@@ -1,0 +1,101 @@
+services:
+  helix-ai-migration-frontend:
+    image: datainteg/helix-ai-migration-frontend:latest
+    container_name: helix-ai-migration-frontend
+    ports:
+      - "8080:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - helix-ai-migration-backend
+    networks:
+      - helix-network
+
+  helix-ai-migration-backend:
+    image: datainteg/helix-ai-migration-backend:latest
+    container_name: helix-ai-migration-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+      - temporal
+    volumes:
+      - helix_artifacts:/app/data/artifacts
+    networks:
+      - helix-network
+
+  helix-ai-migration-worker:
+    image: datainteg/helix-ai-migration-worker:latest
+    container_name: helix-ai-migration-worker
+    env_file:
+      - .env
+    depends_on:
+      - helix-ai-migration-backend
+      - postgres
+      - redis
+      - temporal
+    volumes:
+      - helix_artifacts:/app/data/artifacts
+    networks:
+      - helix-network
+
+  postgres:
+    image: postgres:16
+    container_name: helix-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: helix
+      POSTGRES_PASSWORD: helix_password
+      POSTGRES_DB: helix_metadata
+    volumes:
+      - helix_postgres_data:/var/lib/postgresql/data
+    networks:
+      - helix-network
+
+  redis:
+    image: redis:7
+    container_name: helix-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - helix-network
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: helix-temporal
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=helix
+      - POSTGRES_PWD=helix_password
+      - POSTGRES_SEEDS=postgres
+    depends_on:
+      - postgres
+    networks:
+      - helix-network
+
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: helix-temporal-ui
+    ports:
+      - "8233:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    networks:
+      - helix-network
+
+volumes:
+  helix_postgres_data:
+  helix_artifacts:
+
+networks:
+  helix-network:
+    driver: bridge
