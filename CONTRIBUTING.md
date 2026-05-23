@@ -36,9 +36,25 @@ Thank you for contributing to Helix Migration, an open-source AI-powered migrati
 ```bash
 git clone https://github.com/datainteg/helix-ai-migration.git
 cd helix-ai-migration
+
+# Backend
+cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1  # Windows
+pip install -r requirements.txt
+alembic upgrade head
+pytest tests/ -v  # 58 tests should pass
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+
+# Or Docker (full stack)
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-When implementation scaffolding exists, follow `DEVELOPMENT.md` for local setup.
+See `DEVELOPMENT.md` for detailed local setup. See `CODE_REVIEW.md` for full codebase audit.
 
 ## Branch Naming
 

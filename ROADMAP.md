@@ -12,41 +12,79 @@
 | Backend image | datainteg/helix-ai-migration-backend |
 | Worker image | datainteg/helix-ai-migration-worker |
 
-This roadmap describes the public direction for Helix Migration. It may change as the open-source project evolves.
+## ✅ MVP Foundation — COMPLETE (May 2026)
 
-## MVP Phase
+All 21 prompts implemented. See `CODE_REVIEW.md` for full audit.
 
-Goal: Create a self-hosted, Docker-based foundation for the platform.
+**Implemented:**
+- ✅ Repository structure + Docker Compose (7 services)
+- ✅ Frontend premium app shell (15 pages, 23 TSX/TS files)
+- ✅ Backend API (10 routers, 49 Python files, 58 tests)
+- ✅ PostgreSQL metadata store (8 models, 7 migrations)
+- ✅ Authentication (JWT, bcrypt, RBAC, org isolation)
+- ✅ LLM provider management (7 provider types)
+- ✅ BMAD + LangGraph agent workflow (4-node graph, 13 agents registered)
+- ✅ PydanticAI structured output runtime (JSON extraction, validation)
+- ✅ Temporal workflow/activity/worker skeleton
+- ✅ Developer workspace + AI code review
+- ✅ Validation center + reconciliation dashboard
+- ✅ Audit logs + system health
+- ✅ Safe artifact upload with security controls
+- ✅ API key encryption and masking
 
-Included:
+## 🟡 Phase 2 — Agent Expansion (In Progress)
 
-- Repository structure
-- Docker Compose setup
-- Frontend shell
-- Backend API shell
-- PostgreSQL metadata store
-- Redis integration
-- Temporal integration
-- First admin setup
-- Organization setup
-- Basic authentication
-- Project creation
-- Basic dashboard
+**Goal:** Wire all 13 BMAD agents into the LangGraph.
 
-## Admin Panel Phase
+| Feature | Status |
+|---|---|
+| BA Agent (Mary) | ✅ Wired |
+| Architect Agent (Winston) | ✅ Wired |
+| Data Engineer (Amelia) | 🔜 Ready |
+| QA/Validation Agent | 🔜 Ready |
+| Recon Agent | 🔜 Ready |
+| DevOps Agent | 🔜 Ready |
+| PM Agent (John) | 🔜 Ready |
+| Party Mode orchestrator | 🔜 Ready |
+| Real LLM provider calls | 🔜 Router ready |
 
-Goal: Provide enterprise administration.
+## 🔜 Phase 3 — Live Connectors
 
-Planned:
+| Feature | Status |
+|---|---|
+| PostgreSQL connector | 🔜 Planned |
+| MySQL connector | 🔜 Planned |
+| Oracle connector | 🔜 Planned |
+| Snowflake connector | 🔜 Planned |
+| Schema discovery | 🔜 Planned |
+| CSV/JSON import | 🔜 Planned |
 
-- User management
-- Role management
-- Organization management
-- Audit logs
-- System health
-- Security settings
+## 🔜 Phase 4 — Enterprise Features
 
-## LLM Settings Phase
+| Feature | Status |
+|---|---|
+| SSO / OAuth | 🔜 Planned |
+| Kubernetes Helm chart | 🔜 Planned |
+| Advanced RBAC | 🔜 Planned |
+| Prometheus metrics | 🔜 Planned |
+| Multi-tenant isolation | 🔜 Planned |
+| Rate limiting | 🔜 Planned (see IMPROVEMENTS.md) |
+
+## 🔜 Phase 5 — Advanced AI
+
+| Feature | Status |
+|---|---|
+| AI-assisted SQL conversion | 🔜 Planned |
+| Code migration agent | 🔜 Planned |
+| Notebook generator | 🔜 Planned |
+| DAG/workflow analyzer | 🔜 Planned |
+| Best-of-3 model comparison | 🔜 Planned |
+| Local LLM support (Ollama/LM Studio) | 🔜 Planned |
+
+---
+
+**See `IMPROVEMENTS.md` for detailed code quality, performance, security, and workflow recommendations.**
+**See `CODE_REVIEW.md` for complete file-to-prompt mapping and audit.**
 
 Goal: Support bring-your-own-key model configuration.
 
