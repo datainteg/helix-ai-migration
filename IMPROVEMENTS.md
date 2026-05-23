@@ -1,8 +1,8 @@
 # Helix Migration — Improvements & Recommendations
 
 > **Date:** May 23, 2026  
-> **Scope:** Architecture, code quality, performance, scalability, security, refactoring, documentation, workflow  
-> **Status:** Deep review of all ~100 source files across backend, agents, worker, and frontend
+> **Scope:** Full line-by-line code review of all ~100 source files  
+> **Status:** Deep review — backend, agents, worker, frontend
 
 ---
 
@@ -16,9 +16,10 @@
 6. [Refactoring Opportunities](#6-refactoring-opportunities)
 7. [Missing Documentation](#7-missing-documentation)
 8. [Development Workflow Enhancements](#8-development-workflow-enhancements)
-9. [Quick Wins (1-2 Hours)](#9-quick-wins-1-2-hours)
-10. [Medium-Term (1-2 Weeks)](#10-medium-term-1-2-weeks)
-11. [Long-Term Vision (1-3 Months)](#11-long-term-vision-1-3-months)
+9. [Line-by-Line Findings](#9-line-by-line-findings)
+10. [Quick Wins (1-2 Hours)](#10-quick-wins-1-2-hours)
+11. [Medium-Term (1-2 Weeks)](#11-medium-term-1-2-weeks)
+12. [Long-Term Vision (1-3 Months)](#12-long-term-vision-1-3-months)
 
 ---
 
@@ -463,30 +464,186 @@ Current file needs updates reflecting MVP completion:
 
 ---
 
-## 9. Quick Wins (1-2 Hours)
+## 9. Line-by-Line Findings
 
-| # | Task | Impact | Effort |
+### 9.1 `workflow_service.py` (Backend Service)
+
+| Line | Issue | Severity | Fix |
 |---|---|---|---|
-| 1 | Fix `except Exception: pass` in analyzer.py → log warning | Debugging | 5 min |
-| 2 | Fix `except Exception: pass` in reviewer.py → log warning | Debugging | 5 min |
-| 3 | Add `@pytest.mark.asyncio` consistency (check all tests) | Tests | 10 min |
-| 4 | Remove unused `text` import from workflow_service.py | Clean | 1 min |
-| 5 | Update CONTRIBUTING.md "Planning/Architecture Phase" → "MVP Complete" | Docs | 5 min |
-| 6 | Add `GZipMiddleware` to FastAPI app | Perf | 5 min |
-| 7 | Create `frontend/src/lib/types.ts` with shared types | Code Quality | 20 min |
-| 8 | Update ROADMAP.md status from Phase 1 to reflect completion | Docs | 10 min |
-| 9 | Create `.github/workflows/ci.yml` | CI | 30 min |
-| 10 | Add `.pre-commit-config.yaml` | Quality | 15 min |
+| 17 | `TEMPORAL_ADDRESS = os.getenv(...)` module-level constant — won't pick up runtime env changes | Low | Read in function, not at module level |
+| 25 | `_is_production()` uses module-level `APP_ENV` | Low | Same as above |
+| 46 | `handle.result_run_id` — attribute may differ across Temporal SDK versions | Low | Verify against SDK docs, use `handle.first_execution_run_id` if needed |
+| 102 | `except Exception as exc:` — too broad, catches KeyboardInterrupt, SystemExit | Medium | Use `except (ConnectionError, TemporalError) as exc:` |
+| 153 | `if db is None: db = SessionLocal()` — opens session outside context manager, no guaranteed cleanup if exception before try block | Medium | Always use `with SessionLocal() as db:` context manager |
+| 194 | `db.rollback()` — called unconditionally, may error if no active transaction | Low | Check `db.is_active` before rollback |
+| 233 | `raw_output=str(agent_outputs[agent_name])` — converts dict to Python repr, not JSON | 🔴 High | Use `json.dumps(agent_outputs[agent_name])` |
+
+### 9.2 `llm_provider_adapters.py` (Provider Adapters)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 18 | `timeout: int` in ProviderConnectionConfig — should be `float` for sub-second timeouts | Low | Change to `timeout: float` |
+| 42 | `f"Bearer {api_key}"` — API key appears in logs if httpx debug logging enabled | Low | Set httpx log level to WARNING in production |
+| 55 | `if 200 <= response.status_code < 300:` — correct pattern ✅ | — | Good, unlike analyzer.py which checks only `== 200` |
+| 65-89 | Three adapters return "not implemented yet" — good placeholder pattern ✅ | — | Ready for real implementation |
+| 92-105 | `build_llm_provider_adapter()` — clean factory with normalization ✅ | — | Well-structured |
+
+### 9.3 `analyzer.py` / `reviewer.py` (Code Agents)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 13 | `import sys, os, json` inside function — runtime import pattern | Low | Move to top-level, handle missing deps gracefully |
+| 14 | `sys.path.insert(0, ...)` — **mutates global Python path at runtime** | 🔴 Critical | Install as package or set PYTHONPATH; never mutate sys.path in library code |
+| 19 | `SessionLocal()` — opens DB directly, no org scoping | 🔴 High | Pass db session from caller; use org-scoped queries |
+| 26 | `provider = db.query(LLMProvider).filter(LLMProvider.status == "active").first()` — **no org_id filter, picks ANY active provider globally** | 🔴 Critical | Add `.filter(LLMProvider.organization_id == org_id)` |
+| 30 | `sorted(provider_obj.secrets, ...)[0]` — O(n log n) sort for finding max | Low | Use `max(secrets, key=lambda s: s.key_version)` for O(n) |
+| 44 | `if resp.status_code == 200:` — only checks exact 200, not 201/202/204 | Medium | Use `200 <= resp.status_code < 300` |
+| 46 | `json.loads(content) if content.strip().startswith("{")` — fragile JSON detection | Medium | Use `safe_extract_json()` from `agents/runtime/structured_output.py` |
+| 49-50 | `except Exception: pass` — **silently swallows ALL errors including decrypt failures, network errors, JSON parse errors** | 🔴 Critical | Log all exceptions at `logger.warning()`; return structured error dict |
+| 62 | `risks=["import" in l for l in lines].count(True) > 5 and ["High import count"] or []` — confusing short-circuit logic | Medium | Use `["High import count"] if sum(1 for l in lines if "import" in l) > 5 else []` |
+| 63 | `complexity_score=min(len(lines) / 100, 10.0)` — crude metric | Low | Add cyclomatic complexity or at minimum comment the heuristic |
+| 66 | `confidence_score=0.75` — hardcoded, same for all files | Low | Vary by file size, import count, or static analysis findings |
+
+**Note:** Lines 11-50 of `analyzer.py` and lines 9-50 of `reviewer.py` are **identical duplicates** (~40 lines each). See Section 6.1.
+
+### 9.4 `nodes.py` (BMAD LangGraph Nodes)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 16 | `datetime.now(timezone.utc)` — non-deterministic call inside workflow node | 🔴 High | Pass timestamp from state or use mock; violates Temporal determinism |
+| 19 | `**state` spread on TypedDict with `total=False` — may lose type narrowing | Low | Use explicit dict construction or cast |
+| 41 | `get_official_agent_metadata("business_analyst")` — filesystem I/O inside node | Medium | Cache metadata at graph build time; read from state |
+| 104 | `validation_planner_node` does NOT call `get_official_agent_metadata` unlike BA/architect nodes | Low | Add agent metadata call for consistency |
+| 146 | `"continue_to_execution_planning"` — magic string | Low | Define as constant: `NEXT_STEP_CONTINUE = "continue_to_execution_planning"` |
+| 148 | `"revise_business_analysis_or_architecture"` — magic string | Low | Same as above |
+
+### 9.5 `official_agents.py` (BMAD Agent Registry)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 63 | `bmad_root = os.getenv("BMAD_METHOD_ROOT")` — env var read per agent lookup | Low | Cache result at module level |
+| 73-77 | `_read_skill_description()` — reads file line-by-line searching for `description:` prefix — fragile parsing | Low | Use YAML frontmatter parser (tomllib already imported) |
+| 86 | Filesystem read per `get_official_agent_metadata()` call — called by every node invocation | Medium | Cache parsed metadata at import time |
+
+### 9.6 `graph.py` (LangGraph)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 29 | `graph.compile()` — compiles on every `run_bmad_graph()` call | Medium | Cache compiled graph as module-level singleton |
+| 62-65 | `final_output = BMADFinalOutput(...)` — validates even if outputs dict has unknown keys | Low | Add `.model_validate()` with strict mode |
+
+### 9.7 `secret_service.py` (Encryption)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 6 | `hashlib.sha256(settings.ENCRYPTION_KEY.encode(...)).digest()` — derives 32-byte key from password | Medium | Document that ENCRYPTION_KEY should be 32 random bytes, not a password |
+| 12 | `encrypt_value("")` raises ValueError — good defensive check ✅ | — | — |
+| 28-32 | `mask_key()` preserves first 4 + last 4 chars — standard pattern ✅ | — | Good |
+
+### 9.8 `auth_service.py` (Authentication)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 11-20 | `SYSTEM_PERMISSIONS` — comprehensive list ✅ | — | Good |
+| 63 | `setup_first_admin()` — checks `User.is_super_admin == True` — prevents duplicate ✅ | — | Good |
+| 83-95 | `login()` — returns token, updates last_login ✅ | — | Good |
+| — | **Missing: password strength validation** — "Test123!" is accepted | Medium | Add min 8 chars, require uppercase+lowercase+digit+special |
+
+### 9.9 `config.py` (Settings)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 14 | `JWT_SECRET_KEY: str = "change_me"` — insecure default | 🔴 High | Raise ValidationError in production if unchanged |
+| 15 | `ENCRYPTION_KEY: str = "change_me_32_byte_key"` — insecure default | 🔴 High | Same as above |
+| 19 | `DATABASE_URL` default uses `localhost` — Docker uses `postgres` hostname | Low | Document difference; Docker Compose overrides via .env correctly ✅ |
+
+### 9.10 `session.py` (Database)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 6 | `pool_size=10, max_overflow=20` — good defaults ✅ | — | — |
+| 14 | `get_db()` — standard FastAPI dependency ✅ | — | Good |
+
+### 9.11 `main.py` (FastAPI App)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 6-16 | 12 router imports — clean and organized ✅ | — | Good |
+| 34-45 | All routers prefixed `/api/v1` ✅ | — | Good |
+| — | **Missing: GZipMiddleware** | Low | Add `GZipMiddleware` |
+| — | **Missing: TrustedHostMiddleware** | Medium | Add for production |
+| — | **Missing: rate limiting middleware** | 🔴 High | See Section 5.1 |
+
+### 9.12 Frontend: `auth-context.tsx`
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 30 | `localStorage.getItem("helix_token")` — token stored in localStorage, vulnerable to XSS | Medium | Consider httpOnly cookie for production |
+| 42 | `login()` — good error handling, redirects on success ✅ | — | Good flow |
+| 72 | `setupFirstAdmin()` — same pattern as login ✅ | — | Good |
+
+### 9.13 Frontend: Project Detail Page
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 25 | `Record<string, unknown>` — loses type safety for agent outputs | Low | Define `AgentOutputs` interface |
+| 38 | `useEffect` dependency on `[id, token]` but `API` is not in deps ✅ (it's constant) | — | Correct |
+| 52 | `setRequirements((r) => [...r, req])` — functional state update ✅ | — | Good pattern |
+
+### 9.14 Frontend: LLM Settings Page
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 13-20 | `PROVIDER_LABELS` — comprehensive constants ✅ | — | Good |
+| 44 | `catch { /* ignore */ }` — swallows fetch errors silently | Medium | Set error state: `catch { setError("Failed to load providers") }` |
+| 62 | Form reset after submit — `setForm({...})` ✅ | — | Good UX |
+
+### 9.15 Frontend: Dev Workspace Page
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 24 | Project fetch in useEffect but selectedProject not set — selects first project automatically | Low | UX: show project selector prompt if multiple projects |
+| 55 | File extension check: `.pop()?.toLowerCase()` — fragile, fails for `file.tar.gz` | Low | Use `filename.split(".").slice(1).join(".")` for multi-dot names |
+
+### 9.16 `developer_agents.py` (Schemas)
+
+| Line | Issue | Severity | Fix |
+|---|---|---|---|
+| 28-45 | `CodeAnalyzerOutput` — 15 fields, comprehensive ✅ | — | Good schema |
+| 48-62 | `CodeReviewOutput` — good schema with SecurityFinding sub-model ✅ | — | Good |
+| — | All fields have defaults (`= []`, `= None`) — makes partial data safe ✅ | — | Good defensive design |
 
 ---
 
-## 10. Medium-Term (1-2 Weeks)
+## 10. Quick Wins (1-2 Hours)
+
+| # | Task | File | Line | Severity |
+|---|---|---|---|---|
+| 1 | Fix `except Exception: pass` → log warning | `analyzer.py` | 49 | 🔴 |
+| 2 | Fix `except Exception: pass` → log warning | `reviewer.py` | 49 | 🔴 |
+| 3 | Change `str()` to `json.dumps()` for agent outputs | `workflow_service.py` | 233 | 🔴 |
+| 4 | Add org_id filter to LLM provider query | `analyzer.py` | 26 | 🔴 |
+| 5 | Add org_id filter to LLM provider query | `reviewer.py` | 26 | 🔴 |
+| 6 | Remove `sys.path.insert` mutagen | `analyzer.py` | 14 | 🔴 |
+| 7 | Remove `sys.path.insert` mutagen | `reviewer.py` | 14 | 🔴 |
+| 8 | Predictable mock timestamps (not `datetime.now()`) | `nodes.py` | 16 | 🔴 |
+| 9 | Raise error if `JWT_SECRET_KEY == "change_me"` in prod | `config.py` | 14 | 🔴 |
+| 10 | Use `safe_extract_json()` instead of `startswith("{")` | `analyzer.py` | 46 | Medium |
+| 11 | Use `safe_extract_json()` instead of `startswith("{")` | `reviewer.py` | 46 | Medium |
+| 12 | Add `GZipMiddleware` to FastAPI | `main.py` | — | Low |
+| 13 | Cache compiled graph as singleton | `graph.py` | 29 | Medium |
+| 14 | Make `validation_planner_node` call `get_official_agent_metadata` | `nodes.py` | 104 | Low |
+| 15 | Add `useApi()` hook to eliminate repeated `API` const | All pages | — | Medium |
+
+---
+
+## 11. Medium-Term (1-2 Weeks)
 
 | # | Task | Impact |
 |---|---|---|
-| 1 | Unify LLM calls through `agents/runtime/llm_router.py` | Architecture |
+| 1 | Unify LLM calls through `agents/runtime/llm_router.py` (remove 80 lines of duplicates) | 🔴 Architecture |
 | 2 | Add TanStack Query to frontend | UX, Perf |
-| 3 | Add slowapi rate limiting to auth endpoints | Security |
+| 3 | Add slowapi rate limiting to auth endpoints | 🔴 Security |
 | 4 | Create reusable frontend components (Card, LoadingState, EmptyState) | Code Quality |
 | 5 | Add `pytest-cov` with 75% threshold | Testing |
 | 6 | Standardize DB session via DI, remove direct `SessionLocal()` | Architecture |
@@ -497,7 +654,7 @@ Current file needs updates reflecting MVP completion:
 
 ---
 
-## 11. Long-Term Vision (1-3 Months)
+## 12. Long-Term Vision (1-3 Months)
 
 | # | Task | Impact |
 |---|---|---|
