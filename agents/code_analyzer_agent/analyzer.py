@@ -5,71 +5,30 @@ Uses configured LLM provider when available. Falls back to typed summary stubs
 so analysis remains available without external API dependencies.
 """
 
-import json
 import logging
 
-from agents.runtime.structured_output import safe_extract_json
+from agents.runtime.llm_client import call_llm
 from agents.schemas.developer_agents import CodeAnalyzerOutput
 
 logger = logging.getLogger(__name__)
 
-
-def _try_llm_call(source_code: str, filename: str, org_id: str | None = None) -> dict | None:
-    """Try LLM analysis via configured provider. Falls back to None on any error."""
-    try:
-        from app.services.llm_router_service import resolve_routing
-        from app.models.llm import LLMProvider, LLMAgentMapping
-        from app.db.session import SessionLocal
-        from app.services.secret_service import decrypt_value
-        import httpx
-
-        db = SessionLocal()
-        try:
-            q = db.query(LLMProvider).filter(LLMProvider.status == "active")
-            if org_id:
-                q = q.filter(LLMProvider.organization_id == org_id)
-            provider = q.first()
-
-            if not provider:
-                return None
-            mappings = db.query(LLMAgentMapping).all()
-            pid, model, temp, max_tokens = resolve_routing("code_analyzer", provider.id, provider.default_model, mappings)
-            provider_obj = db.query(LLMProvider).filter(LLMProvider.id == pid).first()
-            if not provider_obj or not provider_obj.secrets:
-                return None
-            secret = max(provider_obj.secrets, key=lambda s: s.key_version)
-            api_key = decrypt_value(secret.encrypted_api_key)
-            base = provider_obj.base_url or "https://api.openai.com/v1"
-
-            resp = httpx.post(
-                f"{base.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model, "temperature": temp, "max_tokens": max_tokens,
-                    "messages": [
-                        {"role": "system", "content": "You are a code analyzer. Analyze the code and output valid JSON with: summary, inputs, outputs, dependencies (list of {name, type}), transformations, risks, complexity_score, assumptions, limitations, confidence_score."},
-                        {"role": "user", "content": f"File: {filename}\n```\n{source_code[:8000]}\n```"},
-                    ],
-                },
-                timeout=float(provider_obj.timeout),
-            )
-            if 200 <= resp.status_code < 300:
-                content = resp.json()["choices"][0]["message"]["content"]
-                json_str = safe_extract_json(content)
-                return json.loads(json_str) if json_str else {"summary": content}
-        finally:
-            db.close()
-    except Exception as exc:
-        logger.warning("LLM code analysis failed for %s: %s", filename, exc)
-    return None
+_SYSTEM_PROMPT = (
+    "You are a code analyzer. Analyze the code and output valid JSON with: "
+    "summary, inputs, outputs, dependencies (list of {name, type}), transformations, "
+    "risks, complexity_score, assumptions, limitations, confidence_score."
+)
 
 
 def analyze_code(source_code: str, filename: str, org_id: str | None = None) -> CodeAnalyzerOutput:
-    result = _try_llm_call(source_code, filename, org_id=org_id)
+    result = call_llm(
+        agent_name="code_analyzer",
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=f"File: {filename}\n```\n{source_code[:8000]}\n```",
+        org_id=org_id,
+    )
     if result:
         return CodeAnalyzerOutput(**result)
 
-    # Fallback: typed summary from static analysis
     lines = source_code.splitlines()
     import_count = sum(1 for l in lines if "import" in l)
     return CodeAnalyzerOutput(

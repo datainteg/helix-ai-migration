@@ -1,10 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.rate_limiting import limiter
+from app.core.logging_config import configure_logging, RequestIdMiddleware
 from app.api.health import router as health_router
 from app.api.auth import router as auth_router
 from app.api.llm_providers import router as llm_router
@@ -20,6 +22,19 @@ from app.api.system import router as system_router
 from app.api.connectors import router as connectors_router
 from app.core.config import settings
 
+configure_logging(settings.APP_ENV)
+
+if settings.SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.APP_ENV,
+        integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+        traces_sample_rate=0.2,
+    )
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="0.1.0",
@@ -29,6 +44,18 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+app.add_middleware(RequestIdMiddleware)
+
+_MAX_BODY_BYTES = (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024
+
+
+@app.middleware("http")
+async def enforce_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"detail": f"Request body exceeds {settings.MAX_UPLOAD_MB + 1} MB limit"})
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,

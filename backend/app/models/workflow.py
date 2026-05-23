@@ -1,6 +1,7 @@
 """Workflow persistence models — workflow_runs and workflow_steps."""
 
 from sqlalchemy import Column, String, Text, ForeignKey, Integer, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -32,7 +33,7 @@ class WorkflowStep(BaseModel):
     step_order = Column(Integer, nullable=False)
     status = Column(String(50), default="pending", nullable=False)
     raw_output = Column(Text, nullable=True)
-    parsed_output_json = Column(Text, nullable=True)  # JSON string — JSONB on PostgreSQL, Text on SQLite
+    parsed_output_json = Column(JSONB, nullable=True)
     provider_name = Column(String(100), nullable=True)
     model_name = Column(String(100), nullable=True)
     prompt_version = Column(String(20), nullable=True)

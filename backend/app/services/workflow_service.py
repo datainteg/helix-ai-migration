@@ -293,15 +293,13 @@ def save_workflow_step(
     error_message: str | None = None,
 ) -> WorkflowStep:
     """Save an agent step output within a workflow run."""
-    import json
-
     step = WorkflowStep(
         workflow_run_id=workflow_run_id,
         agent_name=agent_name,
         step_order=step_order,
         status=status,
         raw_output=raw_output,
-        parsed_output_json=json.dumps(parsed_output_json) if parsed_output_json else None,
+        parsed_output_json=parsed_output_json,
         provider_name=provider_name,
         model_name=model_name,
         error_message=error_message,

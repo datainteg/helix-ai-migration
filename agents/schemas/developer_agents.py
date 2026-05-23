@@ -4,7 +4,7 @@ Code Analyzer and Code Review Agent output schemas.
 Task 14: Typed Developer Execution agent outputs for safe review.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -22,7 +22,7 @@ class TransformationInfo(BaseModel):
 
 
 class SecurityFinding(BaseModel):
-    severity: str  # info, warning, high, critical
+    severity: Literal["info", "warning", "high", "critical"]
     description: str
     location: Optional[str] = None
 

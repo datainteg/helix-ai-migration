@@ -21,10 +21,10 @@ def _now() -> str:
 _compiled_graph = None
 
 
-def build_bmad_graph():
+def build_bmad_graph(force_rebuild: bool = False):
     """Build the BMAD LangGraph StateGraph. Cached after first compilation."""
     global _compiled_graph
-    if _compiled_graph is not None:
+    if _compiled_graph is not None and not force_rebuild:
         return _compiled_graph
 
     graph = StateGraph(BMADWorkflowState)

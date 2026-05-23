@@ -1,9 +1,11 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class RiskItem(BaseModel):
     title: str
-    severity: str
+    severity: Literal["low", "medium", "high", "critical"]
     impact: str
     mitigation: str
 

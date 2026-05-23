@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     SAFE_EXECUTION_MODE: str = "analysis_only"
 
+    SENTRY_DSN: str = ""
+
     def model_post_init(self, _context) -> None:
         """Validate security-critical settings in production."""
         if self.APP_ENV == "production":
