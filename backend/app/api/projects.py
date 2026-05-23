@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -39,13 +39,54 @@ def api_create_project(request: Request, data: ProjectCreate, user_id: str = Dep
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
-def api_list_projects(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return list_projects(db, _org_id(user_id, db))
+def api_list_projects(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db), include_archived: bool = Query(False)):
+    return list_projects(db, _org_id(user_id, db), include_archived=include_archived)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def api_get_project(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return get_project(db, _org_id(user_id, db), project_id)
+
+
+@router.patch("/projects/{project_id}/archive", response_model=ProjectResponse)
+def api_archive_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    from app.services.project_service import ensure_project_access
+    from app.models.project import Project
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id).first()
+    p.status = "archived"
+    db.commit()
+    db.refresh(p)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_archived", entity_type="project", entity_id=project_id, request=request)
+    return p
+
+
+@router.patch("/projects/{project_id}/restore", response_model=ProjectResponse)
+def api_restore_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    from app.services.project_service import ensure_project_access
+    from app.models.project import Project
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id).first()
+    p.status = "draft"
+    db.commit()
+    db.refresh(p)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_restored", entity_type="project", entity_id=project_id, request=request)
+    return p
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+def api_delete_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Soft-delete: sets status to 'deleted'. Data retained for audit trail."""
+    from app.services.project_service import ensure_project_access
+    from app.models.project import Project
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id).first()
+    p.status = "deleted"
+    db.commit()
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_deleted", entity_type="project", entity_id=project_id, request=request)
 
 
 # ── SubProjects ──

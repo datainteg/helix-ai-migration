@@ -21,6 +21,10 @@ from app.api.audit import router as audit_router
 from app.api.system import router as system_router
 from app.api.connectors import router as connectors_router
 from app.api.encryption import router as encryption_router
+from app.api.invitations import router as invitations_router
+from app.api.webhooks import router as webhooks_router
+from app.api.usage import router as usage_router
+from app.api.superadmin import router as superadmin_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -114,6 +118,10 @@ app.include_router(audit_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(connectors_router, prefix="/api/v1")
 app.include_router(encryption_router, prefix="/api/v1")
+app.include_router(invitations_router, prefix="/api/v1")
+app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(usage_router, prefix="/api/v1")
+app.include_router(superadmin_router, prefix="/api/v1")
 
 
 @app.get("/")

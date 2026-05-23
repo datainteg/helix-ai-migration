@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from app.services.password_reset_service import request_password_reset, confirm_
 from app.auth.jwt import create_access_token, get_current_user_id, revoke_token
 from app.api.audit import write_audit
 from app.rate_limiting import limiter
+from app.core.config import settings
 from pydantic import BaseModel, EmailStr
 
 
@@ -19,6 +20,7 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
 
 router = APIRouter(tags=["auth"])
 _bearer = HTTPBearer()
@@ -63,13 +65,14 @@ def refresh_token(request: Request, credentials: HTTPAuthorizationCredentials = 
 
 @router.post("/auth/password-reset/request", status_code=202)
 @limiter.limit("5/minute")
-def request_reset(request: Request, data: PasswordResetRequest, db: Session = Depends(get_db)):
+async def request_reset(request: Request, data: PasswordResetRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Request a password reset token. Always returns 202 to avoid email enumeration."""
     raw_token = request_password_reset(db, data.email)
     if raw_token:
-        # In production, send via email. For now, surface in response for dev convenience.
-        import logging
-        logging.getLogger(__name__).info("DEV password reset token for %s: %s", data.email, raw_token)
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
+        from app.services.email_service import send_email, render_password_reset_email
+        subject, html = render_password_reset_email(reset_url)
+        background_tasks.add_task(send_email, to=data.email, subject=subject, html_body=html)
     return {"status": "accepted", "message": "If that email exists, a reset link has been sent"}
 
 

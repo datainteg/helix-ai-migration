@@ -1,0 +1,102 @@
+"""Super-admin endpoints: manage all orgs, impersonate, global stats."""
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+
+from app.db.session import get_db
+from app.auth.jwt import get_current_user_id, create_access_token
+from app.models.identity import Organization, User, OrganizationMember
+from app.services.auth_service import get_current_user
+
+router = APIRouter(prefix="/superadmin", tags=["superadmin"])
+
+
+def _require_super_admin(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)) -> User:
+    user = get_current_user(db, user_id)
+    if not user.is_super_admin:
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return user
+
+
+@router.get("/organizations")
+def list_all_orgs(admin: User = Depends(_require_super_admin), db: Session = Depends(get_db)):
+    """List all organizations across the platform."""
+    orgs = db.query(Organization).all()
+    return [
+        {
+            "id": o.id,
+            "name": o.name,
+            "slug": o.slug,
+            "status": o.status,
+            "member_count": db.query(OrganizationMember).filter(OrganizationMember.organization_id == o.id).count(),
+            "created_at": str(o.created_at),
+        }
+        for o in orgs
+    ]
+
+
+@router.patch("/organizations/{org_id}/status")
+def set_org_status(
+    org_id: str,
+    status: str,
+    admin: User = Depends(_require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Suspend or reactivate an organization."""
+    if status not in ("active", "suspended"):
+        raise HTTPException(status_code=400, detail="status must be 'active' or 'suspended'")
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org.status = status
+    db.commit()
+    return {"id": org_id, "status": status}
+
+
+@router.get("/users")
+def list_all_users(admin: User = Depends(_require_super_admin), db: Session = Depends(get_db)):
+    """List all users across the platform."""
+    users = db.query(User).all()
+    return [
+        {"id": u.id, "email": u.email, "name": u.name, "status": u.status, "is_super_admin": u.is_super_admin, "created_at": str(u.created_at)}
+        for u in users
+    ]
+
+
+class ImpersonateRequest(BaseModel):
+    user_id: str
+    reason: str
+
+
+@router.post("/impersonate")
+def impersonate_user(
+    data: ImpersonateRequest,
+    admin: User = Depends(_require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Issue a short-lived token to act as another user (audit trail mandatory)."""
+    import logging
+    target = db.query(User).filter(User.id == data.user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    logging.getLogger(__name__).warning(
+        "SUPERADMIN_IMPERSONATE admin=%s target=%s reason=%s",
+        admin.id, data.user_id, data.reason,
+    )
+    from datetime import timedelta
+    token = create_access_token(data.user_id, expires_delta=timedelta(minutes=15))
+    return {"access_token": token, "token_type": "bearer", "expires_in": 900, "note": "15-minute impersonation token"}
+
+
+@router.get("/stats")
+def platform_stats(admin: User = Depends(_require_super_admin), db: Session = Depends(get_db)):
+    """Platform-wide aggregate stats."""
+    from app.models.project import Project
+    from app.models.workflow import WorkflowRun
+    return {
+        "orgs": db.query(Organization).count(),
+        "users": db.query(User).count(),
+        "projects": db.query(Project).count(),
+        "workflows": db.query(WorkflowRun).count(),
+    }

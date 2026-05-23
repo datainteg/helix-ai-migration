@@ -27,9 +27,11 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     return ProjectResponse.model_validate(project)
 
 
-def list_projects(db: Session, org_id: str) -> list[ProjectResponse]:
-    projects = db.query(Project).filter(Project.organization_id == org_id).all()
-    return [ProjectResponse.model_validate(p) for p in projects]
+def list_projects(db: Session, org_id: str, include_archived: bool = False) -> list[ProjectResponse]:
+    q = db.query(Project).filter(Project.organization_id == org_id, Project.status != "deleted")
+    if not include_archived:
+        q = q.filter(Project.status != "archived")
+    return [ProjectResponse.model_validate(p) for p in q.all()]
 
 
 def get_project(db: Session, org_id: str, project_id: str) -> ProjectResponse:

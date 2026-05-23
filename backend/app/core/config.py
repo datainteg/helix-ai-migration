@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     OTEL_ENDPOINT: str = ""
 
+    # Email (SMTP or SendGrid)
+    EMAIL_ENABLED: bool = False
+    EMAIL_FROM: str = "noreply@helix-migration.app"
+    EMAIL_FROM_NAME: str = "Helix Migration"
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_TLS: bool = True
+    SENDGRID_API_KEY: str = ""  # If set, uses SendGrid instead of SMTP
+    FRONTEND_URL: str = "http://localhost:3000"
+
     def model_post_init(self, _context) -> None:
         """Validate security-critical settings in production."""
         if self.APP_ENV == "production":

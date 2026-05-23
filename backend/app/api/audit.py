@@ -1,7 +1,10 @@
+import csv
 import hashlib
 import hmac
+import io
 import json
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -60,11 +63,7 @@ def write_audit(
     db.commit()
 
 
-@router.get("/audit-logs")
-def list_audit_logs(
-    user_id: str = Depends(require_permission("admin:audit:read")),
-    db: Session = Depends(get_db),
-):
+def _get_org_logs(db: Session, user_id: str, limit: int = 500) -> tuple[str, list[AuditLog]]:
     from app.services.auth_service import get_current_user
     user = get_current_user(db, user_id)
     org_id = user.memberships[0].organization_id
@@ -72,9 +71,19 @@ def list_audit_logs(
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)
         .order_by(AuditLog.created_at.desc())
-        .limit(50)
+        .limit(limit)
         .all()
     )
+    return org_id, logs
+
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    user_id: str = Depends(require_permission("admin:audit:read")),
+    db: Session = Depends(get_db),
+    limit: int = Query(50, ge=1, le=500),
+):
+    _, logs = _get_org_logs(db, user_id, limit=limit)
     return [
         {
             "id": l.id,
@@ -88,6 +97,87 @@ def list_audit_logs(
         }
         for l in logs
     ]
+
+
+@router.get("/audit-logs/export/csv")
+def export_audit_csv(
+    user_id: str = Depends(require_permission("admin:audit:read")),
+    db: Session = Depends(get_db),
+):
+    """Export audit logs as CSV download."""
+    _, logs = _get_org_logs(db, user_id, limit=500)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "action", "entity_type", "entity_id", "actor_id", "ip_address", "entry_hash", "created_at"])
+    for l in logs:
+        writer.writerow([l.id, l.action, l.entity_type, l.entity_id, l.actor_id, l.ip_address, l.entry_hash, l.created_at])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit-logs.csv"},
+    )
+
+
+@router.get("/audit-logs/export/pdf")
+def export_audit_pdf(
+    user_id: str = Depends(require_permission("admin:audit:read")),
+    db: Session = Depends(get_db),
+):
+    """Export audit logs as PDF download."""
+    try:
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+    except ImportError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=501, detail="reportlab not installed — PDF export unavailable")
+
+    _, logs = _get_org_logs(db, user_id, limit=200)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=20)
+    styles = getSampleStyleSheet()
+
+    elements = [
+        Paragraph(f"{settings.APP_NAME} — Audit Log", styles["Title"]),
+        Spacer(1, 12),
+    ]
+
+    data = [["Timestamp", "Action", "Entity Type", "Entity ID", "Actor ID", "IP"]]
+    for l in logs:
+        data.append([
+            str(l.created_at)[:19],
+            l.action or "",
+            l.entity_type or "",
+            (l.entity_id or "")[:20],
+            (l.actor_id or "")[:20],
+            l.ip_address or "",
+        ])
+
+    table = Table(data, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d4ed8")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f0f4ff")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=audit-logs.pdf"},
+    )
 
 
 @router.get("/audit-logs/verify")

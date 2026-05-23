@@ -70,6 +70,19 @@ class PasswordResetToken(BaseModel):
     used_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class OrgInvitation(BaseModel):
+    __tablename__ = "org_invitations"
+
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    invited_by_user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    role_id = Column(String(36), ForeignKey("roles.id"), nullable=True)
+    token_hash = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), default="pending", nullable=False)
+
+
 class OrganizationMember(BaseModel):
     __tablename__ = "organization_members"
 
