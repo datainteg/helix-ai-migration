@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@/lib/auth-context";
+import { useApi } from "@/lib/use-api";
 import { useEffect, useState } from "react";
 
 interface Provider {
@@ -13,51 +13,71 @@ interface Provider {
   status: string;
 }
 
+interface CatalogueEntry {
+  provider_type: string;
+  models: string[];
+  default_base_url: string;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI / ChatGPT",
-  deepseek: "DeepSeek",
-  openrouter: "OpenRouter",
   anthropic: "Anthropic Claude",
   google: "Google Gemini",
+  deepseek: "DeepSeek",
+  openrouter: "OpenRouter",
+  local: "Local Model (Ollama / LM Studio)",
   custom: "Custom OpenAI-compatible API",
-  local: "Local Model URL",
 };
 
+const EMPTY_FORM = { provider_type: "openai", name: "", base_url: "", default_model: "", api_key: "" };
+
 export default function LLMSettingsPage() {
-  const { token } = useAuth();
+  const api = useApi();
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [catalogue, setCatalogue] = useState<Record<string, CatalogueEntry>>({});
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ provider_type: "openai", name: "", base_url: "", default_model: "", api_key: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [error, setError] = useState("");
 
-  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
   const fetchProviders = async () => {
-    if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/v1/llm-providers`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setProviders(await res.json());
+      const data = await api.get<Provider[]>("/api/v1/llm-providers");
+      setProviders(data);
     } catch { /* ignore */ }
     setLoading(false);
   };
 
-  useEffect(() => { fetchProviders(); }, [token]);
+  useEffect(() => {
+    fetchProviders();
+    api.get<CatalogueEntry[]>("/api/v1/llm-providers/catalogue")
+      .then((entries) => {
+        const map: Record<string, CatalogueEntry> = {};
+        entries.forEach((e) => { map[e.provider_type] = e; });
+        setCatalogue(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleProviderTypeChange = (ptype: string) => {
+    const entry = catalogue[ptype];
+    setForm((f) => ({
+      ...f,
+      provider_type: ptype,
+      base_url: entry?.default_base_url || "",
+      default_model: entry?.models[0] || "",
+    }));
+  };
 
   const addProvider = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     try {
-      const res = await fetch(`${API}/api/v1/llm-providers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail); }
+      await api.post("/api/v1/llm-providers", form);
       setShowAdd(false);
-      setForm({ provider_type: "openai", name: "", base_url: "", default_model: "", api_key: "" });
+      setForm(EMPTY_FORM);
       fetchProviders();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to add provider");
@@ -67,78 +87,135 @@ export default function LLMSettingsPage() {
   const testConnection = async (id: string) => {
     setTestResult(null);
     try {
-      const res = await fetch(`${API}/api/v1/llm-providers/${id}/test`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setTestResult(await res.json());
+      const result = await api.post<{ success: boolean; message: string }>(`/api/v1/llm-providers/${id}/test`);
+      setTestResult(result);
     } catch {
       setTestResult({ success: false, message: "Connection test failed" });
     }
   };
 
+  const availableModels = catalogue[form.provider_type]?.models ?? [];
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">LLM Provider Settings</h1>
-        <button onClick={() => setShowAdd(!showAdd)} className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700">
+        <button
+          onClick={() => { setShowAdd(!showAdd); setError(""); }}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
           {showAdd ? "Cancel" : "Add Provider"}
         </button>
       </div>
 
-      {error && <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">{error}</div>}
       {testResult && (
-        <div className={`rounded-lg px-4 py-2 text-sm ${testResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
-          {testResult.message}
+        <div className={`rounded-lg px-4 py-2 text-sm border ${testResult.success ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
+          {testResult.success ? "✓" : "✗"} {testResult.message}
         </div>
       )}
 
       {showAdd && (
         <form onSubmit={addProvider} className="rounded-xl border bg-white p-6 shadow-sm space-y-4">
-          <h3 className="font-semibold">Add Provider</h3>
+          <h3 className="font-semibold text-gray-900">Add Provider</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Provider Type</label>
-              <select value={form.provider_type} onChange={(e) => setForm((f) => ({ ...f, provider_type: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm">
+              <select
+                value={form.provider_type}
+                onChange={(e) => handleProviderTypeChange(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              >
                 {Object.entries(PROVIDER_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Name</label>
-              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="My Provider" required />
+              <input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                placeholder="My Provider"
+                required
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Base URL</label>
-              <input value={form.base_url} onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="https://api.openai.com/v1" />
+              <input
+                value={form.base_url}
+                onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                placeholder="Auto-filled from provider type"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Default Model</label>
-              <input value={form.default_model} onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="gpt-4.1" required />
+              {availableModels.length > 0 ? (
+                <select
+                  value={form.default_model}
+                  onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                  required
+                >
+                  {availableModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              ) : (
+                <input
+                  value={form.default_model}
+                  onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                  placeholder="Enter model name"
+                  required
+                />
+              )}
             </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">API Key</label>
-            <input type="password" value={form.api_key} onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="sk-..." required />
+            <input
+              type="password"
+              value={form.api_key}
+              onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              placeholder={form.provider_type === "deepseek" ? "sk-..." : form.provider_type === "anthropic" ? "sk-ant-..." : "sk-..."}
+              required
+            />
+            {form.provider_type === "deepseek" && (
+              <p className="mt-1 text-xs text-gray-500">
+                Get your API key at <span className="font-mono">platform.deepseek.com</span>. Supports deepseek-chat (V3), deepseek-reasoner (R1), and deepseek-coder.
+              </p>
+            )}
           </div>
-          <button type="submit" className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700">Save Provider</button>
+          <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Save Provider
+          </button>
         </form>
       )}
 
       {loading ? (
         <div className="text-center py-8 text-gray-500">Loading providers...</div>
       ) : providers.length === 0 ? (
-        <div className="rounded-xl border bg-white p-12 shadow-sm text-center text-gray-500">No providers configured. Add your first LLM provider.</div>
+        <div className="rounded-xl border bg-white p-12 shadow-sm text-center text-gray-500">
+          No providers configured. Add your first LLM provider above.
+        </div>
       ) : (
         <div className="space-y-3">
           {providers.map((p) => (
             <div key={p.id} className="rounded-xl border bg-white p-4 shadow-sm flex items-center justify-between">
               <div>
                 <p className="font-medium text-sm">{p.name}</p>
-                <p className="text-xs text-gray-500">{PROVIDER_LABELS[p.provider_type] || p.provider_type} • {p.default_model} • Key: {p.api_key_masked}</p>
+                <p className="text-xs text-gray-500">
+                  {PROVIDER_LABELS[p.provider_type] || p.provider_type} • {p.default_model} • Key: {p.api_key_masked}
+                  {p.base_url && <span className="ml-1 text-gray-400">• {p.base_url}</span>}
+                </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs px-2 py-1 rounded ${p.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{p.status}</span>
-                <button onClick={() => testConnection(p.id)} className="text-xs text-helix-600 hover:underline">Test</button>
+                <span className={`text-xs px-2 py-1 rounded-full ${p.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                  {p.status}
+                </span>
+                <button onClick={() => testConnection(p.id)} className="text-xs text-blue-600 hover:underline">
+                  Test
+                </button>
               </div>
             </div>
           ))}

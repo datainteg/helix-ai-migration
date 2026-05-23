@@ -19,10 +19,50 @@ from app.rate_limiting import limiter
 
 router = APIRouter(tags=["llm-providers"])
 
+_PROVIDER_MODELS = {
+    "openai": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o3-mini"],
+    "anthropic": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"],
+    "google": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-pro"],
+    "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
+    "openrouter": [],
+    "local": ["llama3.2", "qwen2.5-coder", "mistral", "phi4"],
+    "custom": [],
+}
+
 
 def _org(db, uid):
     from app.services.auth_service import get_current_user
     return get_current_user(db, uid).memberships[0].organization_id
+
+
+_PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com",
+    "google": "https://generativelanguage.googleapis.com",
+    "deepseek": "https://api.deepseek.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "local": "http://localhost:11434/v1",
+    "custom": "",
+}
+
+
+@router.get("/llm-providers/catalogue")
+def api_provider_catalogue(user_id: str = Depends(get_current_user_id)):
+    """Return supported providers with their models and default base URLs."""
+    return [
+        {
+            "provider_type": ptype,
+            "models": _PROVIDER_MODELS.get(ptype, []),
+            "default_base_url": _PROVIDER_BASE_URLS.get(ptype, ""),
+        }
+        for ptype in ["openai", "anthropic", "google", "deepseek", "openrouter", "local", "custom"]
+    ]
+
+
+@router.get("/llm-providers/models")
+def api_provider_models(user_id: str = Depends(get_current_user_id)):
+    """Return supported model list per provider type."""
+    return _PROVIDER_MODELS
 
 
 @router.get("/llm-providers", response_model=list[LLMProviderResponse])

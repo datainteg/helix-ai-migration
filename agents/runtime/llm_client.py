@@ -115,8 +115,11 @@ def call_llm(
                 return _call_anthropic(base or "https://api.anthropic.com", api_key, model, max_tokens, system_prompt, user_prompt, timeout)
             elif ptype == LLMProviderType.GOOGLE:
                 return _call_gemini(base or "https://generativelanguage.googleapis.com", api_key, model, system_prompt, user_prompt, timeout)
+            elif ptype == LLMProviderType.DEEPSEEK:
+                return _call_openai_compatible(base or "https://api.deepseek.com/v1", api_key, model, temp, max_tokens, system_prompt, user_prompt, timeout)
             else:
-                return _call_openai_compatible(base, api_key, model, temp, max_tokens, system_prompt, user_prompt, timeout)
+                # OpenAI, OpenRouter, Custom, Local — all OpenAI-compatible
+                return _call_openai_compatible(base or "https://api.openai.com/v1", api_key, model, temp, max_tokens, system_prompt, user_prompt, timeout)
         finally:
             db.close()
     except Exception as exc:

@@ -23,6 +23,15 @@ _AGENT_DEFAULT_MODELS: dict[str, str] = {
     "pm": "mock-claude-3-opus",
 }
 
+# ── DeepSeek model catalogue (used by frontend provider form + agent mapping UI)
+DEEPSEEK_MODELS = [
+    "deepseek-chat",           # DeepSeek-V3 — general purpose
+    "deepseek-reasoner",       # DeepSeek-R1 — chain-of-thought reasoning
+    "deepseek-coder",          # DeepSeek-Coder — code generation / review
+]
+
+DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+
 
 def _resolve_agent_routing(
     agent_name: str,
