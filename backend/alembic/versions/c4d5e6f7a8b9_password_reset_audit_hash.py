@@ -16,8 +16,8 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "password_reset_tokens",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("user_id", sa.dialects.postgresql.UUID(as_uuid=False), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("token_hash", sa.String(255), nullable=False, unique=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),

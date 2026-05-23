@@ -6,6 +6,7 @@ Create Date: 2026-05-23
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "d5e6f7a8b9c0"
 down_revision = "c4d5e6f7a8b9"
@@ -16,8 +17,8 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "org_data_encryption_keys",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("id", UUID(as_uuid=False), primary_key=True),
+        sa.Column("organization_id", UUID(as_uuid=False), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("encrypted_dek", sa.String(512), nullable=False),
         sa.Column("key_version", sa.String(50), nullable=False, server_default="1"),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.true()),

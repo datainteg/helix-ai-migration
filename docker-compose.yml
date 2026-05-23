@@ -1,94 +1,140 @@
 services:
-  helix-ai-migration-frontend:
-    image: datainteg/helix-ai-migration-frontend:latest
-    container_name: helix-ai-migration-frontend
-    ports:
-      - "8080:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    depends_on:
-      - helix-ai-migration-backend
-    networks:
-      - helix-network
-
-  helix-ai-migration-backend:
-    image: datainteg/helix-ai-migration-backend:latest
-    container_name: helix-ai-migration-backend
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      - postgres
-      - redis
-      - temporal
-    volumes:
-      - helix_artifacts:/app/data/artifacts
-    networks:
-      - helix-network
-
-  helix-ai-migration-worker:
-    image: datainteg/helix-ai-migration-worker:latest
-    container_name: helix-ai-migration-worker
-    env_file:
-      - .env
-    depends_on:
-      - helix-ai-migration-backend
-      - postgres
-      - redis
-      - temporal
-    volumes:
-      - helix_artifacts:/app/data/artifacts
-    networks:
-      - helix-network
-
   postgres:
     image: postgres:16
     container_name: helix-postgres
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-helix_metadata}
     volumes:
       - helix_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-helix_metadata}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - helix-network
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: helix-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - helix-network
 
   temporal:
     image: temporalio/auto-setup:latest
     container_name: helix-temporal
+    restart: unless-stopped
     ports:
       - "7233:7233"
     environment:
-      - DB=postgresql
+      - DB=postgres12
       - DB_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER is required}
-      - POSTGRES_PWD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD}
       - POSTGRES_SEEDS=postgres
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - helix-network
 
   temporal-ui:
     image: temporalio/ui:latest
     container_name: helix-temporal-ui
+    restart: unless-stopped
     ports:
       - "8233:8080"
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
       - temporal
+    networks:
+      - helix-network
+
+  migrate:
+    image: helix-backend:local
+    container_name: helix-migrate
+    command: ["sh", "-c", "alembic upgrade head"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - helix-network
+    profiles:
+      - migrate
+
+  backend:
+    image: helix-backend:local
+    container_name: helix-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    volumes:
+      - helix_artifacts:/app/data/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      - helix-network
+
+  worker:
+    image: helix-worker:local
+    container_name: helix-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    volumes:
+      - helix_artifacts:/app/data/artifacts
+    networks:
+      - helix-network
+
+  frontend:
+    image: helix-frontend:local
+    container_name: helix-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - helix-network
 

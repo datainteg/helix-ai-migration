@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000

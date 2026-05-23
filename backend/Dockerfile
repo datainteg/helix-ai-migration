@@ -2,7 +2,7 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
@@ -11,12 +11,13 @@ FROM python:3.11-slim AS runner
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
 ENV PATH="/install/bin:$PATH"
 ENV PYTHONPATH="/install/lib/python3.11/site-packages:/app"
 
 COPY --from=builder /install /install
-COPY . .
+COPY backend/ .
+COPY agents/ ./agents/
+COPY connectors/ ./connectors/
 
 RUN adduser --disabled-password --gecos "" --uid 1000 helix \
     && chown -R helix:helix /app
