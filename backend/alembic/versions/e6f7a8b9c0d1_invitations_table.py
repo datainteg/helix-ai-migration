@@ -17,10 +17,10 @@ def upgrade() -> None:
     op.create_table(
         "org_invitations",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("invited_by_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("organization_id", sa.dialects.postgresql.UUID(as_uuid=False), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("invited_by_user_id", sa.dialects.postgresql.UUID(as_uuid=False), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("role_id", sa.String(36), sa.ForeignKey("roles.id"), nullable=True),
+        sa.Column("role_id", sa.dialects.postgresql.UUID(as_uuid=False), sa.ForeignKey("roles.id"), nullable=True),
         sa.Column("token_hash", sa.String(255), nullable=False, unique=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
