@@ -1,16 +1,19 @@
 import uuid
-import httpx
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
 
 from app.models.llm import LLMProvider, LLMProviderSecret, LLMAgentMapping
 from app.schemas.llm import (
-    LLMProviderCreate, LLMProviderUpdate, LLMProviderResponse,
-    AgentMappingCreate, AgentMappingResponse, TestConnectionResponse,
+    LLMProviderCreate,
+    LLMProviderUpdate,
+    LLMProviderResponse,
+    AgentMappingCreate,
+    AgentMappingResponse,
+    TestConnectionResponse,
 )
+from app.services.llm_provider_adapters import ProviderConnectionConfig, build_llm_provider_adapter
 from app.services.secret_service import encrypt_value, decrypt_value, mask_key
-from app.core.config import settings
 
 
 def create_provider(db: Session, org_id: str, data: LLMProviderCreate) -> LLMProviderResponse:
@@ -45,14 +48,20 @@ def list_providers(db: Session, org_id: str) -> list[LLMProviderResponse]:
 
 
 def get_provider(db: Session, org_id: str, provider_id: str) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     return _to_response(provider)
 
 
 def update_provider(db: Session, org_id: str, provider_id: str, data: LLMProviderUpdate) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -63,7 +72,10 @@ def update_provider(db: Session, org_id: str, provider_id: str, data: LLMProvide
 
 
 def rotate_key(db: Session, org_id: str, provider_id: str, new_api_key: str) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
@@ -83,14 +95,16 @@ def rotate_key(db: Session, org_id: str, provider_id: str, new_api_key: str) -> 
 
 
 async def test_connection(db: Session, org_id: str, provider_id: str) -> TestConnectionResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
     if provider.status != "active":
         return TestConnectionResponse(success=False, message="Provider is inactive")
 
-    # Resolve API key
     latest_secret = sorted(provider.secrets, key=lambda s: s.key_version, reverse=True)[0] if provider.secrets else None
     if not latest_secret:
         return TestConnectionResponse(success=False, message="No API key configured")
@@ -100,43 +114,22 @@ async def test_connection(db: Session, org_id: str, provider_id: str) -> TestCon
     except Exception:
         return TestConnectionResponse(success=False, message="Failed to decrypt API key")
 
-    # Resolve base URL based on provider type
-    base_url = provider.base_url or _default_base_url(provider.provider_type)
-    if not base_url:
-        return TestConnectionResponse(success=False, message=f"No base URL configured for {provider.provider_type}")
-
-    # Attempt a lightweight API call to verify connectivity
-    try:
-        async with httpx.AsyncClient(timeout=float(provider.timeout)) as client:
-            resp = await client.get(
-                f"{base_url.rstrip('/')}/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            if resp.status_code in (200, 401):
-                # 401 = valid endpoint, just auth issue (key may have limited scope)
-                return TestConnectionResponse(success=True, message=f"Connected to {provider.name} — endpoint reachable")
-            return TestConnectionResponse(success=False, message=f"Unexpected response: HTTP {resp.status_code}")
-    except httpx.ConnectError:
-        return TestConnectionResponse(success=False, message=f"Cannot reach {base_url} — connection refused")
-    except httpx.TimeoutException:
-        return TestConnectionResponse(success=False, message=f"Connection to {base_url} timed out after {provider.timeout}s")
-    except Exception as e:
-        return TestConnectionResponse(success=False, message=f"Connection test failed: {str(e)[:200]}")
-
-
-def _default_base_url(provider_type: str) -> str | None:
-    mapping = {
-        "openai": "https://api.openai.com/v1",
-        "anthropic": "https://api.anthropic.com/v1",
-        "google": "https://generativelanguage.googleapis.com/v1",
-        "deepseek": "https://api.deepseek.com/v1",
-        "openrouter": "https://openrouter.ai/api/v1",
-    }
-    return mapping.get(provider_type)
+    adapter = build_llm_provider_adapter(
+        ProviderConnectionConfig(
+            provider_type=provider.provider_type,
+            name=provider.name,
+            base_url=provider.base_url,
+            timeout=provider.timeout,
+        )
+    )
+    return await adapter.test_connection(api_key)
 
 
 def delete_provider(db: Session, org_id: str, provider_id: str):
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     db.delete(provider)
@@ -144,7 +137,10 @@ def delete_provider(db: Session, org_id: str, provider_id: str):
 
 
 def create_agent_mapping(db: Session, org_id: str, data: AgentMappingCreate) -> AgentMappingResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == data.provider_id, LLMProvider.organization_id == org_id).first()
+    provider = db.query(LLMProvider).filter(
+        LLMProvider.id == data.provider_id,
+        LLMProvider.organization_id == org_id,
+    ).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     mapping = LLMAgentMapping(
