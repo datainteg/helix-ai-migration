@@ -39,6 +39,8 @@
 - [Phase 8: Deployment & Final Review](#phase-8-deployment--final-review)
   - [Prompt 20: Docker Compose End-to-End Validation](#prompt-20-docker-compose-end-to-end-validation)
   - [Prompt 21: Full MVP Consistency & Safety Review](#prompt-21-full-mvp-consistency--safety-review)
+- [Phase 9: Connector Framework & Live Recon](#phase-9-connector-framework--live-recon)
+  - [Prompt 22: Connector Framework & Live Reconciliation MVP](#prompt-22-connector-framework--live-reconciliation-mvp)
 
 ---
 
@@ -2698,6 +2700,187 @@ chore(review): full MVP consistency and safety audit
 
 ---
 
+## Phase 9: Connector Framework & Live Recon
+
+---
+
+### Prompt 22: Connector Framework & Live Reconciliation MVP
+
+#### Prerequisites
+
+Read these files before making changes:
+
+- `README.md`
+- `AGENTS.md`
+- `ARCHITECTURE.md`
+- `DATABASE_DESIGN.md`
+- `API_DESIGN.md`
+- `SECURITY.md`
+- `DOCKER_GUIDE.md`
+- `docs/connectors/CONNECTOR_GUIDE.md`
+- `docs/validation/VALIDATION_RECON_GUIDE.md`
+
+Inspect these code paths:
+
+- `backend/app/models/`
+- `backend/app/schemas/`
+- `backend/app/services/`
+- `backend/app/api/`
+- `backend/app/storage/`
+- `frontend/`
+
+#### Goal
+
+Implement the first real connector framework and live reconciliation MVP with built-in connectors, file connectors, and custom connector extensibility.
+
+#### Supported Connector Types
+
+```
+1. PostgreSQL       → Functional MVP
+2. MySQL            → Skeleton
+3. SQL Server       → Skeleton
+4. Snowflake        → Skeleton
+5. S3               → Skeleton
+6. CSV Upload       → Functional MVP
+7. Excel Upload     → Functional MVP
+8. Custom Connector → Registry + docs
+```
+
+#### Scope
+
+| # | Task |
+|---|---|
+| 1 | Create `connectors/` directory with base framework |
+| 2 | Implement PostgreSQL connector (functional MVP) |
+| 3 | Implement CSV + Excel file connectors (functional MVP) |
+| 4 | Create MySQL/SQL Server/Snowflake/S3 skeletons |
+| 5 | Create custom connector registry |
+| 6 | Create backend connector service + recon service |
+| 7 | Create connector API endpoints |
+| 8 | Add 16 connector tests |
+
+#### Base Connector Interface
+
+```python
+class BaseConnector(ABC):
+    connector_type: ConnectorType
+    display_name: str
+    capabilities: ConnectorCapabilities
+
+    async def test_connection() -> ConnectorTestResult
+    async def list_schemas() -> list[SchemaInfo]
+    async def list_tables(schema_name) -> list[TableInfo]
+    async def list_columns(schema_name, table_name) -> list[ColumnInfo]
+    async def get_row_count(schema_name, table_name) -> RowCountResult
+```
+
+#### Connector Capabilities Model
+
+```json
+{
+  "test_connection": true,
+  "schema_discovery": true,
+  "table_discovery": true,
+  "column_discovery": true,
+  "row_count": true,
+  "file_listing": false,
+  "file_schema_inference": false,
+  "table_profile": true,
+  "supports_recon": true
+}
+```
+
+#### Backend APIs
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/connectors/test` | Test any connector |
+| `GET` | `/api/v1/connectors/registry` | List all available connectors |
+| `POST` | `/api/v1/connectors/discover/schemas` | Discover schemas |
+| `POST` | `/api/v1/connectors/discover/tables` | Discover tables |
+| `POST` | `/api/v1/connectors/discover/columns` | Discover columns |
+| `POST` | `/api/v1/connectors/row-count` | Get row count |
+
+#### Recon Service
+
+```
+POST /api/v1/projects/{project_id}/recon/run
+  → row-count comparison between source and target
+  → stores ReconRun + ReconResult metadata
+  → never stores production row data
+```
+
+#### Security Rules
+
+- All connection credentials are secrets — never logged or returned
+- Safe identifier validation: `^[A-Za-z_][A-Za-z0-9_]*$`
+- No arbitrary SQL execution from user input
+- CSV/Excel files are untrusted — read data only, no macro execution
+- Custom connector code upload from UI is NOT allowed in MVP
+
+#### Constraints
+
+- ❌ Do not implement row-level deep comparison yet
+- ❌ Do not store source/target production rows
+- ❌ Do not add Spark/PySpark
+- ❌ Do not add full connector marketplace
+- ❌ No arbitrary custom connector code upload/execution from UI
+
+#### Acceptance Criteria
+
+- [ ] `connectors/` directory exists with base framework
+- [ ] PostgreSQL connector has functional MVP implementation
+- [ ] CSV upload connector has functional MVP implementation
+- [ ] Excel upload connector has functional MVP implementation
+- [ ] MySQL/SQL Server/Snowflake/S3 skeletons exist
+- [ ] Custom connector registry exists
+- [ ] Connector test/discovery APIs work
+- [ ] Recon service stores metadata only
+- [ ] No passwords returned in API responses
+- [ ] Tests pass without real external DB/Snowflake/S3
+- [ ] No uploaded code execution introduced
+
+#### Deliverables
+
+- Show changed files (~25 files)
+- Show new dependencies (pandas, openpyxl)
+- Run tests (16 new connector tests)
+- Show remaining limitations
+- Stop after this task
+
+#### Test Commands
+
+```bash
+# Connector tests
+cd backend && pytest tests/test_connectors.py -v
+
+# Full test suite
+cd backend && pytest tests/ -v
+```
+
+#### Suggested Commit Message
+
+```bash
+feat(connectors): add connector framework with PostgreSQL, CSV, Excel, and skeletons
+```
+
+#### ✅ Implementation Status (May 2026)
+
+**Connector framework delivered:**
+- 8 connector types registered (3 functional, 5 skeletons)
+- Base framework: ABC, types, exceptions, identifier validation
+- PostgreSQL: full information_schema queries with safe identifiers
+- CSV/Excel: pandas-based schema inference and row counts
+- Custom registry: `register_connector()`, `get_connector()`, `list_registered()`
+- Connector service: unified interface for all types
+- Recon service: row-count comparison with metadata storage
+- 16 tests passing
+
+**Files changed:** `connectors/` (25 files), `backend/app/services/connector_service.py`, `backend/app/services/recon_service.py`, `backend/app/api/connectors.py`, `backend/app/main.py`, `backend/tests/test_connectors.py`
+
+
+---
+
 ## Summary: Phase Dependencies
 
 ```mermaid
@@ -2727,7 +2910,10 @@ graph TD
     P15 --> P20[20: Docker E2E]
     P16 --> P20
     P18 --> P20
+    P18 --> P22[22: Connectors]
     P19 --> P20
+    P14 --> P22
+    P22 --> P20
     P20 --> P21[21: Final Review]
 ```
 
