@@ -14,6 +14,7 @@ from app.api.code_conversion import router as conversion_router
 from app.api.validation import router as validation_router
 from app.api.audit import router as audit_router
 from app.api.system import router as system_router
+from app.api.connectors import router as connectors_router
 from app.core.config import settings
 
 app = FastAPI(
@@ -45,6 +46,7 @@ app.include_router(conversion_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
+app.include_router(connectors_router, prefix="/api/v1")
 
 
 @app.get("/")
