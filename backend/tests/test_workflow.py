@@ -88,7 +88,10 @@ def test_workflow_flow(client):
 
     resp = client.post(f"/api/v1/projects/{pid}/agent-workflows", json={"requirement_id": rid}, headers=h)
     assert resp.status_code == 200
-    wf = resp.json()["workflow"]
+    data = resp.json()
+    assert data["mode"] == "local_fallback"
+    assert data["status"] == "completed"
+    wf = data["result"]
     assert wf["status"] == "completed"
     assert wf["approval_required"] is True
     assert set(wf["outputs"]) == {"business_analyst", "architect", "validation_planner", "approval_gate"}
