@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
 from app.auth.dependencies import get_current_organization_id
 from app.services.project_service import ensure_project_access
+from app.models.project import MigrationRequirement
 from agents.bmad.workflow import run_bmad_workflow
 
 
@@ -24,7 +25,18 @@ router = APIRouter(tags=["agent-workflows"])
 @router.post("/projects/{project_id}/agent-workflows")
 def start_workflow(project_id: str, data: StartWorkflowRequest, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)
-    result = run_bmad_workflow(project_id, data.requirement_id)
+    requirement = db.query(MigrationRequirement).filter(
+        MigrationRequirement.id == data.requirement_id,
+        MigrationRequirement.project_id == project_id,
+    ).first()
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    result = run_bmad_workflow(
+        project_id,
+        data.requirement_id,
+        organization_id=org_id,
+        requirement_text=requirement.source_text,
+    )
     return {"workflow": result}
 
 
