@@ -102,3 +102,41 @@ def test_workflow_flow(client):
         headers=h,
     )
     assert resp.status_code == 200
+
+
+def test_workflow_persistence(client):
+    """Test that BMAD workflow runs and steps are persisted to PostgreSQL."""
+
+    client.post("/api/v1/auth/first-admin", json={
+        "email": "p@t.com", "name": "P", "password": "Test123!",
+        "organization_name": "O", "organization_slug": "o",
+    })
+    login = client.post("/api/v1/auth/login", json={"email": "p@t.com", "password": "Test123!"})
+    token = login.json()["access_token"]
+    h = {"Authorization": f"Bearer {token}"}
+
+    resp = client.post("/api/v1/projects", json={"name": "Persist Project"}, headers=h)
+    pid = resp.json()["id"]
+    resp = client.post(f"/api/v1/projects/{pid}/requirements", json={"source_text": "Migrate DB"}, headers=h)
+    rid = resp.json()["id"]
+
+    # Start workflow (will use local_fallback and persist)
+    resp = client.post(f"/api/v1/projects/{pid}/agent-workflows", json={
+        "requirement_id": rid,
+        "requirement_text": "Migrate Oracle to Snowflake",
+    }, headers=h)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    wf_id = data["workflow_id"]
+    assert data["mode"] == "local_fallback"
+    assert data["status"] == "completed"
+
+    # Verify persistence via GET
+    resp = client.get(f"/api/v1/agent-workflows/{wf_id}", headers=h)
+    assert resp.status_code == 200
+    persisted = resp.json()
+    assert persisted["workflow_id"] == wf_id
+    assert persisted["status"] == "completed"
+    assert persisted["mode"] == "local_fallback"
+    assert persisted["project_id"] == pid

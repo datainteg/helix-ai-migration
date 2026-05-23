@@ -10,7 +10,12 @@ import logging
 import os
 import uuid
 
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
 from agents.bmad.graph import run_bmad_graph
+from app.db.session import SessionLocal
+from app.models.workflow import WorkflowRun, WorkflowStep
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,7 @@ async def start_bmad_planning_workflow(
     requirement_id: str,
     organization_id: str | None = None,
     requirement_text: str | None = None,
+    db: Session | None = None,
 ) -> dict:
     """Start the BMAD planning workflow.
 
@@ -101,6 +107,7 @@ async def start_bmad_planning_workflow(
             result["workflow_id"],
             result["mode"],
         )
+        _persist_started_workflow(db, result, input_data)
         return result
     except Exception as exc:
         if _is_production():
@@ -122,26 +129,196 @@ async def start_bmad_planning_workflow(
         result["workflow_id"],
         result["mode"],
     )
+
+    # Persist the workflow run and steps
+    _persist_workflow_result(db, result, input_data)
+
     return result
 
 
-async def get_workflow_status(workflow_id: str) -> dict:
+async def get_workflow_status(
+    workflow_id: str,
+    db: Session | None = None,
+) -> dict:
     """Get BMAD workflow status.
 
-    For MVP, returns a placeholder with TODO note if no persistence exists.
+    Returns persisted workflow run state when available.
     Does not fake completed status unless data exists.
-
-    Args:
-        workflow_id: Temporal workflow ID or local fallback ID
-
-    Returns:
-        Dict with workflow_id, status, and metadata.
     """
-    # TODO: Query workflow_runs table once Prompt 10 (persistence) is implemented.
-    # For now, return a clear placeholder.
+    if db is None:
+        db = SessionLocal()
+
+    try:
+        run = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
+    except SQLAlchemyError as exc:
+        logger.warning("Workflow status persistence lookup failed: %s", exc)
+        run = None
+
+    if run:
+        return {
+            "workflow_id": run.workflow_id or workflow_id,
+            "run_id": run.run_id,
+            "status": run.status or "unknown",
+            "mode": run.mode,
+            "project_id": run.project_id,
+            "requirement_id": run.requirement_id,
+            "organization_id": run.organization_id,
+        }
+
     return {
         "workflow_id": workflow_id,
         "status": "unknown",
         "mode": "temporal" if "bmad-" in workflow_id else "local_fallback",
-        "note": "Workflow persistence not yet implemented. See Prompt 10.",
+        "note": "Workflow run not found in persistence.",
     }
+
+
+def _persist_started_workflow(db: Session | None, result: dict, input_data: dict) -> None:
+    """Persist a Temporal-started workflow run as 'started'."""
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        create_workflow_run(
+            db,
+            organization_id=input_data.get("organization_id", "unknown"),
+            project_id=input_data["project_id"],
+            requirement_id=input_data["requirement_id"],
+            workflow_id=result["workflow_id"],
+            run_id=result["run_id"],
+            status="started",
+            mode="temporal",
+        )
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to persist started workflow: %s", exc)
+        db.rollback()
+    finally:
+        if own_db:
+            db.close()
+
+
+def _persist_workflow_result(db: Session | None, result: dict, input_data: dict) -> None:
+    """Persist a completed workflow run and its agent steps."""
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        run = create_workflow_run(
+            db,
+            organization_id=input_data.get("organization_id", "unknown"),
+            project_id=input_data["project_id"],
+            requirement_id=input_data["requirement_id"],
+            workflow_id=result["workflow_id"],
+            run_id=result["run_id"],
+            status=result["status"],
+            mode=result["mode"],
+        )
+
+        agent_outputs = result.get("result", {}).get("outputs", {})
+        agent_order = ["business_analyst", "architect", "validation_planner", "approval_gate"]
+        for idx, agent_name in enumerate(agent_order):
+            if agent_name in agent_outputs:
+                save_workflow_step(
+                    db,
+                    workflow_run_id=run.id,
+                    agent_name=agent_name,
+                    step_order=str(idx + 1),
+                    status="completed",
+                    raw_output=str(agent_outputs[agent_name]),
+                    parsed_output_json=agent_outputs[agent_name],
+                )
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to persist workflow result: %s", exc)
+        db.rollback()
+    finally:
+        if own_db:
+            db.close()
+
+
+# ── Persistence CRUD (Prompt 10) ──────────────────────────────────────
+
+def create_workflow_run(
+    db: Session,
+    *,
+    organization_id: str,
+    project_id: str,
+    requirement_id: str,
+    workflow_id: str,
+    run_id: str,
+    status: str = "pending",
+    mode: str = "local_fallback",
+) -> WorkflowRun:
+    """Create a new workflow run record."""
+    run = WorkflowRun(
+        organization_id=organization_id,
+        project_id=project_id,
+        requirement_id=requirement_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        status=status,
+        mode=mode,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def update_workflow_run_status(
+    db: Session,
+    workflow_id: str,
+    status: str,
+) -> WorkflowRun | None:
+    """Update the status of a workflow run."""
+    run = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
+    if run:
+        run.status = status
+        db.commit()
+        db.refresh(run)
+    return run
+
+
+def save_workflow_step(
+    db: Session,
+    *,
+    workflow_run_id: str,
+    agent_name: str,
+    step_order: str,
+    status: str = "completed",
+    raw_output: str | None = None,
+    parsed_output_json: dict | None = None,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    error_message: str | None = None,
+) -> WorkflowStep:
+    """Save an agent step output within a workflow run."""
+    import json
+
+    step = WorkflowStep(
+        workflow_run_id=workflow_run_id,
+        agent_name=agent_name,
+        step_order=step_order,
+        status=status,
+        raw_output=raw_output,
+        parsed_output_json=json.dumps(parsed_output_json) if parsed_output_json else None,
+        provider_name=provider_name,
+        model_name=model_name,
+        error_message=error_message,
+    )
+    db.add(step)
+    db.commit()
+    db.refresh(step)
+    return step
+
+
+def get_workflow_run(db: Session, workflow_id: str) -> WorkflowRun | None:
+    """Get a workflow run by ID."""
+    return db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
+
+
+def list_workflow_runs(db: Session, organization_id: str, project_id: str | None = None) -> list[WorkflowRun]:
+    """List workflow runs for an organization, optionally filtered by project."""
+    q = db.query(WorkflowRun).filter(WorkflowRun.organization_id == organization_id)
+    if project_id:
+        q = q.filter(WorkflowRun.project_id == project_id)
+    return q.order_by(WorkflowRun.created_at.desc()).all()

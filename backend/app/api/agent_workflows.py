@@ -59,6 +59,7 @@ async def start_workflow(
         requirement_id=data.requirement_id,
         organization_id=org_id,
         requirement_text=data.requirement_text or requirement.source_text,
+        db=db,
     )
 
     return StartWorkflowResponse(
@@ -74,9 +75,10 @@ async def start_workflow(
 async def get_workflow(
     workflow_id: str,
     user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Get BMAD workflow status by workflow ID."""
-    return await get_workflow_status(workflow_id)
+    return await get_workflow_status(workflow_id, db=db)
 
 
 @router.post("/agent-workflows/{workflow_id}/approve")
