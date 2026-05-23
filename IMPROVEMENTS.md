@@ -605,13 +605,74 @@ Current file needs updates reflecting MVP completion:
 | 24 | Project fetch in useEffect but selectedProject not set — selects first project automatically | Low | UX: show project selector prompt if multiple projects |
 | 55 | File extension check: `.pop()?.toLowerCase()` — fragile, fails for `file.tar.gz` | Low | Use `filename.split(".").slice(1).join(".")` for multi-dot names |
 
-### 9.16 `developer_agents.py` (Schemas)
+### 9.17 `artifact_version_service.py` — ✅ Clean, well-designed
 
-| Line | Issue | Severity | Fix |
-|---|---|---|---|
-| 28-45 | `CodeAnalyzerOutput` — 15 fields, comprehensive ✅ | — | Good schema |
-| 48-62 | `CodeReviewOutput` — good schema with SecurityFinding sub-model ✅ | — | Good |
-| — | All fields have defaults (`= []`, `= None`) — makes partial data safe ✅ | — | Good defensive design |
+| Line | Finding |
+|---|---|
+| 8 | `hash_content()` uses SHA256 — standard ✅ |
+| 12-25 | Creates artifact + v1 atomically in one transaction ✅ |
+| 34-65 | All queries org-scoped via direct filter or double-join ✅ |
+
+### 9.18 `agent_service.py` — ✅ Clean
+
+| Line | Finding |
+|---|---|
+| 16-18 | `_ensure_project_access()` — good isolation helper ✅ |
+| 32-38 | Joins through Project for org scoping ✅ |
+| 84 | `int(latest.version)` — ⚠️ could ValueError if version is non-numeric |
+
+### 9.19 `code_reviews.py` — ✅ Good, minor DRY
+
+| Line | Finding |
+|---|---|
+| 18-22 | Org-scoped artifact read, `os.path.exists` check ✅ |
+| 25 | `open(path, "r", encoding="utf-8")` — safe text read, never executes ✅ |
+| 52,63 | `org_id = get_current_user(db, user_id).memberships[0].organization_id` — repeated; should use `Depends(get_current_organization_id)` |
+
+### 9.20 `code_conversion.py` — 🔴 Has issues
+
+| Line | Issue | Severity |
+|---|---|---|
+| 38 | `content_hash="generated_draft_hash"` — placeholder, not real hash | 🔴 |
+| 39 | `storage_path=f"/drafts/..."` — path not validated against storage root | 🔴 |
+
+### 9.21 `storage/local.py` — ✅ Excellent
+
+| Line | Finding |
+|---|---|
+| 16 | Cross-platform path normalization ✅ |
+| 30 | `resolve().relative_to()` traversal guard ✅ |
+| 35-40 | UUID-based names with project subdirectory ✅ |
+
+### 9.22 `schemas/project.py` — ⚠️ Missing field
+
+| Line | Issue | Severity |
+|---|---|---|
+| 5-8 | `ProjectCreate` missing `migration_type` field — frontend sends it but schema ignores it | 🔴 |
+
+### 9.23 `models/identity.py` — ✅ Excellent RBAC design
+
+| Finding |
+|---|
+| Organization, User, Role, Permission, OrganizationMember — all well-modeled ✅ |
+| `role_permissions` M2M table with `ondelete="CASCADE"` ✅ |
+| `is_super_admin` flag for global admin bypass ✅ |
+
+### 9.24 `models/llm.py` — ✅ Clean
+
+| Finding |
+|---|
+| `LLMProvider` org-scoped with indexed `organization_id` ✅ |
+| `LLMProviderSecret` stores only encrypted keys ✅ |
+| `LLMAgentMapping` with per-agent model routing ✅ |
+
+### 9.25 `models/artifacts.py` — ✅ Comprehensive
+
+| Finding |
+|---|
+| `CodeArtifact` → `CodeArtifactVersion` → `ArtifactReview` → `ArtifactApproval` chain ✅ |
+| `content_hash` (SHA256), `storage_path` for file reference ✅ |
+| `approval_status`, `approved_by`, `approved_at` for governance ✅ |
 
 ---
 
