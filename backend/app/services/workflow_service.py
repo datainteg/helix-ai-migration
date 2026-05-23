@@ -6,6 +6,7 @@ Dev/Test: falls back to direct run_bmad_graph when Temporal is unavailable.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -224,7 +225,7 @@ def _persist_workflow_result(db: Session | None, result: dict, input_data: dict)
                     agent_name=agent_name,
                     step_order=str(idx + 1),
                     status="completed",
-                    raw_output=str(agent_outputs[agent_name]),
+                    raw_output=json.dumps(agent_outputs[agent_name]),
                     parsed_output_json=agent_outputs[agent_name],
                 )
     except SQLAlchemyError as exc:

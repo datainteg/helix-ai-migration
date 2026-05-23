@@ -17,7 +17,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Cached compiled graph — built once, reused across all invocations
+_compiled_graph = None
+
+
 def build_bmad_graph():
+    """Build the BMAD LangGraph StateGraph. Cached after first compilation."""
+    global _compiled_graph
+    if _compiled_graph is not None:
+        return _compiled_graph
+
     graph = StateGraph(BMADWorkflowState)
     graph.add_node("business_analyst", business_analyst_node)
     graph.add_node("architect", architect_node)

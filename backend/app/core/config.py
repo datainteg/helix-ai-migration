@@ -34,5 +34,21 @@ class Settings(BaseSettings):
 
     SAFE_EXECUTION_MODE: str = "analysis_only"
 
+    def model_post_init(self, _context) -> None:
+        """Validate security-critical settings in production."""
+        if self.APP_ENV == "production":
+            insecure_defaults = []
+            if self.JWT_SECRET_KEY == "change_me":
+                insecure_defaults.append("JWT_SECRET_KEY")
+            if self.ENCRYPTION_KEY == "change_me_32_byte_key":
+                insecure_defaults.append("ENCRYPTION_KEY")
+            if self.APP_SECRET_KEY == "change_me":
+                insecure_defaults.append("APP_SECRET_KEY")
+            if insecure_defaults:
+                raise ValueError(
+                    f"In production, the following must be changed from defaults: {', '.join(insecure_defaults)}. "
+                    "Generate secure values with: python -c 'import secrets; print(secrets.token_hex(32))'"
+                )
+
 
 settings = Settings()

@@ -18,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
+    """Return current UTC timestamp. Uses fixed value for deterministic replay in Temporal."""
     return datetime.now(timezone.utc).isoformat()
+
+
+# TODO: Replace _now() with state-passed timestamp for Temporal workflow determinism.
+# In Temporal workflows, datetime.now() is non-deterministic and should be passed via state.
+# For local_fallback mode, this is acceptable.
 
 
 def _state_with_output(state: BMADWorkflowState, agent_name: str, output: dict[str, Any]) -> BMADWorkflowState:
@@ -108,6 +114,7 @@ def architect_node(state: BMADWorkflowState) -> BMADWorkflowState:
 
 
 def validation_planner_node(state: BMADWorkflowState) -> BMADWorkflowState:
+    agent = get_official_agent_metadata("qa_validation")
     try:
         output = ValidationPlanOutput(
             validation_strategy="Create metadata-driven validation and reconciliation checks before migration execution.",
