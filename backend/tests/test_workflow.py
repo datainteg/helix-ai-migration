@@ -1,4 +1,44 @@
+from pathlib import Path
+
 from agents.bmad.graph import build_bmad_graph, run_bmad_graph
+from agents.bmad.official_agents import get_official_agent_metadata, load_official_bmad_agent
+
+
+def test_bmad_agent_metadata_uses_official_named_agents():
+    analyst = get_official_agent_metadata("business_analyst")
+    architect = get_official_agent_metadata("architect")
+
+    assert analyst["name"] == "Mary"
+    assert analyst["title"] == "Business Analyst"
+    assert analyst["command"] == "bmad-analyst"
+    assert analyst["skill_id"] == "bmad-agent-analyst"
+    assert analyst["skill_path"] == "src/bmm-skills/1-analysis/bmad-agent-analyst/SKILL.md"
+
+    assert architect["name"] == "Winston"
+    assert architect["title"] == "System Architect"
+    assert architect["command"] == "bmad-architect"
+    assert architect["skill_id"] == "bmad-agent-architect"
+    assert architect["skill_path"] == "src/bmm-skills/3-solutioning/bmad-agent-architect/SKILL.md"
+
+
+def test_bmad_agent_metadata_can_load_official_skill_files(tmp_path: Path):
+    skill_dir = tmp_path / "src" / "bmm-skills" / "1-analysis" / "bmad-agent-analyst"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\ndescription: Strategic business analyst and requirements expert.\n---\n# Mary - Business Analyst\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "customize.toml").write_text(
+        '[agent]\nname = "Mary"\ntitle = "Business Analyst"\n',
+        encoding="utf-8",
+    )
+
+    metadata = load_official_bmad_agent("business_analyst", tmp_path)
+
+    assert metadata.source == "official_bmad_skill"
+    assert metadata.name == "Mary"
+    assert metadata.title == "Business Analyst"
+    assert metadata.description == "Strategic business analyst and requirements expert."
 
 
 def test_bmad_langgraph_returns_structured_outputs():

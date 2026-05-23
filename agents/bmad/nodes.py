@@ -11,22 +11,10 @@ from agents.bmad.schemas import (
     RiskItem,
     ValidationPlanOutput,
 )
+from agents.bmad.official_agents import get_official_agent_metadata
 from agents.bmad.state import BMADWorkflowState
 
 logger = logging.getLogger(__name__)
-
-BMAD_AGENT_ROSTER = {
-    "business_analyst": {
-        "agent_name": "Mary",
-        "title": "Business Analyst",
-        "phase": "Analysis",
-    },
-    "architect": {
-        "agent_name": "Winston",
-        "title": "System Architect",
-        "phase": "Solutioning",
-    },
-}
 
 
 def _now() -> str:
@@ -58,10 +46,10 @@ def _state_with_error(state: BMADWorkflowState, agent_name: str, error: Validati
 
 
 def business_analyst_node(state: BMADWorkflowState) -> BMADWorkflowState:
-    roster_entry = BMAD_AGENT_ROSTER["business_analyst"]
+    agent = get_official_agent_metadata("business_analyst")
     try:
         output = BusinessAnalystOutput(
-            summary=f"{roster_entry['agent_name']} ({roster_entry['title']}) completed initial migration requirement analysis.",
+            summary=f"{agent['name']} ({agent['title']}) completed initial migration requirement analysis.",
             business_goals=[
                 "Clarify migration objective and business success criteria.",
                 "Identify source-to-target planning assumptions before engineering work starts.",
@@ -89,10 +77,10 @@ def business_analyst_node(state: BMADWorkflowState) -> BMADWorkflowState:
 
 
 def architect_node(state: BMADWorkflowState) -> BMADWorkflowState:
-    roster_entry = BMAD_AGENT_ROSTER["architect"]
+    agent = get_official_agent_metadata("architect")
     try:
         output = ArchitectOutput(
-            architecture_summary=f"{roster_entry['agent_name']} ({roster_entry['title']}) prepared the draft source-to-target migration architecture.",
+            architecture_summary=f"{agent['name']} ({agent['title']}) prepared the draft source-to-target migration architecture.",
             source_systems=["source system metadata pending"],
             target_systems=["target platform metadata pending"],
             integration_points=[
