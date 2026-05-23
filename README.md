@@ -207,17 +207,29 @@ Migration-Specific Agents
 - Temporal handles durable workflow execution and retries
 - PostgreSQL stores all outputs, prompts, approvals, and metadata
 
-### Core Agents
+### Core Agents (13 BMAD Skills)
 
-| Agent | Responsibility |
-|---|---|
-| Business Analyst Agent | Understand requirements and create project overview |
-| Architect Agent | Design migration architecture and system flow |
-| Data Engineer Agent | Create mapping logic and migration approach |
-| QA/Validation Agent | Generate validation rules and test strategy |
-| Recon Agent | Compare source vs target and generate recon reports |
-| DevOps Agent | Plan deployment, cutover, rollback, and monitoring |
-| PM Agent | Track risks, timeline, approvals, and project status |
+| Agent Key | BMAD Name | Title | Phase | Status |
+|---|---|---|---|---|
+| `business_analyst` | **Mary** | Business Analyst | Analysis | ✅ Wired into graph |
+| `tech_writer` | **Paige** | Technical Writer | Analysis | 🔜 Ready |
+| `pm` | **John** | Product Manager | Plan-Workflows | 🔜 Ready |
+| `ux_designer` | **Sally** | UX Designer | Plan-Workflows | 🔜 Ready |
+| `architect` | **Winston** | System Architect | Solutioning | ✅ Wired into graph |
+| `data_engineer` | **Amelia** | Sr. Software Engineer | Implementation | 🔜 Ready |
+| `qa_validation` | **QA Bot** | QA Automation Engineer | Implementation | 🔜 Ready |
+| `recon` | **Code Reviewer** | Elite Code Reviewer | Implementation | 🔜 Ready |
+| `devops` | **DevOps Bot** | DevOps Engineer | Implementation | 🔜 Ready |
+
+**Core Skills:**
+| `party_mode` 🎉 | Multi-Agent Orchestrator | Spawns agents as independent subagents |
+| `brainstorming` | Creative Ideation | Interactive brainstorming sessions |
+| `distillator` | Document Compression | Lossless LLM-optimized compression |
+| `advanced_elicitation` | Deep Critique | Socratic, first-principles, red-team methods |
+
+**Current graph:** `START → Mary (BA) → Winston (Architect) → VP → Approval → END`
+
+**Agents reference:** `agents/bmad/official_agents.py` — all 13 agents load from the vendored BMAD-METHOD skill files.
 
 ### Agent Communication Flow
 
