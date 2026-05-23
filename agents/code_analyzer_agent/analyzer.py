@@ -7,20 +7,11 @@ so analysis remains available without external API dependencies.
 
 import json
 import logging
-import os
-import sys
 
 from agents.runtime.structured_output import safe_extract_json
 from agents.schemas.developer_agents import CodeAnalyzerOutput
 
 logger = logging.getLogger(__name__)
-
-# Ensure backend is importable without mutating sys.path
-_built = False
-_backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
-if _backend_root not in sys.path:
-    sys.path.insert(0, _backend_root)
-    _built = True
 
 
 def _try_llm_call(source_code: str, filename: str, org_id: str | None = None) -> dict | None:
@@ -73,8 +64,8 @@ def _try_llm_call(source_code: str, filename: str, org_id: str | None = None) ->
     return None
 
 
-def analyze_code(source_code: str, filename: str) -> CodeAnalyzerOutput:
-    result = _try_llm_call(source_code, filename)
+def analyze_code(source_code: str, filename: str, org_id: str | None = None) -> CodeAnalyzerOutput:
+    result = _try_llm_call(source_code, filename, org_id=org_id)
     if result:
         return CodeAnalyzerOutput(**result)
 

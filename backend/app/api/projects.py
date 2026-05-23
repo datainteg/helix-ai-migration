@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -19,6 +19,7 @@ from app.services.project_service import (
     add_schema, add_table, add_column,
 )
 from app.services.auth_service import get_current_user
+from app.api.audit import write_audit
 
 router = APIRouter(tags=["projects"])
 
@@ -30,8 +31,11 @@ def _org_id(user_id: str, db: Session) -> str:
 # ── Projects ──
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
-def api_create_project(data: ProjectCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return create_project(db, _org_id(user_id, db), user_id, data)
+def api_create_project(request: Request, data: ProjectCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    result = create_project(db, org_id, user_id, data)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_created", entity_type="project", entity_id=result.id, request=request)
+    return result
 
 
 @router.get("/projects", response_model=list[ProjectResponse])

@@ -15,6 +15,8 @@ from app.services.llm_provider_service import (
 )
 from app.api.audit import write_audit
 
+from app.rate_limiting import limiter
+
 router = APIRouter(tags=["llm-providers"])
 
 
@@ -58,7 +60,8 @@ def api_rotate_key(provider_id: str, data: KeyRotateRequest, user_id: str = Depe
 
 
 @router.post("/llm-providers/{provider_id}/test", response_model=TestConnectionResponse)
-async def api_test_provider(provider_id: str, user_id: str = Depends(require_permission("admin:llm:read")), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def api_test_provider(request: Request, provider_id: str, user_id: str = Depends(require_permission("admin:llm:read")), db: Session = Depends(get_db)):
     return await test_connection(db, _org(db, user_id), provider_id)
 
 

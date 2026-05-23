@@ -173,7 +173,11 @@ class TestConnectorAPIClient:
         token = login.json()["access_token"]
         h = {"Authorization": f"Bearer {token}"}
 
+        project = client.post("/api/v1/projects", json={"name": "ConnTest"}, headers=h)
+        project_id = project.json()["id"]
+
         resp = client.post("/api/v1/connectors/test", json={
+            "project_id": project_id,
             "connector_type": "postgres",
             "config": {"host": "localhost", "database": "test"},
         }, headers=h)

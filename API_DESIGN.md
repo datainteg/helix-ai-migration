@@ -1,5 +1,7 @@
 # API Design
 
+> **Reality note (2026-05-23):** Endpoints described below are the **target API**. For the actual implemented surface (with stub/partial annotations), see [README.md → API Surface](README.md#api-surface-implemented). Notable stubs: `POST /agent-workflows/{id}/approve` does not persist (C-9), `POST /projects/{id}/validation-runs` and `/recon-runs` return hardcoded data (C-2), `POST /artifacts/{id}/convert` writes a fake content_hash and an unsafe storage path (C-4).
+
 ## Project Identity
 
 | Item | Value |

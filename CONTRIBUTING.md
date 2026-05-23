@@ -43,7 +43,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1  # Windows
 pip install -r requirements.txt
 alembic upgrade head
-pytest tests/ -v  # 58 tests should pass
+pytest tests/ -v  # 60 tests total — 58 pass, 2 skipped (Temporal integration)
 
 # Frontend
 cd frontend
@@ -148,3 +148,19 @@ Implementation PRs should include tests for:
 - Validation rule examples
 - Report templates
 - Test coverage
+
+## Highest-Impact Open Issues
+
+See [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) for the full prioritized list. The current top P0 items are:
+
+| ID | Problem | Estimate |
+|---|---|---|
+| C-1 | `worker/Dockerfile` missing `pip install -r requirements.txt` | 5 minutes |
+| C-2 | Validation / reconciliation API + UI return hardcoded fixtures | 1-2 days |
+| C-3 | Cross-org LLM provider leak in code analyzer/reviewer | 1-2 hours |
+| C-5 | No rate limiting on auth / connector test / LLM test | 4-6 hours |
+| C-6 | PostgreSQL connector does not URL-encode credentials | 30 minutes |
+| C-7 | BMAD nodes return hardcoded text, do not call any LLM | 1-2 days |
+| C-9 | Workflow approval endpoint does not persist the decision | 2 hours |
+
+All have file paths, recommended fixes, and verification steps in `FUTURE_IMPROVEMENTS.md`.

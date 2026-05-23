@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import quote_plus
 
 from connectors.base.connector import (
     BaseConnector,
@@ -34,6 +35,10 @@ class PostgreSQLConnector(BaseConnector):
         supports_recon=True,
     )
 
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        self._engine = None
+
     def _build_connection_url(self) -> str:
         """Build SQLAlchemy connection URL. Never logs password."""
         cfg = self.config
@@ -42,17 +47,30 @@ class PostgreSQLConnector(BaseConnector):
         database = cfg.get("database", "postgres")
         username = cfg.get("username", "postgres")
         password = cfg.get("password", "")
-        return f"postgresql://{username}:{password}@{host}:{port}/{database}"
+        ssl_mode = cfg.get("ssl_mode", "prefer")
+        return f"postgresql://{quote_plus(username)}:{quote_plus(password)}@{host}:{port}/{database}?sslmode={ssl_mode}"
+
+    def _get_engine(self):
+        """Lazy-init shared engine. Avoids per-call connection overhead."""
+        from sqlalchemy import create_engine
+        if self._engine is None:
+            self._engine = create_engine(
+                self._build_connection_url(),
+                connect_args={"connect_timeout": 10},
+                pool_pre_ping=True,
+            )
+        return self._engine
+
+    def close(self) -> None:
+        if self._engine is not None:
+            self._engine.dispose()
+            self._engine = None
 
     async def test_connection(self) -> ConnectorTestResult:
         try:
-            from sqlalchemy import create_engine, text
-
-            url = self._build_connection_url()
-            engine = create_engine(url, connect_args={"connect_timeout": 10})
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
                 conn.execute(text("SELECT 1"))
-                conn.commit()
             return ConnectorTestResult(success=True, message="Connected to PostgreSQL")
         except Exception as exc:
             logger.warning("PostgreSQL connection test failed: %s", exc)
@@ -60,11 +78,8 @@ class PostgreSQLConnector(BaseConnector):
 
     async def list_schemas(self) -> list[SchemaInfo]:
         try:
-            from sqlalchemy import create_engine, text
-
-            url = self._build_connection_url()
-            engine = create_engine(url)
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
                 rows = conn.execute(
                     text("SELECT schema_name FROM information_schema.schemata ORDER BY schema_name")
                 )
@@ -75,11 +90,8 @@ class PostgreSQLConnector(BaseConnector):
     async def list_tables(self, schema_name: str) -> list[TableInfo]:
         validate_identifier(schema_name, "schema_name")
         try:
-            from sqlalchemy import create_engine, text
-
-            url = self._build_connection_url()
-            engine = create_engine(url)
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
                 rows = conn.execute(
                     text(
                         "SELECT table_name, table_type FROM information_schema.tables "
@@ -98,11 +110,8 @@ class PostgreSQLConnector(BaseConnector):
         validate_identifier(schema_name, "schema_name")
         validate_identifier(table_name, "table_name")
         try:
-            from sqlalchemy import create_engine, text
-
-            url = self._build_connection_url()
-            engine = create_engine(url)
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
                 rows = conn.execute(
                     text(
                         "SELECT column_name, data_type, is_nullable, ordinal_position "
@@ -130,11 +139,8 @@ class PostgreSQLConnector(BaseConnector):
         validate_identifier(schema_name, "schema_name")
         validate_identifier(table_name, "table_name")
         try:
-            from sqlalchemy import create_engine, text
-
-            url = self._build_connection_url()
-            engine = create_engine(url)
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
                 result = conn.execute(
                     text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')
                 )
@@ -146,3 +152,18 @@ class PostgreSQLConnector(BaseConnector):
                 )
         except Exception as exc:
             raise DiscoveryError(f"Row count failed: {exc}", "postgres") from exc
+
+    async def get_null_count(self, schema_name: str, table_name: str, column_name: str) -> int:
+        """Count NULL values in a column. Used by validation engine."""
+        validate_identifier(schema_name, "schema_name")
+        validate_identifier(table_name, "table_name")
+        validate_identifier(column_name, "column_name")
+        try:
+            from sqlalchemy import text
+            with self._get_engine().connect() as conn:
+                result = conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}" WHERE "{column_name}" IS NULL')
+                )
+                return result.scalar() or 0
+        except Exception as exc:
+            raise DiscoveryError(f"Null count failed: {exc}", "postgres") from exc

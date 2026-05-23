@@ -20,7 +20,7 @@ from app.schemas.project import (
 # ── Projects ──
 
 def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate) -> ProjectResponse:
-    project = Project(organization_id=org_id, owner_id=owner_id, name=data.name, description=data.description, risk_level=data.risk_level)
+    project = Project(organization_id=org_id, owner_id=owner_id, name=data.name, description=data.description, risk_level=data.risk_level, migration_type=data.migration_type)
     db.add(project)
     db.commit()
     db.refresh(project)

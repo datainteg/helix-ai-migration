@@ -48,9 +48,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: helix
-      POSTGRES_PASSWORD: helix_password
-      POSTGRES_DB: helix_metadata
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-helix_metadata}
     volumes:
       - helix_postgres_data:/var/lib/postgresql/data
     networks:
@@ -72,8 +72,8 @@ services:
     environment:
       - DB=postgresql
       - DB_PORT=5432
-      - POSTGRES_USER=helix
-      - POSTGRES_PWD=helix_password
+      - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER is required}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_SEEDS=postgres
     depends_on:
       - postgres

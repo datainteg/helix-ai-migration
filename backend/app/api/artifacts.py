@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, Request, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -7,12 +7,13 @@ from app.services.artifact_version_service import create_artifact_metadata, list
 from app.services.project_service import ensure_project_access
 from app.storage.local import sanitize_filename, save_artifact_file, validate_upload
 from app.services.auth_service import get_current_user
+from app.api.audit import write_audit
 
 router = APIRouter(tags=["artifacts"])
 
 
 @router.post("/projects/{project_id}/artifacts/upload")
-async def upload_artifact(project_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+async def upload_artifact(request: Request, project_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     user = get_current_user(db, user_id)
     org_id = user.memberships[0].organization_id
     ensure_project_access(db, org_id, project_id)
@@ -24,7 +25,9 @@ async def upload_artifact(project_id: str, file: UploadFile = File(...), user_id
     path = save_artifact_file(project_id, original_filename, content)
 
     ext = sanitize_filename(original_filename).rsplit(".", 1)[-1].lower()
-    return create_artifact_metadata(db, org_id, project_id, original_filename, ext, str(path), content)
+    result = create_artifact_metadata(db, org_id, project_id, original_filename, ext, str(path), content)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="artifact_uploaded", entity_type="artifact", entity_id=result.id, meta={"filename": original_filename}, request=request)
+    return result
 
 
 @router.get("/projects/{project_id}/artifacts")

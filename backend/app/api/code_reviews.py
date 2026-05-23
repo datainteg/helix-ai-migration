@@ -1,6 +1,6 @@
 import json
 import os
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
 from app.models.artifacts import ArtifactReview, CodeArtifactVersion, CodeArtifact
 from app.services.auth_service import get_current_user
+from app.api.audit import write_audit
 from agents.code_analyzer_agent.analyzer import analyze_code
 from agents.code_review_agent.reviewer import review_code
 
@@ -46,12 +47,12 @@ def _get_latest_version(db: Session, org_id: str, artifact_id: str) -> CodeArtif
 
 
 @router.post("/artifacts/{artifact_id}/analyze")
-def analyze_artifact(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def analyze_artifact(request: Request, artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     org_id = get_current_user(db, user_id).memberships[0].organization_id
     version = _get_latest_version(db, org_id, artifact_id)
     content, filename = _read_artifact_content(db, org_id, artifact_id)
 
-    result = analyze_code(content, filename)
+    result = analyze_code(content, filename, org_id=org_id)
     review = ArtifactReview(
         artifact_version_id=version.id,
         review_type="analysis",
@@ -60,16 +61,17 @@ def analyze_artifact(artifact_id: str, user_id: str = Depends(get_current_user_i
     )
     db.add(review)
     db.commit()
+    write_audit(db, org_id=org_id, actor_id=user_id, action="artifact_analyzed", entity_type="artifact", entity_id=artifact_id, request=request)
     return result.model_dump()
 
 
 @router.post("/artifacts/{artifact_id}/review")
-def review_artifact(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def review_artifact(request: Request, artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     org_id = get_current_user(db, user_id).memberships[0].organization_id
     version = _get_latest_version(db, org_id, artifact_id)
     content, filename = _read_artifact_content(db, org_id, artifact_id)
 
-    result = review_code(content, filename)
+    result = review_code(content, filename, org_id=org_id)
     review = ArtifactReview(
         artifact_version_id=version.id,
         review_type="code_review",
@@ -78,6 +80,7 @@ def review_artifact(artifact_id: str, user_id: str = Depends(get_current_user_id
     )
     db.add(review)
     db.commit()
+    write_audit(db, org_id=org_id, actor_id=user_id, action="artifact_reviewed", entity_type="artifact", entity_id=artifact_id, request=request)
     return result.model_dump()
 
 

@@ -14,6 +14,8 @@
 
 Helix Migration uses AI agents to help teams plan, validate, reconcile, and manage enterprise migrations. The platform must keep humans in control and store every important output as typed, reviewable metadata.
 
+> **Reality note (2026-05-23):** Today the 4 wired BMAD nodes (`business_analyst`, `architect`, `validation_planner`, `approval_gate` in [agents/bmad/nodes.py](agents/bmad/nodes.py)) construct their `BusinessAnalystOutput` / `ArchitectOutput` / `ValidationPlanOutput` outputs with **hardcoded strings** — they do not call any LLM. The infrastructure to do so (`agents.runtime.llm_router.route_llm_call()`, `agents.runtime.structured_output.build_mock_agent_response()`) exists but is not invoked from the nodes. The other 9 of 13 registered BMAD agents are metadata-only references. Tracked as C-7 in [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md).
+
 ## Methodology and Runtime
 
 | Layer | Technology | Purpose |

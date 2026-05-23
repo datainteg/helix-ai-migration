@@ -1,8 +1,24 @@
 # Helix Migration — Improvements & Recommendations
 
-> **Date:** May 23, 2026  
-> **Scope:** Full line-by-line code review of all ~100 source files  
+> **Date:** May 23, 2026
+> **Scope:** Full line-by-line code review of all ~100 source files
 > **Status:** Deep review — backend, agents, worker, frontend
+
+> ## 🔁 2026-05-23 Update
+>
+> A second full line-by-line review re-confirmed most findings here and **added several that were not in this document**:
+>
+> - **Validation/Recon API + UI returns hardcoded fixtures** (now C-2 in [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md))
+> - **BMAD nodes never call any LLM** (now C-7)
+> - **Workflow approval endpoint does not persist** (now C-9)
+> - **MySQL / SQL Server / Snowflake / S3 connectors are skeletons** — not in original findings
+> - **`useApi()` hook exists but no page uses it** — not in original findings
+> - **Worker Dockerfile missing `pip install`** (now C-1)
+> - **System health reports hardcoded "unknown"** for 3 components — not in original findings
+> - **Frontend code-review page expects fields backend doesn't return** — not in original findings
+> - **Several String-typed timestamp columns** (`started_at`, `finished_at`, `approved_at`) — lexicographic ordering bug (now H-6)
+>
+> See **[FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md)** for the single prioritized engineering plan. This document remains as the line-by-line reference. Items here that are now in `FUTURE_IMPROVEMENTS.md` keep their original IDs; new items use C-* / H-* / M-* / L-* tiering.
 
 ---
 

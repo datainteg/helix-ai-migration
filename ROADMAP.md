@@ -1,5 +1,9 @@
 # Roadmap
 
+> **Last updated:** 2026-05-23
+> **Single source of truth for what's next:** [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md)
+> **Capability matrix:** see [README.md → Honest Capability Matrix](README.md#honest-capability-matrix)
+
 ## Project Identity
 
 | Item | Value |
@@ -7,275 +11,116 @@
 | Product | Helix Migration |
 | Repository | helix-ai-migration |
 | Website | helix.datainteg.io |
-| Tagline | Open-source AI-powered migration and validation platform. |
-| Frontend image | datainteg/helix-ai-migration-frontend |
-| Backend image | datainteg/helix-ai-migration-backend |
-| Worker image | datainteg/helix-ai-migration-worker |
-
-## ✅ MVP Foundation — COMPLETE (May 2026)
-
-All 21 prompts implemented. See `CODE_REVIEW.md` for full audit.
-
-**Implemented:**
-- ✅ Repository structure + Docker Compose (7 services)
-- ✅ Frontend premium app shell (15 pages, 23 TSX/TS files)
-- ✅ Backend API (10 routers, 49 Python files, 58 tests)
-- ✅ PostgreSQL metadata store (8 models, 7 migrations)
-- ✅ Authentication (JWT, bcrypt, RBAC, org isolation)
-- ✅ LLM provider management (7 provider types)
-- ✅ BMAD + LangGraph agent workflow (4-node graph, 13 agents registered)
-- ✅ PydanticAI structured output runtime (JSON extraction, validation)
-- ✅ Temporal workflow/activity/worker skeleton
-- ✅ Developer workspace + AI code review
-- ✅ Validation center + reconciliation dashboard
-- ✅ Audit logs + system health
-- ✅ Safe artifact upload with security controls
-- ✅ API key encryption and masking
-
-## 🟡 Phase 2 — Agent Expansion (In Progress)
-
-**Goal:** Wire all 13 BMAD agents into the LangGraph.
-
-| Feature | Status |
-|---|---|
-| BA Agent (Mary) | ✅ Wired |
-| Architect Agent (Winston) | ✅ Wired |
-| Data Engineer (Amelia) | 🔜 Ready |
-| QA/Validation Agent | 🔜 Ready |
-| Recon Agent | 🔜 Ready |
-| DevOps Agent | 🔜 Ready |
-| PM Agent (John) | 🔜 Ready |
-| Party Mode orchestrator | 🔜 Ready |
-| Real LLM provider calls | 🔜 Router ready |
-
-## 🔜 Phase 3 — Live Connectors
-
-| Feature | Status |
-|---|---|
-| PostgreSQL connector | 🔜 Planned |
-| MySQL connector | 🔜 Planned |
-| Oracle connector | 🔜 Planned |
-| Snowflake connector | 🔜 Planned |
-| Schema discovery | 🔜 Planned |
-| CSV/JSON import | 🔜 Planned |
-
-## 🔜 Phase 4 — Enterprise Features
-
-| Feature | Status |
-|---|---|
-| SSO / OAuth | 🔜 Planned |
-| Kubernetes Helm chart | 🔜 Planned |
-| Advanced RBAC | 🔜 Planned |
-| Prometheus metrics | 🔜 Planned |
-| Multi-tenant isolation | 🔜 Planned |
-| Rate limiting | 🔜 Planned (see IMPROVEMENTS.md) |
-
-## 🔜 Phase 5 — Advanced AI
-
-| Feature | Status |
-|---|---|
-| AI-assisted SQL conversion | 🔜 Planned |
-| Code migration agent | 🔜 Planned |
-| Notebook generator | 🔜 Planned |
-| DAG/workflow analyzer | 🔜 Planned |
-| Best-of-3 model comparison | 🔜 Planned |
-| Local LLM support (Ollama/LM Studio) | 🔜 Planned |
+| Tagline | Open-source AI-powered migration and validation platform |
+| Frontend image | `datainteg/helix-ai-migration-frontend` |
+| Backend image | `datainteg/helix-ai-migration-backend` |
+| Worker image | `datainteg/helix-ai-migration-worker` |
 
 ---
 
-**See `IMPROVEMENTS.md` for detailed code quality, performance, security, and workflow recommendations.**
-**See `CODE_REVIEW.md` for complete file-to-prompt mapping and audit.**
+## Status Snapshot (as of 2026-05-23)
 
-Goal: Support bring-your-own-key model configuration.
+| Phase | Stated status (older docs) | Actual status (line-by-line code read) |
+|---|---|---|
+| Phase 1 — Core Platform | ✅ Complete | ✅ Foundation present. Auth, RBAC, org isolation, project CRUD, LLM provider CRUD, artifact upload all work. Several integration gaps remain (see C-9, H-3, H-16 in FUTURE_IMPROVEMENTS.md). |
+| Phase 2 — Developer Workspace | ✅ Complete | 🟡 Partial. Upload + analyze + review APIs work; conversion endpoint writes invalid data (C-4); UI on `/projects/{id}/developer-workspace` is a static mockup; code review page expects fields backend doesn't return (H-14). |
+| Phase 3 — Validation & Recon | ✅ Complete | 🔴 Stub. API returns hardcoded numbers; frontend renders fixtures. Real `recon_service.run_row_count_recon` exists but is not wired (C-2). |
+| Phase 4 — Governance & Observability | ✅ Complete | 🟡 Partial. Audit table + endpoint exist but only first-admin and LLM provider CRUD actually audit. System health reports `"unknown"` for Redis / Temporal / Worker (H-19). |
+| Phase 5 — Templates & Plugins | 🔜 Planned | 🔜 Not started. Custom connector registry exists (`connectors/custom/registry.py`); no templates / plugin lifecycle yet. |
+| Phase 6 — Enterprise Hardening | 🔜 Planned | 🔜 Not started. No SSO, no Helm chart, no per-org KEK, no rate limiting. |
+| Phase 7 — Advanced AI | 🔜 Planned | 🔜 Not started. BMAD nodes do not yet call any LLM (C-7); 4 of 13 agents wired into graph. |
 
-Planned:
+---
 
-- OpenAI / ChatGPT
-- Google Gemini
-- Anthropic Claude
-- DeepSeek
-- OpenRouter
-- Custom OpenAI-compatible API
-- Local model URL
-- Key encryption
-- Key masking
-- Key rotation
-- Agent-wise model mapping
+## ✅ Implemented Today
 
-## Agent Workflow Phase
+- Repository structure + Docker Compose (7 services in dev compose)
+- Frontend Next.js shell (17 page routes, 23 TSX/TS files)
+- Backend FastAPI (13 routers, 10 services, 9 models, 7 Alembic migrations)
+- Authentication (JWT HS256, bcrypt, RBAC with 7 roles / 17 permissions, org isolation)
+- LLM provider CRUD (7 provider types modeled; OpenAI-compatible `test_connection` only)
+- Fernet encryption + masking of API keys
+- BMAD + LangGraph 4-node graph (BA, Architect, Validation Planner, Approval Gate) — **outputs hardcoded, not LLM-generated**
+- PydanticAI-compatible structured output runtime
+- Temporal workflow / activity / worker code (worker Docker image broken — see C-1)
+- Workflow persistence (`workflow_runs`, `workflow_steps`)
+- Safe artifact upload (.py / .sql, 25 MB cap, UUID names, path-traversal guarded)
+- Functional connectors: **PostgreSQL, CSV, Excel**
+- Skeleton connectors: MySQL, SQL Server, Snowflake, S3
+- `useApi()` hook (defined, not yet used by pages)
+- Tests: 60 total, 58 pass, 2 skipped (Temporal integration)
 
-Goal: Implement the first BMAD migration planning workflow.
+## 🟡 Partial / Stubbed
 
-Planned:
+- BMAD agent execution (hardcoded outputs)
+- Code review UI (backend / frontend contract mismatch)
+- Validation engine (API stub)
+- Reconciliation engine (API stub, real service unwired)
+- Audit logging (only 2 endpoints audit)
+- System health probes (3 of 5 components hardcoded "unknown")
+- Code conversion (writes fake `content_hash`, unsafe storage path)
+- Workflow approval persistence (returns success without writing)
 
-- Requirement intake
-- Business Analyst Agent
-- Architect Agent
-- Human approval
-- Data Engineer Agent
-- QA / Validation Agent
-- Recon Agent
-- DevOps Agent
-- PM Agent
-- Final review and sign-off
-- Typed outputs with PydanticAI
-- Durable orchestration with Temporal
+## 🔴 Missing
 
-## Metadata Phase
-
-Goal: Store source and target metadata in PostgreSQL.
-
-Planned:
-
-- Source system metadata
-- Target system metadata
-- Schema storage
-- Table storage
-- Column storage
-- Schema snapshots
-- Basic schema comparison
-
-## Validation and Recon Phase
-
-Goal: Provide practical migration quality checks.
-
-Planned:
-
-- Schema validation
-- Row count checks
-- Null checks
-- Duplicate checks
-- Distribution checks
-- Checksum strategy
-- Reconciliation summaries
-- Downloadable reports
-- AI mismatch explanations
-
-## Developer Execution Phase
-
-Goal: Add engineering execution support for migration code and ETL artifacts.
-
-Planned:
-
-- Developer Workspace
-- Code Review Center
-- ETL Migration Workspace
-- Artifact upload for `.py`, `.sql`, `.ipynb`, DAG files, and config files
-- Code Analyzer Agent
-- Code Review Agent
-- Code Migration Agent
-- Notebook Generator Agent
-- DAG / Workflow Review Agent
-- Version Control Agent
-- Side-by-side diff viewer
-- Artifact versioning
-- Human approval workflow for generated code
-- Validation and reconciliation plan linkage
-
-## Connector Phase
-
-Goal: Add connector framework and first connector implementations.
-
-Planned:
-
-- Connector interface
-- Test connection
-- Schema scan
-- Metadata extraction
-- PostgreSQL connector
-- MySQL connector
-- SQL Server connector
-- Oracle connector
-- Snowflake connector
-- File connector
-- Databricks connector
-
-## Enterprise Phase
-
-Goal: Harden for larger enterprise deployments.
-
-Planned:
-
-- SSO
-- LDAP/AD integration
-- Advanced RBAC
-- Secrets manager integration
+- Rate limiting on any endpoint
+- JWT revocation / token blacklist
+- Password strength validation
+- SSL/TLS enforcement on connectors
+- URL-encoded credentials in connection strings
+- SSRF protection on LLM `base_url` and connector test
+- Per-org DEK / envelope encryption
+- Frontend tests (no Playwright, no Vitest)
+- CI/CD workflows
+- Structured logging, OTel tracing, Prometheus metrics, Sentry
 - Helm chart
-- Advanced audit search
-- Monitoring and alerting
-- Multi-organization hardening
-- Policy controls
+- SSO / OAuth
 
-## Future AI Features
+---
 
-Planned:
+## Forward Plan (Quarterly)
 
-- AI-assisted SQL conversion
-- Draft code and notebook generation with required human approval
-- DAG/workflow analysis and readiness scoring
-- AI-generated mapping drafts
-- AI mismatch explanation
-- Best-of-3 model comparison
-- Migration simulator
-- Dependency graph
-- Lineage visualization
-- Local LLM support with Ollama, vLLM, and LM Studio
-- Sensitive-data safe mode
+The single prioritized engineering plan lives in **[FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md)**. Below is the high-level quarterly view; it tracks the same items.
 
-## Final Phased Roadmap
+### Q1 — Foundation & Security Hardening
+- All P0 criticals (C-1 through C-10) closed.
+- Rate limiting, password strength, token revocation, audit-everywhere, CORS hardening (H-1 through H-7).
+- CI/CD scaffold.
+- Honest validation / reconciliation in UI (either real, or labeled "demo").
 
-### Phase 1: Core Platform
+### Q2 — Performance & Reliability
+- Implement MySQL, SQL Server, Snowflake, S3 connectors.
+- Real validation engine (schema-compare + row-count + null-count).
+- Per-node Temporal activities + Signal-based approval.
+- Structured logging, OpenTelemetry, Prometheus, Sentry.
+- Per-org DEK envelope encryption.
+- Test coverage to 75%.
 
-- Core platform
-- Admin panel
-- LLM settings
-- Project workspace
-- BMAD agents
-- PostgreSQL metadata
-- Docker Compose
+### Q3 — Features & Polish
+- Wire all 13 BMAD agents into LangGraph (fan-out where independent).
+- SSO/OAuth.
+- Kubernetes Helm chart.
+- Plugin system foundations.
+- Audit log tamper-evidence.
+- WebSocket workflow progress.
+- Migration templates and validation libraries.
 
-### Phase 2: Developer Workspace
+### Q4 — Advanced AI & Ecosystem
+- Best-of-N model comparison.
+- Migration simulator.
+- AI mismatch explanations.
+- Local LLM full support (Ollama, vLLM, LM Studio).
+- Sensitive-data safe mode.
+- Knowledge memory + lineage visualization.
 
-- Developer Workspace
-- Code Review Center
-- Artifact versioning
-- Basic code analysis
-- Basic notebook generation
-- Side-by-side diff
+---
 
-### Phase 3: Validation & Recon
+## Reference Docs
 
-- Schema compare
-- Row count
-- Recon reports
-- Validation templates
-
-### Phase 4: Governance & Observability
-
-- Audit logs
-- System health
-- Token usage
-- Worker monitoring
-
-### Phase 5: Templates & Plugins
-
-- Migration templates
-- Connector plugins
-- Validation plugins
-- Report templates
-
-### Phase 6: Enterprise Hardening
-
-- Secrets manager integrations
-- SSO
-- Advanced RBAC
-- Helm chart
-- MinIO/S3 storage
-
-### Phase 7: Advanced AI
-
-- AI mismatch explanation
-- Migration simulator
-- Knowledge memory
-- Local LLM support
-- Safe sandboxed execution, if required
+- [README.md](README.md) — entry point and capability matrix
+- [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) — full system review
+- [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) — prioritized engineering plan
+- [CODE_REVIEW.md](CODE_REVIEW.md) — prompt-driven audit (historical)
+- [IMPROVEMENTS.md](IMPROVEMENTS.md) — line-by-line review (historical)
+- [SECURITY.md](SECURITY.md) — security model + planned hardening
+- [ARCHITECTURE.md](ARCHITECTURE.md), [API_DESIGN.md](API_DESIGN.md), [DATABASE_DESIGN.md](DATABASE_DESIGN.md), [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md), [DOCKER_GUIDE.md](DOCKER_GUIDE.md) — design references

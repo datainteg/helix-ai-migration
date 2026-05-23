@@ -27,6 +27,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - ./agents:/app/agents
       - helix_artifacts:/app/data/artifacts
     depends_on:
       - postgres

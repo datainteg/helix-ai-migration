@@ -49,6 +49,20 @@ class Settings(BaseSettings):
                     f"In production, the following must be changed from defaults: {', '.join(insecure_defaults)}. "
                     "Generate secure values with: python -c 'import secrets; print(secrets.token_hex(32))'"
                 )
+            # Reject wildcard CORS origins in production
+            if "*" in self.CORS_ORIGINS:
+                raise ValueError("CORS_ORIGINS must not contain '*' in production")
+            # Validate ENCRYPTION_KEY is a proper base64-encoded 32-byte Fernet key
+            import base64
+            try:
+                decoded = base64.urlsafe_b64decode(self.ENCRYPTION_KEY + "==")
+                if len(decoded) != 32:
+                    raise ValueError
+            except Exception:
+                raise ValueError(
+                    "ENCRYPTION_KEY must be a base64-encoded 32-byte key. "
+                    "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                )
 
 
 settings = Settings()

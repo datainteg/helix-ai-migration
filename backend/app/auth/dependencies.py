@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.auth.jwt import get_current_user_id
 from app.db.session import get_db
@@ -38,7 +38,12 @@ def get_current_organization_id(
 
 
 def _role_for_membership(db: Session, membership: OrganizationMember) -> Role:
-    role = db.query(Role).filter(Role.id == membership.role_id).first()
+    role = (
+        db.query(Role)
+        .options(selectinload(Role.permissions))
+        .filter(Role.id == membership.role_id)
+        .first()
+    )
     if not role:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Role not found")
     return role

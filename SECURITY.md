@@ -14,6 +14,8 @@
 
 Helix Migration is designed for enterprise, self-hosted migration workflows. Security must be built into storage, APIs, agent workflows, admin actions, and Docker deployment.
 
+> **Reality check (2026-05-23):** This document describes the target security posture. Several controls described below are **not yet implemented** in the codebase. See [README.md → Security](README.md#security) for the actual implemented vs. missing matrix and [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) for the prioritized remediation plan. The single most important point: **there is no rate limiting today**. Do not deploy to a public network until C-5 lands.
+
 ## Secrets Handling
 
 Secrets include:
@@ -76,6 +78,8 @@ Suggested roles:
 
 The backend should support secure login, token refresh, logout, and first-admin setup. Future enterprise features may include SSO, LDAP, and Active Directory integration.
 
+**Implemented today:** JWT HS256 with 60-minute expiry, bcrypt password hashing via `passlib`, first-admin idempotent bootstrap. **Not implemented:** token refresh, token revocation/blacklist, password strength validation, SSO, LDAP/AD. Tracked as H-1, H-2 in [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md).
+
 ## Authorization
 
 Authorization must be enforced in backend services, not only in the frontend. Every tenant-owned resource should be checked against organization membership and role permissions.
@@ -102,6 +106,8 @@ Do not store full production business data unless explicitly configured.
 - Cross-organization access is a security defect.
 
 ## Audit Logs
+
+> ⚠️ **Partial:** The `AuditLog` model and `/audit-logs` endpoint exist and `write_audit()` is implemented. Only `auth/first-admin` and `LLM provider CRUD` actually call `write_audit()` today. Most state-changing endpoints (project create, workflow start/approve, validation/recon runs, artifact upload/approve) do NOT yet emit audit rows. Tracked as **H-3** in [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md).
 
 Audit events should include:
 
@@ -157,6 +163,8 @@ Until a formal process is published, security issues should be reported privatel
 - Mask SMTP passwords and webhook secrets in all UI/API responses.
 
 ## Rate Limiting
+
+> ⚠️ **Not yet implemented.** Redis is provisioned in docker-compose but no code uses it for rate limiting. Tracked as **C-5** in [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md).
 
 Redis-backed rate limiting should protect the platform from abuse:
 

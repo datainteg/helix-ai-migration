@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, ForeignKey, Text
+from sqlalchemy import Column, String, Float, ForeignKey, Text, Integer, DateTime
 from app.models.base import BaseModel
 
 
@@ -16,8 +16,8 @@ class ValidationRun(BaseModel):
     project_id = Column(String(36), nullable=False, index=True)
     started_by = Column(String(36), nullable=False)
     status = Column(String(50), default="pending")
-    started_at = Column(String(50), nullable=True)
-    finished_at = Column(String(50), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class ValidationResult(BaseModel):
@@ -35,6 +35,7 @@ class ReconRun(BaseModel):
     source_ref = Column(String(255), nullable=True)
     target_ref = Column(String(255), nullable=True)
     status = Column(String(50), default="pending")
+    error_message = Column(Text, nullable=True)
 
 
 class ReconResult(BaseModel):
@@ -42,5 +43,5 @@ class ReconResult(BaseModel):
     run_id = Column(String(36), ForeignKey("recon_runs.id"), nullable=False)
     result_type = Column(String(50), nullable=False)
     summary = Column(Text, nullable=True)
-    mismatch_count = Column(String(20), nullable=True)
+    mismatch_count = Column(Integer, nullable=True)
     details_ref = Column(String(500), nullable=True)

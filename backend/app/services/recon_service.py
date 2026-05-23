@@ -62,7 +62,7 @@ async def run_row_count_recon(
                 "difference": diff,
                 "status": "passed" if passed else "failed",
             }),
-            mismatch_count=str(diff),
+            mismatch_count=diff,
         )
         db.add(result)
 

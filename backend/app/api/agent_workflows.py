@@ -1,6 +1,6 @@
 """Agent workflow API — start and monitor BMAD planning workflows."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -9,10 +9,14 @@ from app.auth.jwt import get_current_user_id
 from app.auth.dependencies import get_current_organization_id
 from app.services.project_service import ensure_project_access
 from app.services.workflow_service import (
+    get_workflow_run,
     get_workflow_status,
+    list_workflow_runs,
     start_bmad_planning_workflow,
+    update_workflow_run_status,
 )
 from app.models.project import MigrationRequirement
+from app.api.audit import write_audit
 
 
 class StartWorkflowRequest(BaseModel):
@@ -85,13 +89,34 @@ async def get_workflow(
 def approve_step(
     workflow_id: str,
     data: ApprovalRequest,
+    request: Request,
+    org_id: str = Depends(get_current_organization_id),
     user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
     """Record a human approval decision for a workflow step."""
+    run = get_workflow_run(db, workflow_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    new_status = "approved" if data.decision == "approved" else "rejected"
+    update_workflow_run_status(db, workflow_id, new_status)
+
+    write_audit(
+        db,
+        org_id=org_id,
+        actor_id=user_id,
+        action=f"workflow_{new_status}",
+        entity_type="workflow_run",
+        entity_id=workflow_id,
+        meta={"decision": data.decision, "notes": data.notes},
+        request=request,
+    )
+
     return {
         "workflow_id": workflow_id,
         "decision": data.decision,
-        "status": "recorded",
+        "status": new_status,
     }
 
 
@@ -102,8 +127,18 @@ def list_workflows(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """List workflow runs for a project. (Placeholder until Prompt 10.)"""
+    """List workflow runs for a project."""
     ensure_project_access(db, org_id, project_id)
-    # TODO: Query workflow_runs table once Prompt 10 is implemented.
-    return []
-    return {"project_id": project_id, "workflows": []}
+    runs = list_workflow_runs(db, organization_id=org_id, project_id=project_id)
+    return [
+        {
+            "workflow_id": r.workflow_id,
+            "run_id": r.run_id,
+            "status": r.status,
+            "mode": r.mode,
+            "project_id": r.project_id,
+            "requirement_id": r.requirement_id,
+            "created_at": str(r.created_at) if r.created_at else None,
+        }
+        for r in runs
+    ]

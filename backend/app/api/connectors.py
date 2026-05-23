@@ -1,6 +1,6 @@
 """Connector API — test, discover, manage connections."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -15,12 +15,15 @@ from app.services.connector_service import (
     get_row_count,
     list_connector_registry,
 )
-from app.services.auth_service import get_current_user
+from app.services.project_service import ensure_project_access
+from app.api.audit import write_audit
+from app.rate_limiting import limiter
 
 router = APIRouter(tags=["connectors"])
 
 
 class TestConnectionRequest(BaseModel):
+    project_id: str
     connector_type: str
     config: dict
 
@@ -32,9 +35,29 @@ class DiscoveryRequest(BaseModel):
     table_name: str = ""
 
 
+def _safe_config(config: dict) -> dict:
+    """Strip password from config before storing in audit log."""
+    return {k: v for k, v in config.items() if k not in ("password", "secret", "token", "api_key")}
+
+
 @router.post("/connectors/test")
-async def api_test_connection(data: TestConnectionRequest, user_id: str = Depends(get_current_user_id)):
+@limiter.limit("20/minute")
+async def api_test_connection(
+    request: Request,
+    data: TestConnectionRequest,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, org_id, data.project_id)
     result = await test_connection(data.connector_type, data.config)
+    write_audit(
+        db, org_id, user_id,
+        "connector_tested",
+        "connector", data.connector_type,
+        meta={"success": result.success, "connector_type": data.connector_type, "config": _safe_config(data.config)},
+        request=request,
+    )
     return {"success": result.success, "message": result.message}
 
 

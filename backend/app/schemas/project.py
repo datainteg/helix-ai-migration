@@ -6,6 +6,7 @@ class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = None
     risk_level: str = "unknown"
+    migration_type: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):
@@ -15,6 +16,7 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     status: str
     risk_level: str
+    migration_type: Optional[str] = None
     owner_id: str
 
     model_config = {"from_attributes": True}
@@ -81,14 +83,14 @@ class SchemaResponse(BaseModel):
 
 class TableCreate(BaseModel):
     name: str
-    row_count: Optional[str] = None
+    row_count: Optional[int] = None
 
 
 class TableResponse(BaseModel):
     id: str
     schema_id: str
     name: str
-    row_count: Optional[str] = None
+    row_count: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -96,5 +98,5 @@ class TableResponse(BaseModel):
 class ColumnCreate(BaseModel):
     name: str
     data_type: str
-    nullable: str = "YES"
-    ordinal_position: Optional[str] = None
+    nullable: bool = True
+    ordinal_position: Optional[int] = None

@@ -5,17 +5,24 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+interface SecurityFinding {
+  severity: string;
+  description: string;
+  location?: string;
+}
+
 interface ReviewResult {
-  id: string;
   summary: string;
-  inputs_detected: string[];
-  outputs_detected: string[];
-  dependencies: string[];
-  transformations_detected: string[];
-  risks: { title: string; severity: string; impact: string; mitigation: string }[];
-  quality_score: number;
-  migration_suggestions: string[];
-  validation_requirements: string[];
+  quality_findings: string[];
+  anti_patterns: string[];
+  formatting_issues: string[];
+  security_findings: SecurityFinding[];
+  performance_issues: string[];
+  maintainability_risks: string[];
+  hardcoded_secrets_detected: boolean;
+  assumptions: string[];
+  limitations: string[];
+  confidence_score?: number;
 }
 
 interface Artifact {
@@ -106,70 +113,80 @@ export default function CodeReviewPage() {
 
       {review && (
         <div className="space-y-4">
-          {/* Summary + Score */}
+          {/* Summary + Confidence */}
           <div className="rounded-xl border bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold">AI Review Summary</h3>
-              <span className={`text-sm font-bold px-3 py-1 rounded ${review.quality_score >= 0.8 ? "bg-green-100 text-green-700" : review.quality_score >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                Score: {(review.quality_score * 100).toFixed(0)}%
-              </span>
+              {review.confidence_score != null && (
+                <span className={`text-sm font-bold px-3 py-1 rounded ${review.confidence_score >= 0.8 ? "bg-green-100 text-green-700" : review.confidence_score >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                  Confidence: {(review.confidence_score * 100).toFixed(0)}%
+                </span>
+              )}
+              {review.hardcoded_secrets_detected && (
+                <span className="text-xs font-bold px-3 py-1 rounded bg-red-100 text-red-700">⚠ Secrets Detected</span>
+              )}
             </div>
             <p className="text-sm text-gray-700">{review.summary}</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Inputs & Outputs */}
+            {/* Quality Findings */}
             <div className="rounded-xl border bg-white p-6 shadow-sm">
-              <h3 className="font-semibold text-sm mb-2">Detected I/O</h3>
-              <div className="space-y-2 text-xs">
-                <div><span className="text-gray-500">Inputs:</span> {review.inputs_detected?.join(", ") || "None"}</div>
-                <div><span className="text-gray-500">Outputs:</span> {review.outputs_detected?.join(", ") || "None"}</div>
-                <div><span className="text-gray-500">Dependencies:</span> {review.dependencies?.join(", ") || "None"}</div>
-                <div><span className="text-gray-500">Transformations:</span> {review.transformations_detected?.join(", ") || "None"}</div>
-              </div>
+              <h3 className="font-semibold text-sm mb-2">Quality Findings</h3>
+              <ul className="space-y-1 text-xs text-gray-700">
+                {review.quality_findings?.length ? review.quality_findings.map((f, i) => <li key={i}>• {f}</li>) : <li className="text-gray-400">None</li>}
+              </ul>
+              {review.anti_patterns?.length > 0 && (
+                <>
+                  <h4 className="font-medium text-xs mt-3 mb-1 text-gray-600">Anti-patterns</h4>
+                  <ul className="space-y-1 text-xs text-gray-700">
+                    {review.anti_patterns.map((f, i) => <li key={i}>• {f}</li>)}
+                  </ul>
+                </>
+              )}
             </div>
 
-            {/* Migration Suggestions */}
+            {/* Performance & Maintainability */}
             <div className="rounded-xl border bg-white p-6 shadow-sm">
-              <h3 className="font-semibold text-sm mb-2">Migration Suggestions</h3>
-              <ul className="space-y-1 text-xs">
-                {review.migration_suggestions?.map((s, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-helix-600">→</span>
-                    <span className="text-gray-700">{s}</span>
-                  </li>
-                ))}
+              <h3 className="font-semibold text-sm mb-2">Performance & Maintainability</h3>
+              <ul className="space-y-1 text-xs text-gray-700">
+                {[...( review.performance_issues || []), ...(review.maintainability_risks || [])].length
+                  ? [...(review.performance_issues || []), ...(review.maintainability_risks || [])].map((f, i) => <li key={i}>• {f}</li>)
+                  : <li className="text-gray-400">None detected</li>}
               </ul>
             </div>
 
-            {/* Risks */}
+            {/* Security Findings */}
             <div className="rounded-xl border bg-white p-6 shadow-sm md:col-span-2">
-              <h3 className="font-semibold text-sm mb-2">Risks Detected</h3>
-              <div className="space-y-2">
-                {review.risks?.map((r, i) => (
-                  <div key={i} className="rounded-lg border px-3 py-2 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${severityColor(r.severity)}`}>{r.severity}</span>
-                      <span className="font-medium">{r.title}</span>
+              <h3 className="font-semibold text-sm mb-2">Security Findings</h3>
+              {review.security_findings?.length ? (
+                <div className="space-y-2">
+                  {review.security_findings.map((f, i) => (
+                    <div key={i} className="rounded-lg border px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${severityColor(f.severity)}`}>{f.severity}</span>
+                        <span className="text-gray-700">{f.description}</span>
+                      </div>
+                      {f.location && <p className="mt-1 text-xs text-gray-400">Location: {f.location}</p>}
                     </div>
-                    <p className="mt-1 text-xs text-gray-600">{r.impact}</p>
-                    <p className="text-xs text-green-700 mt-0.5">Mitigation: {r.mitigation}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : <p className="text-xs text-gray-400">No security findings</p>}
             </div>
 
-            {/* Validation Requirements */}
+            {/* Assumptions & Limitations */}
             <div className="rounded-xl border bg-white p-6 shadow-sm md:col-span-2">
-              <h3 className="font-semibold text-sm mb-2">Validation Requirements</h3>
-              <ul className="space-y-1 text-xs">
-                {review.validation_requirements?.map((v, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-helix-600">✓</span>
-                    <span className="text-gray-700">{v}</span>
-                  </li>
-                ))}
-              </ul>
+              <h3 className="font-semibold text-sm mb-2">Assumptions & Limitations</h3>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <p className="text-gray-500 font-medium mb-1">Assumptions</p>
+                  <ul className="space-y-1 text-gray-700">{review.assumptions?.map((a, i) => <li key={i}>• {a}</li>)}</ul>
+                </div>
+                <div>
+                  <p className="text-gray-500 font-medium mb-1">Limitations</p>
+                  <ul className="space-y-1 text-gray-700">{review.limitations?.map((l, i) => <li key={i}>• {l}</li>)}</ul>
+                </div>
+              </div>
             </div>
           </div>
         </div>

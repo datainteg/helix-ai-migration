@@ -1,9 +1,23 @@
 # Helix Migration — Final Project Audit: Prompts 1–21
 
-> **Date:** May 23, 2026  
-> **Tests:** 58 passed, 2 skipped, 0 failures  
-> **Commits:** 14 commits covering all 21 prompts  
+> **Date:** May 23, 2026
+> **Tests:** 58 passed, 2 skipped, 0 failures
+> **Commits:** 14 commits covering all 21 prompts
 > **Status:** ✅ MVP Foundation Complete
+
+> ## 🔁 2026-05-23 Reconciliation Note
+>
+> This document is a **prompt-driven implementation audit** — it records what files were created for which prompts, not whether each capability is end-to-end working. A subsequent full line-by-line review found several "✅"-marked items here are stub or partial in practice:
+>
+> - **Prompt 18 (Validation & Reconciliation):** API endpoints return hardcoded data; frontend pages render fixtures. Real `recon_service.run_row_count_recon` exists but is not wired.
+> - **Prompt 15 (BMAD Workflow):** Wired and returns structured output, but the 4 nodes don't actually call an LLM — outputs are hardcoded strings inside the node functions.
+> - **Prompt 17 (Code Review):** Backend `/artifacts/{id}/review` returns `CodeReviewOutput`; frontend code-review page expects fields (`inputs_detected`, `quality_score`, `migration_suggestions`) that schema does not contain — UI renders empty.
+> - **Prompt 20 (Docker E2E):** Worker `Dockerfile` is missing `pip install -r requirements.txt`. Container fails to import `temporalio`.
+> - **Prompt 19 (System Health):** `/system/health` reports `"unknown"` for Redis, Temporal, Worker — no actual probes.
+> - **Prompt 9 (Workflow API):** `/agent-workflows/{id}/approve` returns success without persisting the decision.
+> - **Connector framework:** 3 of 8 connectors are functional (Postgres, CSV, Excel). MySQL, SQL Server, Snowflake, S3 are skeletons.
+>
+> See **[FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md)** for the full prioritized engineering plan that closes these gaps. See **[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)** for the deeper architectural assessment. The body of this document is preserved as historical record of what was built for which prompt.
 
 ---
 

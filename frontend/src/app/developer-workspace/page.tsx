@@ -21,6 +21,7 @@ export default function DeveloperWorkspacePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -29,9 +30,10 @@ export default function DeveloperWorkspacePage() {
     if (!token) { setLoading(false); return; }
     fetch(`${API}/api/v1/projects`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.ok ? r.json() : [])
-      .then((projects: { id: string; name: string }[]) => {
-        if (projects.length > 0 && !selectedProject) {
-          setSelectedProject(projects[0].id);
+      .then((data: { id: string; name: string }[]) => {
+        setProjects(data);
+        if (data.length > 0 && !selectedProject) {
+          setSelectedProject(data[0].id);
         }
       });
     setLoading(false);
@@ -113,6 +115,9 @@ export default function DeveloperWorkspacePage() {
               className="w-full rounded-lg border px-3 py-2 text-sm"
             >
               <option value="">Select a project...</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
             </select>
           </div>
           <div className="flex-1">

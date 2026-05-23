@@ -14,6 +14,8 @@
 
 Helix Migration is an open-source, self-hosted enterprise migration command center. It combines a Next.js frontend, FastAPI backend, PostgreSQL metadata store, Redis, Temporal OSS, agent runtime, validation and reconciliation engine, connector framework, and LLM router.
 
+> **Reality note (2026-05-23):** This document describes the **target** architecture. Several layers are partial or stubbed in the current codebase: BMAD nodes don't yet call LLMs, validation/reconciliation API endpoints return hardcoded fixtures, the worker Docker image fails to build, and 4 of 8 connectors are skeletons. See [README.md → Honest Capability Matrix](README.md#honest-capability-matrix) for the implemented-vs-aspirational breakdown and [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) for the prioritized engineering plan.
+
 ## High-Level Architecture
 
 ```text

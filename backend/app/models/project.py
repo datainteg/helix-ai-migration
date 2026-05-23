@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, Text
+from sqlalchemy import Column, String, ForeignKey, Text, Integer, Boolean
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -12,6 +12,7 @@ class Project(BaseModel):
     description = Column(Text, nullable=True)
     status = Column(String(50), default="draft", nullable=False)
     risk_level = Column(String(20), default="unknown")
+    migration_type = Column(String(50), nullable=True)
     owner_id = Column(String(36), nullable=False)
 
     organization = relationship("Organization", back_populates="projects")
@@ -88,7 +89,7 @@ class TableMetadata(BaseModel):
 
     schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
     name = Column(String(255), nullable=False)
-    row_count = Column(String(20), nullable=True)
+    row_count = Column(Integer, nullable=True)
 
     schema = relationship("SchemaMetadata", back_populates="tables")
     columns = relationship("ColumnMetadata", back_populates="table", cascade="all, delete-orphan")
@@ -100,7 +101,7 @@ class ColumnMetadata(BaseModel):
     table_id = Column(String(36), ForeignKey("tables.id"), nullable=False)
     name = Column(String(255), nullable=False)
     data_type = Column(String(100), nullable=False)
-    nullable = Column(String(10), default="YES")
-    ordinal_position = Column(String(10), nullable=True)
+    nullable = Column(Boolean, default=True)
+    ordinal_position = Column(Integer, nullable=True)
 
     table = relationship("TableMetadata", back_populates="columns")
