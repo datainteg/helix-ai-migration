@@ -48,9 +48,14 @@ OFFICIAL_BMAD_AGENT_REFERENCES: dict[str, BMADAgentReference] = {
 
 def _configured_bmad_root() -> Path | None:
     root = os.getenv("BMAD_METHOD_ROOT")
-    if not root:
-        return None
-    return Path(root).expanduser().resolve()
+    if root:
+        return Path(root).expanduser().resolve()
+
+    vendored_root = Path(__file__).resolve().parent / "BMAD-METHOD"
+    if vendored_root.is_dir():
+        return vendored_root
+
+    return None
 
 
 def _read_skill_description(skill_path: Path) -> str | None:
