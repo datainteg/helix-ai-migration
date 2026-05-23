@@ -16,6 +16,9 @@ class BMADAgentReference:
     customize_path: str
     description: str
     source: str = "official_reference"
+    bmad_root: str | None = None
+    resolved_skill_path: str | None = None
+    resolved_customize_path: str | None = None
 
 
 # BMAD Method ships named agents as skills, not importable Python classes.
@@ -86,6 +89,9 @@ def load_official_bmad_agent(agent_key: str, bmad_root: Path | None = None) -> B
         title=agent_config.get("title", reference.title),
         description=description,
         source="official_bmad_skill",
+        bmad_root=str(root),
+        resolved_skill_path=str(skill_path),
+        resolved_customize_path=str(customize_path),
     )
 
 

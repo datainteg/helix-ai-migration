@@ -13,12 +13,20 @@ def test_bmad_agent_metadata_uses_official_named_agents():
     assert analyst["command"] == "bmad-analyst"
     assert analyst["skill_id"] == "bmad-agent-analyst"
     assert analyst["skill_path"] == "src/bmm-skills/1-analysis/bmad-agent-analyst/SKILL.md"
+    assert analyst["source"] == "official_bmad_skill"
+    assert Path(analyst["resolved_skill_path"]).is_file()
+    assert Path(analyst["resolved_customize_path"]).is_file()
+    assert Path(analyst["bmad_root"]).name == "BMAD-METHOD"
 
     assert architect["name"] == "Winston"
     assert architect["title"] == "System Architect"
     assert architect["command"] == "bmad-architect"
     assert architect["skill_id"] == "bmad-agent-architect"
     assert architect["skill_path"] == "src/bmm-skills/3-solutioning/bmad-agent-architect/SKILL.md"
+    assert architect["source"] == "official_bmad_skill"
+    assert Path(architect["resolved_skill_path"]).is_file()
+    assert Path(architect["resolved_customize_path"]).is_file()
+    assert Path(architect["bmad_root"]).name == "BMAD-METHOD"
 
 
 def test_bmad_agent_metadata_can_load_official_skill_files(tmp_path: Path):
