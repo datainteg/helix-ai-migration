@@ -12,6 +12,7 @@ class AuditLog(BaseModel):
     event_metadata = Column("metadata", Text, nullable=True)
     ip_address = Column(String(50), nullable=True)
     user_agent = Column(String(255), nullable=True)
+    entry_hash = Column(String(64), nullable=True)
 
 
 class SystemHealthCheck(BaseModel):

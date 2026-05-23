@@ -1,6 +1,9 @@
 """Agent workflow API — start and monitor BMAD planning workflows."""
 
+import asyncio
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -118,6 +121,96 @@ def approve_step(
         "decision": data.decision,
         "status": new_status,
     }
+
+
+@router.get("/agent-workflows/{workflow_id}/stream")
+async def stream_workflow_progress(
+    workflow_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """SSE stream of workflow step events. Client connects once; server pushes updates."""
+
+    async def event_generator():
+        last_step_count = 0
+        for _ in range(120):  # max 2 min polling at 1s intervals
+            status = await get_workflow_status(workflow_id, db=db)
+            steps = status.get("steps", [])
+            if len(steps) > last_step_count:
+                for step in steps[last_step_count:]:
+                    data = json.dumps({"type": "step", "step": step})
+                    yield f"data: {data}\n\n"
+                last_step_count = len(steps)
+
+            run_status = status.get("status", "")
+            if run_status in ("completed", "approved", "rejected", "failed"):
+                data = json.dumps({"type": "done", "status": run_status})
+                yield f"data: {data}\n\n"
+                return
+
+            await asyncio.sleep(1)
+        yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/agent-workflows/{workflow_id}/signal-approve")
+async def signal_approve(
+    workflow_id: str,
+    data: ApprovalRequest,
+    request: Request,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Send 'approve' signal to a waiting Temporal per-node workflow."""
+    import os
+    from temporalio.client import Client
+
+    try:
+        client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal("approve", data.notes)
+        update_workflow_run_status(db, workflow_id, "approved")
+        write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_approved",
+                    entity_type="workflow_run", entity_id=workflow_id,
+                    meta={"notes": data.notes}, request=request)
+        return {"workflow_id": workflow_id, "signal": "approve", "status": "sent"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
+
+
+@router.post("/agent-workflows/{workflow_id}/signal-reject")
+async def signal_reject(
+    workflow_id: str,
+    data: ApprovalRequest,
+    request: Request,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Send 'reject' signal to a waiting Temporal per-node workflow."""
+    import os
+    from temporalio.client import Client
+
+    try:
+        client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal("reject", data.notes)
+        update_workflow_run_status(db, workflow_id, "rejected")
+        write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_rejected",
+                    entity_type="workflow_run", entity_id=workflow_id,
+                    meta={"notes": data.notes}, request=request)
+        return {"workflow_id": workflow_id, "signal": "reject", "status": "sent"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
 
 
 @router.get("/projects/{project_id}/agent-workflows")

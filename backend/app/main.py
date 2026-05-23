@@ -20,6 +20,7 @@ from app.api.validation import router as validation_router
 from app.api.audit import router as audit_router
 from app.api.system import router as system_router
 from app.api.connectors import router as connectors_router
+from app.api.encryption import router as encryption_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -34,6 +35,21 @@ if settings.SENTRY_DSN:
         integrations=[FastApiIntegration(), SqlalchemyIntegration()],
         traces_sample_rate=0.2,
     )
+
+# OpenTelemetry setup
+if settings.OTEL_ENDPOINT:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+    resource = Resource.create({"service.name": settings.APP_NAME, "deployment.environment": settings.APP_ENV})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.OTEL_ENDPOINT)))
+    trace.set_tracer_provider(provider)
+    SQLAlchemyInstrumentor().instrument()
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -67,6 +83,23 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# Prometheus metrics at /metrics
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        should_group_status_codes=True,
+        should_ignore_untemplated=True,
+        should_respect_env_var=False,
+        excluded_handlers=["/metrics", "/docs", "/openapi.json"],
+    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    pass
+
+# OpenTelemetry FastAPI instrumentation (must be after app creation)
+if settings.OTEL_ENDPOINT:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    FastAPIInstrumentor.instrument_app(app)
+
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(llm_router, prefix="/api/v1")
@@ -80,6 +113,7 @@ app.include_router(validation_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(connectors_router, prefix="/api/v1")
+app.include_router(encryption_router, prefix="/api/v1")
 
 
 @app.get("/")
