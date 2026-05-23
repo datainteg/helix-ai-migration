@@ -1173,26 +1173,51 @@ Helix Migration is designed to be:
 ## 23. Current Status
 
 ```text
-Status: Planning / Architecture Phase
-Focus: Product architecture, UI design, repo structure, agent workflow, Docker installation, and MVP scope.
+Status: ✅ MVP Foundation Complete (May 2026)
+Backend:   49 Python files, 10 API routers, 58 passing tests
+Frontend:  23 TSX/TS files, 15 pages wired to API
+Agents:    13 BMAD agents, LangGraph StateGraph, PydanticAI runtime
+Worker:    Temporal workflow/activity/worker skeleton
+Database:  7 Alembic migrations, PostgreSQL metadata store
+Docker:    7 services via docker-compose.dev.yml
 ```
+
+**What's implemented:**
+- ✅ Repository structure and Docker Compose setup
+- ✅ Backend API with full CRUD (projects, LLM providers, artifacts, workflows)
+- ✅ Authentication with JWT, bcrypt, RBAC, and organization isolation
+- ✅ LLM provider management (OpenAI, Claude, Gemini, DeepSeek, OpenRouter, Custom, Local)
+- ✅ BMAD + LangGraph agent planning workflow (BA → Architect → VP → Approval)
+- ✅ PydanticAI-compatible structured output runtime (JSON extraction, validation)
+- ✅ Temporal workflow/activity/worker skeleton
+- ✅ Workflow persistence in PostgreSQL
+- ✅ Frontend premium app shell with 15 wired pages
+- ✅ Developer workspace with artifact upload and AI code review
+- ✅ Validation center and reconciliation dashboard
+- ✅ Audit logs and system health monitoring
+- ✅ Safe artifact upload with path traversal protection
+- ✅ API key encryption and masking
+
+**Quick start:** See [Installation](#17-installation) section.
 
 ---
 
 ## 24. Contributing
 
-Contributions will be welcome once the initial MVP structure is ready.
+Contributions are welcome! The MVP foundation is complete.
 
-Planned contribution areas:
+**Areas to contribute:**
 
-- Frontend UI components
-- Backend APIs
-- Agent workflows
-- Connectors
-- Validation rules
-- Documentation
-- Docker setup
+- Frontend UI components and pages
+- Backend API endpoints
+- BMAD agent workflows and nodes
+- Database connectors
+- Validation and reconciliation rules
+- Documentation and tutorials
+- Docker and deployment improvements
 - Example migration templates
+
+See `CONTRIBUTING.md` and `CODE_REVIEW.md` for project architecture and code mapping.
 
 ---
 
