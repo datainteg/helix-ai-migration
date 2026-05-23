@@ -30,19 +30,39 @@ def create_artifact_metadata(db: Session, org_id: str, project_id: str, filename
     return ArtifactResponse.model_validate(artifact)
 
 
-def list_artifacts(db: Session, project_id: str) -> list[ArtifactResponse]:
-    artifacts = db.query(CodeArtifact).filter(CodeArtifact.project_id == project_id).all()
+def list_artifacts(db: Session, org_id: str, project_id: str) -> list[ArtifactResponse]:
+    artifacts = db.query(CodeArtifact).filter(
+        CodeArtifact.organization_id == org_id,
+        CodeArtifact.project_id == project_id,
+    ).all()
     return [ArtifactResponse.model_validate(a) for a in artifacts]
 
 
-def get_artifact(db: Session, artifact_id: str) -> ArtifactResponse:
-    artifact = db.query(CodeArtifact).filter(CodeArtifact.id == artifact_id).first()
+def get_artifact(db: Session, org_id: str, artifact_id: str) -> ArtifactResponse:
+    artifact = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id,
+        CodeArtifact.organization_id == org_id,
+    ).first()
     if not artifact:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Artifact not found")
     return ArtifactResponse.model_validate(artifact)
 
 
-def list_versions(db: Session, artifact_id: str) -> list[ArtifactVersionResponse]:
-    versions = db.query(CodeArtifactVersion).filter(CodeArtifactVersion.artifact_id == artifact_id).order_by(CodeArtifactVersion.version_number.desc()).all()
+def list_versions(db: Session, org_id: str, artifact_id: str) -> list[ArtifactVersionResponse]:
+    artifact = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id,
+        CodeArtifact.organization_id == org_id,
+    ).first()
+    if not artifact:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    versions = (
+        db.query(CodeArtifactVersion)
+        .join(CodeArtifact, CodeArtifactVersion.artifact_id == CodeArtifact.id)
+        .filter(CodeArtifactVersion.artifact_id == artifact_id, CodeArtifact.organization_id == org_id)
+        .order_by(CodeArtifactVersion.version_number.desc())
+        .all()
+    )
     return [ArtifactVersionResponse.model_validate(v) for v in versions]

@@ -2,14 +2,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import require_admin
 from app.models.observability import SystemHealthCheck
 
 router = APIRouter(tags=["system"])
 
 
 @router.get("/system/health")
-def system_health(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def system_health(user_id: str = Depends(require_admin), db: Session = Depends(get_db)):
     checks = []
 
     # Database
@@ -38,10 +38,10 @@ def system_health(user_id: str = Depends(get_current_user_id), db: Session = Dep
 
 
 @router.get("/system/workers")
-def worker_status(user_id: str = Depends(get_current_user_id)):
+def worker_status(user_id: str = Depends(require_admin)):
     return {"workers": [], "status": "no workers connected"}
 
 
 @router.get("/system/failed-jobs")
-def failed_jobs(user_id: str = Depends(get_current_user_id)):
+def failed_jobs(user_id: str = Depends(require_admin)):
     return {"failed_jobs": []}

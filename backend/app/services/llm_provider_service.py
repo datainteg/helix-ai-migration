@@ -44,15 +44,15 @@ def list_providers(db: Session, org_id: str) -> list[LLMProviderResponse]:
     return [_to_response(p) for p in providers]
 
 
-def get_provider(db: Session, provider_id: str) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+def get_provider(db: Session, org_id: str, provider_id: str) -> LLMProviderResponse:
+    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     return _to_response(provider)
 
 
-def update_provider(db: Session, provider_id: str, data: LLMProviderUpdate) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+def update_provider(db: Session, org_id: str, provider_id: str, data: LLMProviderUpdate) -> LLMProviderResponse:
+    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -62,8 +62,8 @@ def update_provider(db: Session, provider_id: str, data: LLMProviderUpdate) -> L
     return _to_response(provider)
 
 
-def rotate_key(db: Session, provider_id: str, new_api_key: str) -> LLMProviderResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+def rotate_key(db: Session, org_id: str, provider_id: str, new_api_key: str) -> LLMProviderResponse:
+    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
@@ -82,8 +82,8 @@ def rotate_key(db: Session, provider_id: str, new_api_key: str) -> LLMProviderRe
     return _to_response(provider)
 
 
-async def test_connection(db: Session, provider_id: str) -> TestConnectionResponse:
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+async def test_connection(db: Session, org_id: str, provider_id: str) -> TestConnectionResponse:
+    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
@@ -135,8 +135,8 @@ def _default_base_url(provider_type: str) -> str | None:
     return mapping.get(provider_type)
 
 
-def delete_provider(db: Session, provider_id: str):
-    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id).first()
+def delete_provider(db: Session, org_id: str, provider_id: str):
+    provider = db.query(LLMProvider).filter(LLMProvider.id == provider_id, LLMProvider.organization_id == org_id).first()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     db.delete(provider)
@@ -144,6 +144,9 @@ def delete_provider(db: Session, provider_id: str):
 
 
 def create_agent_mapping(db: Session, org_id: str, data: AgentMappingCreate) -> AgentMappingResponse:
+    provider = db.query(LLMProvider).filter(LLMProvider.id == data.provider_id, LLMProvider.organization_id == org_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
     mapping = LLMAgentMapping(
         organization_id=org_id,
         agent_type=data.agent_type,

@@ -44,7 +44,7 @@ def test_llm_flow_uses_mocked_provider_connection(client, monkeypatch):
 
     connection_calls = []
 
-    async def mock_connection_success(db, provider_id: str):
+    async def mock_connection_success(db, org_id: str, provider_id: str):
         connection_calls.append(provider_id)
         return LLMTestConnectionResponse(success=True, message="mocked provider reachable")
 
@@ -57,7 +57,7 @@ def test_llm_flow_uses_mocked_provider_connection(client, monkeypatch):
     assert data["message"] == "mocked provider reachable"
     assert connection_calls == [provider_id]
 
-    async def mock_connection_failure(db, provider_id: str):
+    async def mock_connection_failure(db, org_id: str, provider_id: str):
         return LLMTestConnectionResponse(success=False, message="mocked authentication failed")
 
     monkeypatch.setattr(llm_providers_api, "test_connection", mock_connection_failure)

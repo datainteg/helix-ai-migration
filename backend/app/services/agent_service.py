@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models.agents import AgentTask, AgentOutput, AgentDefinition, PromptTemplate, PromptVersion
+from app.models.project import Project
 from app.schemas.agents import (
     AgentTaskCreate, AgentTaskResponse,
     AgentOutputCreate, AgentOutputResponse,
@@ -12,7 +13,14 @@ from app.schemas.agents import (
 
 # ── Agent Tasks ──
 
-def create_task(db: Session, project_id: str, data: AgentTaskCreate) -> AgentTaskResponse:
+def _ensure_project_access(db: Session, org_id: str, project_id: str) -> None:
+    project = db.query(Project).filter(Project.id == project_id, Project.organization_id == org_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+def create_task(db: Session, org_id: str, project_id: str, data: AgentTaskCreate) -> AgentTaskResponse:
+    _ensure_project_access(db, org_id, project_id)
     task = AgentTask(project_id=project_id, agent_type=data.agent_type, input_payload=data.input_payload)
     db.add(task)
     db.commit()
@@ -20,14 +28,27 @@ def create_task(db: Session, project_id: str, data: AgentTaskCreate) -> AgentTas
     return AgentTaskResponse.model_validate(task)
 
 
-def get_task(db: Session, task_id: str) -> AgentTaskResponse:
-    task = db.query(AgentTask).filter(AgentTask.id == task_id).first()
+def get_task(db: Session, org_id: str, task_id: str) -> AgentTaskResponse:
+    task = (
+        db.query(AgentTask)
+        .join(Project, AgentTask.project_id == Project.id)
+        .filter(AgentTask.id == task_id, Project.organization_id == org_id)
+        .first()
+    )
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return AgentTaskResponse.model_validate(task)
 
 
-def add_output(db: Session, task_id: str, data: AgentOutputCreate) -> AgentOutputResponse:
+def add_output(db: Session, org_id: str, task_id: str, data: AgentOutputCreate) -> AgentOutputResponse:
+    task = (
+        db.query(AgentTask)
+        .join(Project, AgentTask.project_id == Project.id)
+        .filter(AgentTask.id == task_id, Project.organization_id == org_id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     output = AgentOutput(task_id=task_id, schema_name=data.schema_name, output_payload=data.output_payload, confidence_score=data.confidence_score)
     db.add(output)
     db.commit()
@@ -35,7 +56,15 @@ def add_output(db: Session, task_id: str, data: AgentOutputCreate) -> AgentOutpu
     return AgentOutputResponse.model_validate(output)
 
 
-def get_outputs(db: Session, task_id: str) -> list[AgentOutputResponse]:
+def get_outputs(db: Session, org_id: str, task_id: str) -> list[AgentOutputResponse]:
+    task = (
+        db.query(AgentTask)
+        .join(Project, AgentTask.project_id == Project.id)
+        .filter(AgentTask.id == task_id, Project.organization_id == org_id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     outputs = db.query(AgentOutput).filter(AgentOutput.task_id == task_id).all()
     return [AgentOutputResponse.model_validate(o) for o in outputs]
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import get_current_organization_id
 from app.schemas.agents import (
     AgentTaskCreate, AgentTaskResponse,
     AgentOutputCreate, AgentOutputResponse,
@@ -18,23 +19,23 @@ router = APIRouter(tags=["agents"])
 
 
 @router.post("/projects/{project_id}/agent-tasks", response_model=AgentTaskResponse, status_code=201)
-def api_create_task(project_id: str, data: AgentTaskCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return create_task(db, project_id, data)
+def api_create_task(project_id: str, data: AgentTaskCreate, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    return create_task(db, org_id, project_id, data)
 
 
 @router.get("/agent-tasks/{task_id}", response_model=AgentTaskResponse)
-def api_get_task(task_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return get_task(db, task_id)
+def api_get_task(task_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    return get_task(db, org_id, task_id)
 
 
 @router.post("/agent-tasks/{task_id}/outputs", response_model=AgentOutputResponse, status_code=201)
-def api_add_output(task_id: str, data: AgentOutputCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return add_output(db, task_id, data)
+def api_add_output(task_id: str, data: AgentOutputCreate, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    return add_output(db, org_id, task_id, data)
 
 
 @router.get("/agent-tasks/{task_id}/outputs", response_model=list[AgentOutputResponse])
-def api_get_outputs(task_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return get_outputs(db, task_id)
+def api_get_outputs(task_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    return get_outputs(db, org_id, task_id)
 
 
 @router.post("/prompt-templates", response_model=PromptTemplateResponse, status_code=201)

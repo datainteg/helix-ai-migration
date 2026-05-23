@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import require_permission
 from app.models.observability import AuditLog, SystemHealthCheck
 from app.core.config import settings
 
@@ -22,7 +23,7 @@ def write_audit(db: Session, org_id: str, actor_id: str, action: str, entity_typ
 
 
 @router.get("/audit-logs")
-def list_audit_logs(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def list_audit_logs(user_id: str = Depends(require_permission("admin:audit:read")), db: Session = Depends(get_db)):
     from app.services.auth_service import get_current_user
     user = get_current_user(db, user_id)
     org_id = user.memberships[0].organization_id
