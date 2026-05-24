@@ -48,7 +48,7 @@ export default function SettingsPage() {
     <AppShell
       eyebrow="Account"
       title="Settings"
-      description="Preferences are stored locally in this browser. Cross-device sync arrives once profile sync ships."
+      description="Appearance tweaks save to this browser instantly and sync to your account in the background."
       crumbs={[{ label: "Settings" }]}
     >
       <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8 max-w-[1100px]">

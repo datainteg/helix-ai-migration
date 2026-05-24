@@ -185,8 +185,8 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
 
           {/* Footer note */}
           <p className="text-[10.5px] text-ink-4 leading-relaxed pt-2 border-t border-hx">
-            Tweaks save to this browser via local storage. To sync across devices, save
-            them in your profile from <a href="/settings" className="underline">Settings</a>.
+            Saved locally and (if signed in) synced to your account.
+            Manage from <a href="/settings" className="underline">Settings</a>.
           </p>
         </div>
       </aside>

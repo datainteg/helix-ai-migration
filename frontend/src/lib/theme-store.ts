@@ -35,6 +35,18 @@ export interface TweaksState {
   setPrimaryColor: (hex: string) => void;
   setSurfaceTint: (t: "warm" | "neutral" | "cool") => void;
   reset: () => void;
+
+  /** Replace tweak fields from a server snapshot (skips unknown keys). */
+  hydrateFromServer: (prefs: Partial<TweaksState>) => void;
+}
+
+/** Serializable subset that round-trips to the backend. */
+export interface TweaksSnapshot {
+  theme: ThemeMode;
+  density: Density;
+  fontSizePx: number;
+  primaryColor: string;
+  surfaceTint: "warm" | "neutral" | "cool";
 }
 
 const DEFAULTS = {
@@ -67,10 +79,30 @@ export const useTweaks = create<TweaksState>()(
       setPrimaryColor: (primaryColor) => set({ primaryColor }),
       setSurfaceTint: (surfaceTint) => set({ surfaceTint }),
       reset: () => set({ ...DEFAULTS }),
+      hydrateFromServer: (prefs) => {
+        const next: Partial<TweaksState> = {};
+        if (prefs.theme && ["light", "dark", "auto"].includes(prefs.theme)) next.theme = prefs.theme;
+        if (prefs.density && ["compact", "regular", "comfy"].includes(prefs.density)) next.density = prefs.density;
+        if (typeof prefs.fontSizePx === "number") next.fontSizePx = prefs.fontSizePx;
+        if (typeof prefs.primaryColor === "string") next.primaryColor = prefs.primaryColor;
+        if (prefs.surfaceTint && ["warm", "neutral", "cool"].includes(prefs.surfaceTint)) next.surfaceTint = prefs.surfaceTint;
+        if (Object.keys(next).length) set(next);
+      },
     }),
     { name: "helix-tweaks", version: 1 },
   ),
 );
+
+/** Pull the serializable tweak fields out of full state (omits setters). */
+export function snapshotTweaks(state: TweaksState): TweaksSnapshot {
+  return {
+    theme: state.theme,
+    density: state.density,
+    fontSizePx: state.fontSizePx,
+    primaryColor: state.primaryColor,
+    surfaceTint: state.surfaceTint,
+  };
+}
 
 /** Resolve `theme: "auto"` to the OS preference. */
 function resolveTheme(theme: ThemeMode): "light" | "dark" {

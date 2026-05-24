@@ -19,8 +19,14 @@ class UserResponse(BaseModel):
     is_super_admin: bool
     last_login_at: Optional[datetime] = None
     created_at: datetime
+    preferences: Optional[dict] = None
 
     model_config = {"from_attributes": True}
+
+
+class UserPreferencesUpdate(BaseModel):
+    """Partial update of user UI preferences. Keys are merged into existing prefs."""
+    preferences: dict
 
 
 class UserLogin(BaseModel):

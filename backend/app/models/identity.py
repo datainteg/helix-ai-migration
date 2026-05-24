@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, func
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, JSON, Table, func
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -26,6 +26,7 @@ class User(BaseModel):
     status = Column(String(50), default="active", nullable=False)
     is_super_admin = Column(Boolean, default=False, nullable=False)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
+    preferences = Column(JSON, nullable=True)
 
     memberships = relationship("OrganizationMember", back_populates="user")
 
