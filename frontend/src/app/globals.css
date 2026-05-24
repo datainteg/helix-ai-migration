@@ -1,59 +1,189 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Light theme tokens ────────────────────────────────────────
+   Two parallel scales:
+     1. Legacy `--hx-*` tokens (kept for backward compat with existing pages)
+     2. New `--con-*` "console" tokens (drive the redesign)
+   Both coexist on the same page; pages migrate page-by-page.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* legacy */
+  --hx-bg:        #FAFAF7;
+  --hx-bg-2:      #F4F3EF;
+  --hx-surface:   #FFFFFF;
+  --hx-ink:       #0A0A0A;
+  --hx-ink-2:     #2E2E2E;
+  --hx-ink-3:     #585854;
+  --hx-ink-4:     #8C8C86;
+  --hx-border:    rgba(10,10,10,0.07);
+  --hx-border-2:  rgba(10,10,10,0.12);
+  --hx-accent:    #4F46E5;
+  --hx-accent-ink:#312E81;
+  --hx-accent-soft:#EEF0FF;
+  --hx-violet:    #8B5CF6;
+  --hx-cyan:      #06B6D4;
+  --hx-ok:        #15803D;
+  --hx-warn:      #B45309;
+  --hx-err:       #B91C1C;
+
+  /* console redesign tokens */
+  --con-bg:        #FAFAF7;
+  --con-bg-2:      #F4F3EF;
+  --con-surface:   #FFFFFF;
+  --con-surface-hi:#FCFCFA;
+  --con-ink-1:     #0A0A0A;
+  --con-ink-2:     #2E2E2E;
+  --con-ink-3:     #585854;
+  --con-ink-4:     #8C8C86;
+  --con-ink-5:     #B8B8B0;
+  --con-line:      rgba(10,10,10,0.07);
+  --con-line-2:    rgba(10,10,10,0.12);
+  --con-line-3:    rgba(10,10,10,0.18);
+  --con-brand:     #4F46E5;
+  --con-brand-soft:#EEF0FF;
+  --con-ok:        #15803D;
+  --con-ok-soft:   #DCFCE7;
+  --con-warn:      #B45309;
+  --con-warn-soft: #FEF3C7;
+  --con-err:       #B91C1C;
+  --con-err-soft:  #FEE2E2;
+  --con-info:      #1D4ED8;
+  --con-info-soft: #DBEAFE;
+
+  /* User-tweakable knobs the TweaksPanel overrides at runtime. */
+  --tweak-font-size: 13.5px;
+  --tweak-density:   1;   /* multiplier for vertical padding (compact=0.8, regular=1, comfy=1.2) */
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --hx-bg:        #09090B;
+  --hx-bg-2:      #18181B;
+  --hx-surface:   #18181B;
+  --hx-ink:       #FAFAFA;
+  --hx-ink-2:     #E4E4E7;
+  --hx-ink-3:     #A1A1AA;
+  --hx-ink-4:     #71717A;
+  --hx-border:    rgba(250,250,250,0.08);
+  --hx-border-2:  rgba(250,250,250,0.14);
+
+  --con-bg:        #0A0A0B;
+  --con-bg-2:      #1F1F23;
+  --con-surface:   #161618;
+  --con-surface-hi:#1F1F23;
+  --con-ink-1:     #FAFAFA;
+  --con-ink-2:     #E4E4E7;
+  --con-ink-3:     #A1A1AA;
+  --con-ink-4:     #71717A;
+  --con-ink-5:     #52525B;
+  --con-line:      rgba(250,250,250,0.08);
+  --con-line-2:    rgba(250,250,250,0.14);
+  --con-line-3:    rgba(250,250,250,0.20);
+  --con-brand-soft:rgba(79,70,229,0.18);
+  --con-ok-soft:   rgba(21,128,61,0.16);
+  --con-warn-soft: rgba(180,83,9,0.18);
+  --con-err-soft:  rgba(185,28,28,0.18);
+  --con-info-soft: rgba(29,78,216,0.18);
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: system-ui, -apple-system, sans-serif;
+html, body {
+  background: var(--con-bg);
+  color: var(--con-ink-1);
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: var(--tweak-font-size);
+  line-height: 1.5;
 }
 
-/* Mobile-responsive utilities */
+* { box-sizing: border-box; }
+
 @layer utilities {
-  /* Stack grid cols on mobile */
-  .responsive-grid {
-    @apply grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3;
+  /* Type */
+  .font-mono { font-family: "Geist Mono", ui-monospace, monospace; font-feature-settings: "ss01", "ss02"; }
+  .tabular  { font-variant-numeric: tabular-nums; }
+  .eyebrow {
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--con-ink-4);
+    font-family: "Geist Mono", ui-monospace, monospace;
   }
 
-  /* Full-width table wrapper with horizontal scroll on mobile */
-  .table-scroll {
-    @apply w-full overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0;
-  }
+  /* Surface colors (legacy + new aliases — same class names so unchanged
+     pages keep working with no edits.) */
+  .text-ink    { color: var(--con-ink-1); }
+  .text-ink-2  { color: var(--con-ink-2); }
+  .text-ink-3  { color: var(--con-ink-3); }
+  .text-ink-4  { color: var(--con-ink-4); }
+  .text-ink-5  { color: var(--con-ink-5); }
+  .bg-surface     { background: var(--con-surface); }
+  .bg-surface-hi  { background: var(--con-surface-hi); }
+  .bg-app         { background: var(--con-bg); }
+  .bg-app-2       { background: var(--con-bg-2); }
+  .border-hx      { border-color: var(--con-line); }
+  .border-hx-2    { border-color: var(--con-line-2); }
+  .border-hx-3    { border-color: var(--con-line-3); }
 
-  /* Card padding: tighter on mobile */
+  /* Status colors */
+  .text-ok   { color: var(--con-ok); }
+  .text-warn { color: var(--con-warn); }
+  .text-err  { color: var(--con-err); }
+  .text-info { color: var(--con-info); }
+  .bg-ok-soft   { background: var(--con-ok-soft); }
+  .bg-warn-soft { background: var(--con-warn-soft); }
+  .bg-err-soft  { background: var(--con-err-soft); }
+  .bg-info-soft { background: var(--con-info-soft); }
+
+  /* Layout primitives */
+  .page-container { @apply max-w-[1440px] mx-auto px-8 space-y-4; }
   .card {
-    @apply rounded-xl border bg-white dark:bg-gray-900 dark:border-gray-800 p-4 sm:p-6 shadow-sm;
+    background: var(--con-surface);
+    border: 1px solid var(--con-line);
+    border-radius: 10px;
+    box-shadow: 0 1px 0 rgba(10,10,10,0.04);
   }
+  .focus-ring {
+    @apply focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
+    outline-color: var(--con-brand);
+  }
+  .table-scroll { @apply w-full overflow-x-auto; }
 
-  /* Page container: constrained width, responsive padding */
-  .page-container {
-    @apply max-w-6xl mx-auto px-4 sm:px-6 space-y-6;
+  /* Legacy preserved — referenced by the marketing landing page. */
+  .hx-grid-bg {
+    background-image:
+      linear-gradient(rgba(10,10,10,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(10,10,10,0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
   }
-
-  /* Hide on mobile, show on sm+ */
-  .desktop-only {
-    @apply hidden sm:block;
-  }
-
-  /* Show on mobile only */
-  .mobile-only {
-    @apply block sm:hidden;
-  }
+  .responsive-grid { @apply grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3; }
 }
 
-/* Nav collapse on mobile: wrap links */
-@media (max-width: 640px) {
-  nav a:not(:first-child):not(:last-child) {
-    display: none;
-  }
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(10,10,10,0.10);
+  border-radius: 999px;
+  border: 2px solid var(--con-bg);
 }
+::-webkit-scrollbar-thumb:hover { background: rgba(10,10,10,0.20); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(250,250,250,0.10); }
+
+/* Animations */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+@keyframes feed-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.feed-in { animation: feed-in 240ms ease-out both; }

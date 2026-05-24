@@ -2,6 +2,10 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useCallback, useState } from "react";
+import { Plus, Check, X, BrainCircuit } from "lucide-react";
+import { AdminShell } from "@/components/layout";
+import { LLMIcon } from "@/components/icons";
+import { Card, Button, Chip, StatusBadge, ErrorBanner, LoadingState, EmptyState } from "@/components/ui";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -40,7 +44,7 @@ export default function LLMSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
   const [error, setError] = useState("");
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -52,20 +56,20 @@ export default function LLMSettingsPage() {
       if (res.ok) setProviders(await res.json());
     } catch { /* ignore */ }
     setLoading(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => {
     fetchProviders();
     fetch(`${API_BASE}/api/v1/llm-providers/catalogue`, { headers: authHeader })
-      .then((r) => r.ok ? r.json() : [])
+      .then((r) => (r.ok ? r.json() : []))
       .then((entries: CatalogueEntry[]) => {
         const map: Record<string, CatalogueEntry> = {};
         entries.forEach((e) => { map[e.provider_type] = e; });
         setCatalogue(map);
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchProviders]);
 
   const handleProviderTypeChange = (ptype: string) => {
@@ -94,7 +98,7 @@ export default function LLMSettingsPage() {
       setShowAdd(false);
       setForm(EMPTY_FORM);
       fetchProviders();
-    } catch (err: unknown) {
+    } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add provider");
     }
   };
@@ -108,143 +112,169 @@ export default function LLMSettingsPage() {
       });
       if (!res.ok) throw new Error("Connection test failed");
       const result: { success: boolean; message: string } = await res.json();
-      setTestResult(result);
+      setTestResult({ id, ...result });
     } catch {
-      setTestResult({ success: false, message: "Connection test failed" });
+      setTestResult({ id, success: false, message: "Connection test failed" });
     }
   };
 
   const availableModels = catalogue[form.provider_type]?.models ?? [];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">LLM Provider Settings</h1>
-        <button
-          onClick={() => { setShowAdd(!showAdd); setError(""); }}
-          className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700"
-        >
+    <AdminShell
+      title="LLM Providers"
+      subtitle="Configure and manage AI providers, models, and routing for your migration agents."
+      actions={
+        <Button onClick={() => { setShowAdd((v) => !v); setError(""); }}>
+          {showAdd ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {showAdd ? "Cancel" : "Add Provider"}
-        </button>
-      </div>
-
-      {error && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-2 text-sm text-red-700 dark:text-red-400">
-          {error}
-        </div>
-      )}
+        </Button>
+      }
+    >
+      {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
       {testResult && (
-        <div className={`rounded-lg px-4 py-2 text-sm border ${testResult.success ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400"}`}>
-          {testResult.success ? "✓" : "✗"} {testResult.message}
+        <div
+          className={`rounded-[10px] px-4 py-3 text-[13px] border ${
+            testResult.success
+              ? "bg-[var(--con-ok-soft)] border-hx text-ok"
+              : "bg-[var(--con-err-soft)] border-hx text-err"
+          }`}
+        >
+          {testResult.success ? <Check className="inline h-4 w-4 -mt-0.5 mr-1.5" /> : <X className="inline h-4 w-4 -mt-0.5 mr-1.5" />}
+          {testResult.message}
         </div>
       )}
 
       {showAdd && (
-        <form onSubmit={addProvider} className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm space-y-4">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Add Provider</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Provider Type</label>
-              <select
-                value={form.provider_type}
-                onChange={(e) => handleProviderTypeChange(e.target.value)}
-                className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-              >
-                {Object.entries(PROVIDER_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-                placeholder="My Provider"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Base URL</label>
-              <input
-                value={form.base_url}
-                onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
-                className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-                placeholder="Auto-filled from provider type"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Default Model</label>
-              {availableModels.length > 0 ? (
+        <Card title="Add Provider" description="Configure a new LLM provider for agents to use.">
+          <form onSubmit={addProvider} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Provider type</label>
                 <select
-                  value={form.default_model}
-                  onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
-                  className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-                  required
+                  value={form.provider_type}
+                  onChange={(e) => handleProviderTypeChange(e.target.value)}
+                  className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] focus-ring"
                 >
-                  {availableModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                  {Object.entries(PROVIDER_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
                 </select>
-              ) : (
+              </div>
+              <div>
+                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Display name</label>
                 <input
-                  value={form.default_model}
-                  onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
-                  className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-                  placeholder="Enter model name"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
+                  placeholder="e.g. OpenAI Prod"
                   required
                 />
+              </div>
+              <div>
+                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Base URL</label>
+                <input
+                  value={form.base_url}
+                  onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+                  className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
+                  placeholder="Auto-filled from provider type"
+                />
+              </div>
+              <div>
+                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Default model</label>
+                {availableModels.length > 0 ? (
+                  <select
+                    value={form.default_model}
+                    onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
+                    className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] font-mono focus-ring"
+                    required
+                  >
+                    {availableModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    value={form.default_model}
+                    onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
+                    className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
+                    placeholder="Enter model name"
+                    required
+                  />
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">API key</label>
+              <input
+                type="password"
+                value={form.api_key}
+                onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
+                className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
+                placeholder={form.provider_type === "anthropic" ? "sk-ant-…" : "sk-…"}
+                required
+              />
+              {form.provider_type === "deepseek" && (
+                <p className="mt-1.5 text-[11.5px] text-ink-3">
+                  Get your API key at <span className="font-mono">platform.deepseek.com</span>.
+                </p>
               )}
             </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">API Key</label>
-            <input
-              type="password"
-              value={form.api_key}
-              onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
-              className="w-full rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-              placeholder={form.provider_type === "anthropic" ? "sk-ant-..." : "sk-..."}
-              required
-            />
-            {form.provider_type === "deepseek" && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Get your API key at <span className="font-mono">platform.deepseek.com</span>. Supports deepseek-chat (V3), deepseek-reasoner (R1), and deepseek-coder.
-              </p>
-            )}
-          </div>
-          <button type="submit" className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700">
-            Save Provider
-          </button>
-        </form>
+            <div className="flex justify-end gap-2.5">
+              <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button type="submit" variant="primary">Save Provider</Button>
+            </div>
+          </form>
+        </Card>
       )}
 
       {loading ? (
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading providers...</div>
+        <LoadingState label="Loading providers…" />
       ) : providers.length === 0 ? (
-        <div className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-12 shadow-sm text-center text-gray-500 dark:text-gray-400">
-          No providers configured. Add your first LLM provider above.
-        </div>
+        <EmptyState
+          icon={<BrainCircuit className="h-5 w-5" />}
+          title="No providers configured"
+          description="Add your first LLM provider to start routing agent traffic."
+          action={<Button onClick={() => setShowAdd(true)}><Plus className="h-4 w-4" /> Add Provider</Button>}
+        />
       ) : (
-        <div className="space-y-3">
-          {providers.map((p) => (
-            <div key={p.id} className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="font-medium text-sm text-gray-900 dark:text-gray-100">{p.name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {PROVIDER_LABELS[p.provider_type] || p.provider_type} • {p.default_model} • Key: {p.api_key_masked}
-                  {p.base_url && <span className="ml-1 text-gray-400 dark:text-gray-500">• {p.base_url}</span>}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs px-2 py-1 rounded-full ${p.status === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
-                  {p.status}
-                </span>
-                <button onClick={() => testConnection(p.id)} className="text-xs text-helix-600 hover:underline">
-                  Test
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <Card bodyClassName="p-0">
+          <table className="w-full text-[13px] border-t border-hx">
+            <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Provider</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Default Model</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Base URL</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">API Key</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Status</th>
+                <th className="px-4 py-2.5 text-right font-medium border-b border-hx"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((p) => (
+                <tr key={p.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <LLMIcon provider={p.provider_type} size={20} />
+                      <div>
+                        <p className="font-medium text-ink">{p.name}</p>
+                        <p className="text-[11.5px] text-ink-3">{PROVIDER_LABELS[p.provider_type] || p.provider_type}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink-2">{p.default_model}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink-3 truncate max-w-[200px]">{p.base_url || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink-3">{p.api_key_masked}</td>
+                  <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => testConnection(p.id)} className="text-[12.5px] text-[var(--con-brand)] hover:underline">
+                      Test connection
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
-    </div>
+    </AdminShell>
   );
 }

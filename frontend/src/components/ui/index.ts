@@ -1,5 +1,18 @@
-export { Card } from "./Card";
+// UI barrel — keeps existing import paths working
 export { Button } from "./Button";
-export { LoadingState } from "./LoadingState";
+export { Card, CardSection } from "./Card";
+export { Chip } from "./Chip";
+export type { ChipTone } from "./Chip";
+export { StatusBadge } from "./StatusBadge";
+export { MetricCard, MetricCell } from "./MetricCard";
+export { Sparkline } from "./Sparkline";
+export { AreaChart } from "./AreaChart";
+export { Donut } from "./Donut";
+export { Avatar, AvatarGroup } from "./Avatar";
+export { ProgressBar } from "./ProgressBar";
+export { Table, THead, TBody, TR, TH, TD } from "./Table";
 export { EmptyState } from "./EmptyState";
+export { LoadingState } from "./LoadingState";
 export { ErrorBanner } from "./ErrorBanner";
+export { Tabs } from "./Tabs";
+export { Kbd } from "./Kbd";

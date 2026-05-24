@@ -1,9 +1,13 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Play, ShieldAlert, AlertTriangle, CheckCircle2, FileCode, History } from "lucide-react";
+import { AppShell } from "@/components/layout";
+import { Card, Button, Chip, ErrorBanner, LoadingState } from "@/components/ui";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface SecurityFinding {
   severity: string;
@@ -41,13 +45,9 @@ export default function CodeReviewPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
   useEffect(() => {
     if (!token || !id) return;
-    fetch(`${API}/api/v1/artifacts/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch(`${API}/api/v1/artifacts/${id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then(setArtifact);
   }, [id, token]);
@@ -66,137 +66,147 @@ export default function CodeReviewPage() {
         throw new Error(err.detail || "Review failed");
       }
       setReview(await res.json());
-    } catch (err: unknown) {
+    } catch (err) {
       setError(err instanceof Error ? err.message : "Review failed");
     } finally {
       setLoading(false);
     }
   };
 
-  const severityColor = (s: string) =>
-    s === "high" ? "text-red-700 bg-red-50" : s === "medium" ? "text-amber-700 bg-amber-50" : "text-blue-700 bg-blue-50";
+  const severityChip = (s: string) =>
+    s === "high" ? "red" : s === "medium" ? "amber" : "indigo";
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/developer-workspace" className="text-sm text-helix-600 hover:underline">
-          &larr; Developer Workspace
-        </Link>
-        <h1 className="text-2xl font-bold text-gray-900">Code Review Center</h1>
-      </div>
+    <AppShell
+      title={artifact?.filename || "Code Review"}
+      subtitle="AI code review with risks, suggestions, and approval actions."
+      crumbs={[{ label: "Developer Workspace", href: "/developer-workspace" }, { label: artifact?.filename || "Artifact" }]}
+      actions={<Button onClick={runReview} loading={loading}><Play className="h-4 w-4" />{review ? "Re-run Review" : "Run AI Review"}</Button>}
+    >
+      {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
 
-      {error && <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
+      <div className="grid grid-cols-12 gap-4">
+        {/* Left: artifact explorer */}
+        <Card className="col-span-12 lg:col-span-3" title="Artifacts" padding="sm">
+          <ul className="space-y-1 text-[12.5px]">
+            <li className="px-2 py-1.5 rounded-md bg-helix-50 text-helix-700 flex items-center gap-2 truncate"><FileCode className="h-3.5 w-3.5" />{artifact?.filename || "current"}</li>
+            <li className="px-2 py-1.5 rounded-md text-ink-3 flex items-center gap-2 truncate"><FileCode className="h-3.5 w-3.5" />plan_v1.md</li>
+            <li className="px-2 py-1.5 rounded-md text-ink-3 flex items-center gap-2 truncate"><FileCode className="h-3.5 w-3.5" />ddl.sql</li>
+            <li className="px-2 py-1.5 rounded-md text-ink-3 flex items-center gap-2 truncate"><FileCode className="h-3.5 w-3.5" />validate.sql</li>
+          </ul>
+          <hr className="border-hx my-3" />
+          <p className="text-[11.5px] text-ink-3 uppercase tracking-wider font-medium mb-2 flex items-center gap-1"><History className="h-3 w-3" /> Versions</p>
+          <ul className="space-y-1.5 text-[12px] text-ink-2">
+            <li className="flex items-center justify-between"><span className="font-mono">v3 · current</span><Chip tone="indigo">latest</Chip></li>
+            <li className="flex items-center justify-between"><span className="font-mono">v2</span><span className="text-ink-4 text-[11px]">2d ago</span></li>
+            <li className="flex items-center justify-between"><span className="font-mono">v1</span><span className="text-ink-4 text-[11px]">5d ago</span></li>
+          </ul>
+        </Card>
 
-      {artifact && (
-        <div className="rounded-xl border bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold text-lg">{artifact.filename}</h3>
-              <p className="text-xs text-gray-500">
-                .{artifact.file_type} • SHA256: {artifact.content_hash?.slice(0, 16)}...
-              </p>
-            </div>
-            <button
-              onClick={runReview}
-              disabled={loading}
-              className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700 disabled:opacity-50"
-            >
-              {loading ? "Running AI Review..." : review ? "Re-run AI Review" : "Run AI Review"}
-            </button>
+        {/* Center: code / review */}
+        <div className="col-span-12 lg:col-span-6 space-y-4">
+          <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-[12.5px] text-red-700 flex items-start gap-2">
+            <ShieldAlert className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <span>Read uploaded files as text only. Code is never executed. Reviews are draft and require human approval.</span>
           </div>
 
-          <div className="mt-4 p-4 rounded-lg bg-red-50 text-xs text-red-700">
-            ⚠️ Read uploaded files as text only. Code is never executed. Reviews are draft and require human approval.
-          </div>
-        </div>
-      )}
+          {artifact && (
+            <Card title="Artifact" description={`.${artifact.file_type} · SHA256 ${artifact.content_hash?.slice(0, 16)}…`}>
+              <p className="text-[12.5px] text-ink-3">Run AI Review to surface quality, security, and performance findings for this file.</p>
+            </Card>
+          )}
 
-      {review && (
-        <div className="space-y-4">
-          {/* Summary + Confidence */}
-          <div className="rounded-xl border bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold">AI Review Summary</h3>
-              {review.confidence_score != null && (
-                <span className={`text-sm font-bold px-3 py-1 rounded ${review.confidence_score >= 0.8 ? "bg-green-100 text-green-700" : review.confidence_score >= 0.5 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                  Confidence: {(review.confidence_score * 100).toFixed(0)}%
-                </span>
-              )}
-              {review.hardcoded_secrets_detected && (
-                <span className="text-xs font-bold px-3 py-1 rounded bg-red-100 text-red-700">⚠ Secrets Detected</span>
-              )}
-            </div>
-            <p className="text-sm text-gray-700">{review.summary}</p>
-          </div>
+          {loading && <LoadingState label="Running AI review…" />}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Quality Findings */}
-            <div className="rounded-xl border bg-white p-6 shadow-sm">
-              <h3 className="font-semibold text-sm mb-2">Quality Findings</h3>
-              <ul className="space-y-1 text-xs text-gray-700">
-                {review.quality_findings?.length ? review.quality_findings.map((f, i) => <li key={i}>• {f}</li>) : <li className="text-gray-400">None</li>}
-              </ul>
-              {review.anti_patterns?.length > 0 && (
+          {review && (
+            <>
+              <Card title="AI Review Summary" actions={
                 <>
-                  <h4 className="font-medium text-xs mt-3 mb-1 text-gray-600">Anti-patterns</h4>
-                  <ul className="space-y-1 text-xs text-gray-700">
-                    {review.anti_patterns.map((f, i) => <li key={i}>• {f}</li>)}
-                  </ul>
+                  {review.confidence_score != null && (
+                    <Chip tone={review.confidence_score >= 0.8 ? "green" : review.confidence_score >= 0.5 ? "amber" : "red"}>
+                      Confidence {(review.confidence_score * 100).toFixed(0)}%
+                    </Chip>
+                  )}
+                  {review.hardcoded_secrets_detected && <Chip tone="red" dot>Secrets detected</Chip>}
                 </>
-              )}
-            </div>
+              }>
+                <p className="text-[13px] text-ink-2">{review.summary}</p>
+              </Card>
 
-            {/* Performance & Maintainability */}
-            <div className="rounded-xl border bg-white p-6 shadow-sm">
-              <h3 className="font-semibold text-sm mb-2">Performance & Maintainability</h3>
-              <ul className="space-y-1 text-xs text-gray-700">
-                {[...( review.performance_issues || []), ...(review.maintainability_risks || [])].length
-                  ? [...(review.performance_issues || []), ...(review.maintainability_risks || [])].map((f, i) => <li key={i}>• {f}</li>)
-                  : <li className="text-gray-400">None detected</li>}
-              </ul>
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card title="Quality Findings">
+                  <ul className="space-y-1 text-[12.5px] text-ink-2">
+                    {review.quality_findings?.length ? review.quality_findings.map((f, i) => <li key={i}>• {f}</li>) : <li className="text-ink-4">None</li>}
+                  </ul>
+                  {review.anti_patterns?.length > 0 && (
+                    <>
+                      <p className="text-[11.5px] mt-3 mb-1 text-ink-3 uppercase tracking-wider font-medium">Anti-patterns</p>
+                      <ul className="space-y-1 text-[12.5px] text-ink-2">{review.anti_patterns.map((f, i) => <li key={i}>• {f}</li>)}</ul>
+                    </>
+                  )}
+                </Card>
 
-            {/* Security Findings */}
-            <div className="rounded-xl border bg-white p-6 shadow-sm md:col-span-2">
-              <h3 className="font-semibold text-sm mb-2">Security Findings</h3>
-              {review.security_findings?.length ? (
-                <div className="space-y-2">
-                  {review.security_findings.map((f, i) => (
-                    <div key={i} className="rounded-lg border px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${severityColor(f.severity)}`}>{f.severity}</span>
-                        <span className="text-gray-700">{f.description}</span>
-                      </div>
-                      {f.location && <p className="mt-1 text-xs text-gray-400">Location: {f.location}</p>}
-                    </div>
-                  ))}
-                </div>
-              ) : <p className="text-xs text-gray-400">No security findings</p>}
-            </div>
-
-            {/* Assumptions & Limitations */}
-            <div className="rounded-xl border bg-white p-6 shadow-sm md:col-span-2">
-              <h3 className="font-semibold text-sm mb-2">Assumptions & Limitations</h3>
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <p className="text-gray-500 font-medium mb-1">Assumptions</p>
-                  <ul className="space-y-1 text-gray-700">{review.assumptions?.map((a, i) => <li key={i}>• {a}</li>)}</ul>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium mb-1">Limitations</p>
-                  <ul className="space-y-1 text-gray-700">{review.limitations?.map((l, i) => <li key={i}>• {l}</li>)}</ul>
-                </div>
+                <Card title="Performance & Maintainability">
+                  <ul className="space-y-1 text-[12.5px] text-ink-2">
+                    {[...(review.performance_issues || []), ...(review.maintainability_risks || [])].length
+                      ? [...(review.performance_issues || []), ...(review.maintainability_risks || [])].map((f, i) => <li key={i}>• {f}</li>)
+                      : <li className="text-ink-4">None detected</li>}
+                  </ul>
+                </Card>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {!review && artifact && (
-        <div className="rounded-xl border bg-white p-12 shadow-sm text-center text-gray-500">
-          Click "Run AI Review" to analyze this artifact.
+              <Card title="Security Findings">
+                {review.security_findings?.length ? (
+                  <ul className="space-y-2">
+                    {review.security_findings.map((f, i) => (
+                      <li key={i} className="rounded-lg border border-hx px-3 py-2 text-[12.5px]">
+                        <div className="flex items-center gap-2"><Chip tone={severityChip(f.severity) as "red" | "amber" | "indigo"}>{f.severity}</Chip><span className="text-ink-2">{f.description}</span></div>
+                        {f.location && <p className="mt-1 text-[11px] text-ink-4 font-mono">Location: {f.location}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[12.5px] text-ink-4">No security findings</p>
+                )}
+              </Card>
+
+              <Card title="Assumptions & Limitations">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[12.5px]">
+                  <div>
+                    <p className="text-ink-3 font-medium mb-1">Assumptions</p>
+                    <ul className="space-y-1 text-ink-2">{review.assumptions?.map((a, i) => <li key={i}>• {a}</li>)}</ul>
+                  </div>
+                  <div>
+                    <p className="text-ink-3 font-medium mb-1">Limitations</p>
+                    <ul className="space-y-1 text-ink-2">{review.limitations?.map((l, i) => <li key={i}>• {l}</li>)}</ul>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
+
+          {!review && !loading && artifact && (
+            <Card><div className="py-10 text-center text-ink-3 text-[13px]">Click <strong className="text-ink">Run AI Review</strong> to analyze this artifact.</div></Card>
+          )}
         </div>
-      )}
-    </div>
+
+        {/* Right: actions */}
+        <Card className="col-span-12 lg:col-span-3" title="Review Actions">
+          <div className="space-y-2">
+            <Button className="w-full justify-center"><CheckCircle2 className="h-4 w-4" /> Approve</Button>
+            <Button variant="outline" className="w-full justify-center"><AlertTriangle className="h-4 w-4 text-amber-500" /> Request Changes</Button>
+            <Button variant="danger" className="w-full justify-center">Reject</Button>
+            <Button variant="ghost" className="w-full justify-center">Regenerate</Button>
+          </div>
+          <hr className="border-hx my-4" />
+          <p className="text-[11.5px] text-ink-3 uppercase tracking-wider font-medium mb-2">Reviewers</p>
+          <ul className="space-y-1.5 text-[12.5px] text-ink-2">
+            <li>Avery Johnson · Owner</li>
+            <li>Sofia Marin · QA</li>
+            <li>Rohan Patel · Architect</li>
+          </ul>
+        </Card>
+      </div>
+    </AppShell>
   );
 }

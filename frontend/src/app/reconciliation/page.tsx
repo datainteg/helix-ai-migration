@@ -1,92 +1,119 @@
 "use client";
 
-import { useAuth } from "@/lib/auth-context";
-import { useEffect, useState } from "react";
+import { Download, Play, AlertTriangle } from "lucide-react";
+import { AppShell } from "@/components/layout";
+import {
+  Card,
+  Button,
+  MetricCard,
+  Donut,
+  StatusBadge,
+  Chip,
+} from "@/components/ui";
+import { formatDate, formatTime, formatNumber } from "@/lib/utils";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-interface ReconSummary {
-  source_count: number;
-  target_count: number;
-  matched_count: number;
-  mismatched_count: number;
-  missing_count: number;
-  extra_count: number;
-  recon_score: number;
+interface ReconRun {
+  id: string;
+  table: string;
+  source: string;
+  target: string;
+  sourceCount: number;
+  targetCount: number;
+  mismatched: number;
+  score: number;
+  status: string;
+  startedAt: string;
 }
 
-const DEMO_RECON: ReconSummary = {
-  source_count: 10420,
-  target_count: 10398,
-  matched_count: 10350,
-  mismatched_count: 48,
-  missing_count: 22,
-  extra_count: 0,
-  recon_score: 0.994,
-};
-
 export default function ReconciliationPage() {
-  const { token } = useAuth();
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
-  const [selectedProject, setSelectedProject] = useState("");
-  const [recon] = useState<ReconSummary>(DEMO_RECON);
-
-  useEffect(() => {
-    if (!token) return;
-    fetch(`${API_BASE}/api/v1/projects`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.ok ? r.json() : [])
-      .then(setProjects);
-  }, [token]);
-
-  const pct = (n: number, total: number) => total ? ((n / total) * 100).toFixed(2) : "0";
+  // TODO: hydrate via API once recon endpoint is wired.
+  const reconRuns: ReconRun[] = [];
+  const mismatchCategories: { label: string; value: number; color: string }[] = [];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Reconciliation Dashboard</h1>
-
-      <div className="flex items-center gap-4">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Project:</label>
-        <select
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
-          className="rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm"
-        >
-          <option value="">Select a project...</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+    <AppShell
+      title="Reconciliation Center"
+      subtitle="Compare source and target outcomes with row-level reconciliation insights and anomaly analysis."
+      crumbs={[{ label: "Reconciliation" }]}
+      actions={
+        <>
+          <Button variant="outline"><Download className="h-4 w-4" /> Export Report</Button>
+          <Button><Play className="h-4 w-4" /> Run Reconciliation</Button>
+        </>
+      }
+    >
+      <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 mb-5 text-[12.5px] text-amber-800 flex items-start gap-2">
+        <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+        <span>
+          <strong>Metadata-only mode:</strong> row counts and aggregates are reconciled — source rows are not copied.
+          Enable full reconciliation per project for row-by-row matching.
+        </span>
       </div>
 
-      {selectedProject ? (
-        <div className="space-y-4">
-          <div className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm text-center">
-            <p className="text-sm text-gray-500 dark:text-gray-400">Reconciliation Score</p>
-            <p className={`text-4xl font-bold ${recon.recon_score >= 0.99 ? "text-green-600" : recon.recon_score >= 0.95 ? "text-amber-600" : "text-red-600"}`}>
-              {(recon.recon_score * 100).toFixed(1)}%
-            </p>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <MetricCard label="Reconciliation Score" value="0%" sparkColor="#10B981" />
+        <MetricCard label="Matched Records" value="0" sparkColor="#6366F1" />
+        <MetricCard label="Mismatched" value="0%" sparkColor="#F59E0B" />
+        <MetricCard label="Missing" value="0" sparkColor="#DC2626" />
+        <MetricCard label="Average Row Score" value="0%" sparkColor="#06B6D4" />
+      </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {[
-              { label: "Source Records", value: recon.source_count, color: "text-gray-700 dark:text-gray-200" },
-              { label: "Target Records", value: recon.target_count, color: "text-gray-700 dark:text-gray-200" },
-              { label: "Matched", value: recon.matched_count, color: "text-green-600", pct: pct(recon.matched_count, recon.source_count) },
-              { label: "Mismatched", value: recon.mismatched_count, color: recon.mismatched_count > 0 ? "text-red-600" : "text-green-600", pct: pct(recon.mismatched_count, recon.source_count) },
-              { label: "Missing (Source)", value: recon.missing_count, color: recon.missing_count > 0 ? "text-amber-600" : "text-green-600", pct: pct(recon.missing_count, recon.source_count) },
-              { label: "Extra (Target)", value: recon.extra_count, color: recon.extra_count > 0 ? "text-amber-600" : "text-green-600", pct: pct(recon.extra_count, recon.target_count) },
-            ].map((m) => (
-              <div key={m.label} className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
-                <p className="text-xs text-gray-500 dark:text-gray-400">{m.label}</p>
-                <p className={`text-2xl font-bold ${m.color}`}>{m.value.toLocaleString()}</p>
-                {"pct" in m && <p className="text-xs text-gray-400 dark:text-gray-500">{m.pct}%</p>}
-              </div>
-            ))}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
+        <Card className="lg:col-span-2" title="Reconciliation Trend" description="Mismatch counts over time">
+          <p className="text-[12.5px] text-ink-4 py-12 text-center">No trend data yet.</p>
+        </Card>
+
+        <Card title="Mismatch Categories" description="0 total mismatches">
+          {mismatchCategories.length > 0 ? (
+            <Donut data={mismatchCategories} size={200} thickness={28} centerLabel="0" centerSub="Mismatches" />
+          ) : (
+            <p className="text-[12.5px] text-ink-4 py-12 text-center">No mismatch data yet.</p>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <Card title="Top Anomalies" description="Highest impact mismatch sources">
+          <p className="text-[12.5px] text-ink-4 py-6 text-center">No anomalies yet.</p>
+        </Card>
+
+        <Card className="lg:col-span-2" title="Reconciliation Jobs" description="Run history across tables" padding="none">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="bg-zinc-50/70 text-[11.5px] uppercase tracking-wider text-ink-4">
+                <tr>
+                  <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Table</th>
+                  <th className="px-4 py-2.5 text-right font-medium border-b border-hx">Source</th>
+                  <th className="px-4 py-2.5 text-right font-medium border-b border-hx">Target</th>
+                  <th className="px-4 py-2.5 text-right font-medium border-b border-hx">Mismatches</th>
+                  <th className="px-4 py-2.5 text-right font-medium border-b border-hx">Score</th>
+                  <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Status</th>
+                  <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Started</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hx">
+                {reconRuns.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-[12.5px] text-ink-4">No reconciliation runs yet.</td>
+                  </tr>
+                ) : (
+                  reconRuns.map((r) => (
+                    <tr key={r.id} className="hover:bg-zinc-50/60">
+                      <td className="px-4 py-3 font-medium text-ink font-mono text-[12.5px]">{r.table}</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] text-ink-2">{formatNumber(r.sourceCount)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] text-ink-2">{formatNumber(r.targetCount)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] text-amber-700">{r.mismatched}</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] font-semibold text-emerald-700">{r.score.toFixed(2)}%</td>
+                      <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                      <td className="px-4 py-3 text-ink-3 text-[12px]">{formatDate(r.startedAt)} · {formatTime(r.startedAt)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        </div>
-      ) : (
-        <div className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-12 shadow-sm text-center text-gray-500 dark:text-gray-400">
-          Select a project to view reconciliation results.
-        </div>
-      )}
-    </div>
+        </Card>
+      </div>
+    </AppShell>
   );
 }

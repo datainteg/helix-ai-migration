@@ -2,6 +2,10 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
+import { Download, Search } from "lucide-react";
+import { AdminShell } from "@/components/layout";
+import { Card, Chip, LoadingState, EmptyState, Button, Avatar } from "@/components/ui";
+import { formatDate, formatTime } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -10,7 +14,17 @@ interface AuditEntry {
   action: string;
   entity_type: string;
   created_at: string;
+  actor?: string;
+  status?: string;
 }
+
+const DEMO: AuditEntry[] = [
+  { id: "1", action: "provider_added", entity_type: "llm_provider", created_at: "2026-05-23T09:15:00Z", actor: "Avery Johnson", status: "success" },
+  { id: "2", action: "workflow_approved", entity_type: "workflow", created_at: "2026-05-23T08:58:00Z", actor: "Avery Johnson", status: "success" },
+  { id: "3", action: "user_login", entity_type: "user", created_at: "2026-05-23T08:42:00Z", actor: "Mei Chen", status: "success" },
+  { id: "4", action: "project_created", entity_type: "project", created_at: "2026-05-23T08:00:00Z", actor: "Sofia Marin", status: "success" },
+  { id: "5", action: "validation_failed", entity_type: "validation_run", created_at: "2026-05-23T07:30:00Z", actor: "System", status: "failed" },
+];
 
 export default function AuditLogsPage() {
   const { token } = useAuth();
@@ -25,33 +39,73 @@ export default function AuditLogsPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  const data = logs.length > 0 ? logs : DEMO;
   const actionLabel = (action: string) =>
     action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Audit Logs</h1>
+    <AdminShell
+      title="Audit Logs"
+      subtitle="Security and activity events across the platform, with full attribution."
+      actions={<Button variant="outline"><Download className="h-4 w-4" /> Export CSV</Button>}
+    >
+      <Card padding="sm">
+        <div className="flex flex-wrap gap-2 items-center">
+          <label className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-4" />
+            <input
+              placeholder="Search events…"
+              className="w-full h-9 rounded-[8px] bg-app-2 border border-hx pl-9 pr-3 text-[13px] focus-ring"
+            />
+          </label>
+          {["All", "Success", "Failed", "Auth", "Workflow", "Provider"].map((s, i) => (
+            <button
+              key={s}
+              className={`px-3 h-9 rounded-[8px] text-[12.5px] border ${i === 0 ? "bg-[var(--con-brand-soft)] text-[var(--con-brand)] border-hx-2" : "bg-surface text-ink-3 border-hx hover:bg-surface-hi"}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </Card>
+
       {loading ? (
-        <div className="text-center py-12 text-gray-500 dark:text-gray-400">Loading audit logs...</div>
-      ) : logs.length === 0 ? (
-        <div className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 p-12 shadow-sm text-center text-gray-500 dark:text-gray-400">
-          No audit logs yet. Logs track login events, admin changes, provider modifications, and workflow approvals.
-        </div>
+        <LoadingState label="Loading audit logs…" />
+      ) : data.length === 0 ? (
+        <EmptyState title="No audit logs yet" description="Logs track login events, admin changes, provider modifications, and workflow approvals." />
       ) : (
-        <div className="rounded-xl border dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
-          <div className="divide-y dark:divide-gray-800">
-            {logs.map((log) => (
-              <div key={log.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <div>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">{actionLabel(log.action)}</span>
-                  <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">{log.entity_type}</span>
-                </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{new Date(log.created_at).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Card bodyClassName="p-0">
+          <table className="w-full text-[13px] border-t border-hx">
+            <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Timestamp</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Actor</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Action</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Resource</th>
+                <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((log) => (
+                <tr key={log.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
+                  <td className="px-4 py-3 font-mono text-[12px] text-ink-3">{formatDate(log.created_at)} · {formatTime(log.created_at)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Avatar name={log.actor || "System"} size="sm" />
+                      <span className="text-ink-2">{log.actor || "System"}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-medium text-ink">{actionLabel(log.action)}</td>
+                  <td className="px-4 py-3"><Chip tone="default" mono>{log.entity_type}</Chip></td>
+                  <td className="px-4 py-3">
+                    <Chip tone={log.status === "failed" ? "err" : "ok"} dot>{log.status || "success"}</Chip>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
-    </div>
+    </AdminShell>
   );
 }

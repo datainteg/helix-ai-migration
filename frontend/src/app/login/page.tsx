@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { HelixLogo } from "@/components/layout/HelixLogo";
+import { Button, ErrorBanner } from "@/components/ui";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -24,26 +27,85 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-16">
-      <div className="rounded-xl border bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-helix-700 mb-6">Login</h1>
-        {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" placeholder="admin@example.com" required />
+    <div className="min-h-screen grid lg:grid-cols-2 bg-app">
+      <div className="hidden lg:flex flex-col justify-between bg-indigo-cyan text-white p-12 relative overflow-hidden">
+        <div className="absolute inset-0 hx-grid-bg opacity-10 pointer-events-none" />
+        <Link href="/" className="relative z-10 inline-flex items-center gap-2.5 text-white">
+          <HelixLogo size={32} />
+          <span className="font-semibold text-[17px] tracking-tight">Helix Migration</span>
+        </Link>
+        <div className="relative z-10 max-w-md">
+          <p className="text-[13px] font-medium uppercase tracking-wider text-white/70">Open-source · Self-hosted</p>
+          <h1 className="mt-3 text-[34px] font-semibold tracking-tight leading-tight">
+            Sign in to your migration command center.
+          </h1>
+          <p className="mt-4 text-white/80 text-[14px] leading-relaxed">
+            Multi-agent workflows. Real-time validation & recon. Developer-grade audit trail.
+          </p>
+        </div>
+        <div className="relative z-10 text-[12px] text-white/70">© 2026 Helix Migration · Apache 2.0</div>
+      </div>
+
+      <div className="flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-sm">
+          <div className="lg:hidden mb-6">
+            <Link href="/" className="inline-flex items-center gap-2.5">
+              <HelixLogo size={28} />
+              <span className="font-semibold text-[16px] tracking-tight text-ink">Helix Migration</span>
+            </Link>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm" placeholder="••••••••" required />
-          </div>
-          <button type="submit" disabled={loading} className="w-full rounded-lg bg-helix-600 px-4 py-2 text-white font-medium hover:bg-helix-700 disabled:opacity-50">
-            {loading ? "Signing In..." : "Sign In"}
-          </button>
-        </form>
-        <p className="mt-4 text-xs text-gray-500 text-center">
-          <a href="/setup/first-admin" className="text-helix-600 hover:underline">First admin setup</a>
-        </p>
+
+          <h2 className="text-[24px] font-semibold tracking-tight text-ink">Welcome back</h2>
+          <p className="text-[13.5px] text-ink-3 mt-1">Sign in to continue to your migrations.</p>
+
+          {error && <div className="mt-5"><ErrorBanner message={error} onDismiss={() => setError("")} /></div>}
+
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="admin@example.com"
+                className="w-full h-10 rounded-lg border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="password" className="block text-[12.5px] font-medium text-ink-2">
+                  Password
+                </label>
+                <Link href="#" className="text-[12px] text-helix-600 hover:underline">
+                  Forgot?
+                </Link>
+              </div>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="••••••••"
+                className="w-full h-10 rounded-lg border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
+              />
+            </div>
+            <Button type="submit" loading={loading} className="w-full !h-11">
+              Sign In
+            </Button>
+          </form>
+
+          <p className="mt-6 text-[12.5px] text-ink-3 text-center">
+            New to Helix?{" "}
+            <Link href="/setup/first-admin" className="text-helix-600 hover:underline font-medium">
+              First-admin setup
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

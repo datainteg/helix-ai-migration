@@ -1,56 +1,99 @@
 "use client";
 
-export default function AgentWorkflowPage() {
-  const nodes = [
-    { id: "1", label: "Business Analyst", status: "completed", x: 100, y: 50 },
-    { id: "2", label: "Architect", status: "running", x: 300, y: 50 },
-    { id: "3", label: "Human Approval", status: "pending", x: 500, y: 50 },
-    { id: "4", label: "Data Engineer", status: "pending", x: 700, y: 50 },
-    { id: "5", label: "QA / Validation", status: "pending", x: 900, y: 50 },
-    { id: "6", label: "Recon", status: "pending", x: 1100, y: 50 },
-  ];
+import { useParams } from "next/navigation";
+import { Play, Save } from "lucide-react";
+import { ProjectShell } from "@/components/layout/ProjectShell";
+import { Card, Button, StatusBadge, Avatar, Chip } from "@/components/ui";
 
-  const statusColors: Record<string, string> = {
-    completed: "bg-green-100 border-green-400 text-green-800",
-    running: "bg-blue-100 border-blue-400 text-blue-800",
-    pending: "bg-gray-100 border-gray-300 text-gray-600",
-    failed: "bg-red-100 border-red-400 text-red-800",
-  };
+const FLOW = [
+  { id: "intake", label: "Requirement Intake", phase: "Input", color: "indigo" as const, status: "completed" },
+  { id: "ba", label: "BA Agent", phase: "Analysis", color: "indigo" as const, status: "completed" },
+  { id: "arch", label: "Architect Agent", phase: "Design", color: "violet" as const, status: "running" },
+  { id: "approval", label: "Human Approval", phase: "Gate", color: "amber" as const, status: "queued" },
+  { id: "de", label: "Data Engineer", phase: "Build", color: "cyan" as const, status: "pending" },
+  { id: "qa", label: "QA Agent", phase: "Validate", color: "green" as const, status: "pending" },
+  { id: "recon", label: "Recon Agent", phase: "Reconcile", color: "indigo" as const, status: "pending" },
+  { id: "devops", label: "DevOps Agent", phase: "Deploy", color: "violet" as const, status: "pending" },
+  { id: "final", label: "PM · Final", phase: "Sign-off", color: "default" as const, status: "pending" },
+];
 
+export default function ProjectAgentsPage() {
+  const { id } = useParams<{ id: string }>();
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Agent Workflow</h1>
-        <button className="rounded-lg bg-helix-600 px-4 py-2 text-sm font-medium text-white hover:bg-helix-700">
-          Start Workflow
-        </button>
-      </div>
-
-      <div className="rounded-xl border bg-white p-6 shadow-sm overflow-x-auto">
-        <p className="text-xs text-gray-400 mb-4">BMAD Migration Workflow — React Flow canvas placeholder</p>
-        <div className="flex gap-4 min-w-[1200px]">
-          {nodes.map((node, i) => (
-            <div key={node.id} className="flex items-center gap-2">
-              <div className={`rounded-lg border-2 px-4 py-3 text-sm font-medium min-w-[150px] text-center ${statusColors[node.status]}`}>
-                <div className="text-xs text-gray-400 mb-1">Step {i + 1}</div>
-                {node.label}
-                <div className="text-xs mt-1 capitalize">{node.status}</div>
+    <ProjectShell
+      projectId={String(id)}
+      projectName="Untitled project"
+      projectStatus="draft"
+      subtitle="Multi-agent workflow canvas with execution log and artifacts."
+      actions={<>
+        <Button variant="outline"><Save className="h-4 w-4" /> Save</Button>
+        <Button><Play className="h-4 w-4" /> Run Workflow</Button>
+      </>}
+    >
+      <div className="grid grid-cols-12 gap-4">
+        <Card className="col-span-12 lg:col-span-8" title="Workflow Canvas">
+          <div className="space-y-3">
+            {FLOW.map((n) => (
+              <div key={n.id} className="flex items-center gap-3">
+                <FlowNode {...n} />
               </div>
-              {i < nodes.length - 1 && <div className="text-gray-300 text-lg">→</div>}
+            ))}
+          </div>
+        </Card>
+        <div className="col-span-12 lg:col-span-4 space-y-4">
+          <Card title="Workflow Details">
+            <dl className="space-y-3 text-[13px]">
+              <div>
+                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Mode</dt>
+                <dd className="mt-0.5 text-ink-2">BMAD · Auto with gates</dd>
+              </div>
+              <div>
+                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Status</dt>
+                <dd className="mt-0.5"><StatusBadge status="running" /></dd>
+              </div>
+              <div>
+                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Approvers</dt>
+                <dd className="mt-1 flex -space-x-2"><Avatar name="Avery Johnson" /><Avatar name="Mei Chen" /><Avatar name="Sofia Marin" /></dd>
+              </div>
+            </dl>
+          </Card>
+          <Card title="Human Approval">
+            <p className="text-[12.5px] text-ink-3">Review the Architect Agent output before proceeding to execution agents.</p>
+            <div className="mt-3 flex flex-col gap-2">
+              <Button className="w-full justify-center">Approve</Button>
+              <Button variant="outline" className="w-full justify-center">Request changes</Button>
+              <Button variant="danger" className="w-full justify-center">Reject</Button>
             </div>
-          ))}
+          </Card>
+          <Card title="Output Artifacts">
+            <ul className="space-y-1.5 text-[12.5px]">
+              <li className="flex justify-between text-ink-2"><span>plan_v1.md</span><Chip tone="indigo">Plan</Chip></li>
+              <li className="flex justify-between text-ink-2"><span>ddl.sql</span><Chip tone="violet">DDL</Chip></li>
+              <li className="flex justify-between text-ink-2"><span>migrate.py</span><Chip tone="cyan">Code</Chip></li>
+            </ul>
+          </Card>
         </div>
       </div>
+    </ProjectShell>
+  );
+}
 
-      <div className="rounded-xl border bg-white p-6 shadow-sm">
-        <h3 className="font-semibold mb-3">Human Approval</h3>
-        <p className="text-sm text-gray-500 mb-4">Review the Architect Agent output before proceeding to execution agents.</p>
-        <div className="flex gap-3">
-          <button className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">Approve</button>
-          <button className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50">Reject</button>
-          <button className="rounded-lg border px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">Request Changes</button>
-        </div>
+function FlowNode({ label, phase, color, status }: { label: string; phase: string; color: "indigo" | "violet" | "cyan" | "amber" | "green" | "default"; status: string }) {
+  const palette: Record<typeof color, string> = {
+    indigo: "bg-helix-50 text-helix-800 border-helix-200",
+    violet: "bg-violet-50 text-violet-800 border-violet-200",
+    cyan: "bg-cyan-50 text-cyan-800 border-cyan-200",
+    amber: "bg-amber-50 text-amber-800 border-amber-200",
+    green: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    default: "bg-zinc-50 text-ink-2 border-hx",
+  };
+  return (
+    <div className={`rounded-xl border px-4 py-3 shadow-xs w-full flex items-center justify-between ${palette[color]}`}>
+      <div>
+        <div className="text-[11px] uppercase tracking-wider opacity-70 font-medium">{phase}</div>
+        <div className="text-[14px] font-semibold">{label}</div>
       </div>
+      <StatusBadge status={status} />
     </div>
   );
 }

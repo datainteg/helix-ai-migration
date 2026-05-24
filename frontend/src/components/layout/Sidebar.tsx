@@ -1,0 +1,193 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  FolderKanban,
+  Bot,
+  ShieldCheck,
+  GitCompareArrows,
+  TerminalSquare,
+  Plug,
+  FileText,
+  FolderUp,
+  LayoutTemplate,
+  Puzzle,
+  Settings,
+  Search,
+  ChevronDown,
+} from "lucide-react";
+import { HelixWordmark } from "./HelixLogo";
+import { Avatar } from "@/components/ui/Avatar";
+import { Kbd } from "@/components/ui/Kbd";
+import { cn } from "@/lib/utils";
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  count?: number;
+  live?: boolean;
+  shortcut?: string;
+};
+
+const PRIMARY: NavItem[] = [
+  { label: "Command Center",     href: "/dashboard",            icon: LayoutDashboard, shortcut: "1" },
+  { label: "Projects",           href: "/projects",             icon: FolderKanban,    shortcut: "2" },
+  { label: "Agents",             href: "/agents",               icon: Bot,             shortcut: "3", live: true },
+  { label: "Validation",         href: "/validation",           icon: ShieldCheck,     shortcut: "4" },
+  { label: "Reconciliation",     href: "/reconciliation",       icon: GitCompareArrows, shortcut: "5" },
+  { label: "Dev Workspace",      href: "/developer-workspace",  icon: TerminalSquare,  shortcut: "6" },
+];
+
+const RESOURCES: NavItem[] = [
+  { label: "Connectors",         href: "/connectors",   icon: Plug },
+  { label: "Files",              href: "/files",        icon: FolderUp },
+  { label: "Reports",            href: "/reports",      icon: FileText },
+  { label: "Templates",          href: "/templates",    icon: LayoutTemplate },
+  { label: "Plugins",            href: "/plugins",      icon: Puzzle },
+];
+
+const ADMIN: NavItem[] = [
+  { label: "Administration",     href: "/admin",        icon: Settings },
+];
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "group relative flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[12.5px] transition-colors",
+        active
+          ? "bg-app-2 text-ink font-medium"
+          : "text-ink-3 hover:bg-[rgba(10,10,10,0.03)] hover:text-ink-2"
+      )}
+    >
+      {/* Status rail */}
+      <span
+        aria-hidden
+        className={cn(
+          "absolute -left-2.5 top-1/2 -translate-y-1/2 w-[2px] rounded-full bg-ink transition-[height]",
+          active ? "h-3.5" : "h-0"
+        )}
+      />
+      <Icon className={cn("h-[15px] w-[15px]", active ? "text-ink" : "text-ink-4")} />
+      <span className="flex-1 truncate">{item.label}</span>
+      {item.live && (
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-brand)] animate-pulse-dot" />
+      )}
+      {item.count !== undefined && (
+        <span className="font-mono tabular-nums text-[10.5px] text-ink-4">{item.count}</span>
+      )}
+      {item.shortcut && !active && (
+        <span className="hidden group-hover:inline-block">
+          <Kbd>{item.shortcut}</Kbd>
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function NavGroup({ label, items, isActive }: { label?: string; items: NavItem[]; isActive: (href: string) => boolean }) {
+  return (
+    <div className="flex flex-col gap-px px-3.5">
+      {label && (
+        <div className="eyebrow text-[9.5px] px-2 pt-3 pb-1.5">{label}</div>
+      )}
+      {items.map((item) => (
+        <NavLink key={item.href} item={item} active={isActive(item.href)} />
+      ))}
+    </div>
+  );
+}
+
+function WorkspaceSwitcher() {
+  return (
+    <button
+      type="button"
+      className="w-full flex items-center gap-2 px-2.5 py-2 bg-surface border border-hx-2 rounded-[8px] text-left text-[12.5px] text-ink-2 hover:bg-surface-hi transition-colors"
+    >
+      <span
+        className="grid place-items-center h-[18px] w-[18px] rounded-[4px] text-[10px] font-semibold text-white"
+        style={{ background: "linear-gradient(135deg,#4F46E5,#06B6D4)" }}
+      >
+        D
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-ink truncate">DataInteg Inc.</div>
+        <div className="text-[10.5px] text-ink-4 font-mono">prod · us-east-1</div>
+      </div>
+      <ChevronDown className="h-3 w-3 text-ink-4" />
+    </button>
+  );
+}
+
+function SearchTrigger() {
+  return (
+    <button
+      type="button"
+      className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-transparent border border-hx-2 rounded-[8px] text-[12px] text-ink-4 hover:bg-surface-hi transition-colors"
+    >
+      <Search className="h-[13px] w-[13px]" />
+      <span className="flex-1 text-left">Search…</span>
+      <Kbd>⌘ K</Kbd>
+    </button>
+  );
+}
+
+function UserFooter({ name = "Avery Johnson", role = "Platform Admin" }) {
+  return (
+    <div className="flex items-center gap-2.5 px-1 py-2 mt-1 border-t border-hx">
+      <Avatar name={name} size={26} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-medium text-ink truncate">{name}</div>
+        <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
+      </div>
+      <ChevronDown className="h-3 w-3 text-ink-4" />
+    </div>
+  );
+}
+
+export function Sidebar() {
+  const pathname = usePathname() || "";
+  const isActive = (href: string) =>
+    href === "/dashboard"
+      ? pathname === "/dashboard" || pathname === "/"
+      : pathname.startsWith(href);
+
+  return (
+    <aside className="hidden lg:flex w-[232px] flex-shrink-0 flex-col h-screen sticky top-0 bg-surface-hi border-r border-hx">
+      {/* Brand */}
+      <div className="px-5 pt-4 pb-3.5 border-b border-hx">
+        <Link href="/dashboard" aria-label="Helix Console home">
+          <HelixWordmark size={22} />
+        </Link>
+      </div>
+
+      {/* Workspace + search */}
+      <div className="px-3.5 pt-2.5 pb-3 flex flex-col gap-2">
+        <WorkspaceSwitcher />
+        <SearchTrigger />
+      </div>
+
+      {/* Nav */}
+      <div className="flex-1 overflow-y-auto pb-3">
+        <NavGroup items={PRIMARY} isActive={isActive} />
+        <NavGroup label="Resources" items={RESOURCES} isActive={isActive} />
+        <NavGroup label="System" items={ADMIN} isActive={isActive} />
+      </div>
+
+      {/* Status + user */}
+      <div className="px-3.5 pt-2 pb-3 border-t border-hx bg-surface-hi">
+        <div className="flex items-center gap-2 px-1 py-1.5 text-[11px] text-ink-3">
+          <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-ok)] animate-pulse-dot" />
+          <span>All systems operational</span>
+          <span className="ml-auto font-mono text-[10px] text-ink-4">↗</span>
+        </div>
+        <UserFooter />
+      </div>
+    </aside>
+  );
+}
