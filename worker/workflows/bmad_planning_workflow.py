@@ -1,7 +1,10 @@
-"""Temporal workflow for BMAD migration planning.
+"""Temporal workflow for BMAD migration planning (monolithic mode).
 
-Workflow code MUST be deterministic — no direct I/O, random, datetime,
-or external service calls. All external operations run inside activities.
+Workflow code MUST be deterministic — no I/O, no random, no datetime, no
+external service calls. Everything external runs inside activities.
+
+The activity is referenced as a function (not by string name) so the
+Temporal sandbox can validate types + serialization at registration time.
 """
 
 from __future__ import annotations
@@ -13,6 +16,11 @@ from typing import Any
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
+# Activity reference lives outside the sandbox; imports_passed_through tells
+# Temporal not to try to re-import this module inside the workflow sandbox.
+with workflow.unsafe.imports_passed_through():
+    from worker.activities.bmad_activities import execute_bmad_graph_activity
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,30 +28,18 @@ logger = logging.getLogger(__name__)
 class BMADPlanningWorkflow:
     """Durable BMAD planning workflow executed by Temporal.
 
-    Invokes the execute_bmad_graph_activity with retry and timeout.
-    The activity wraps the LangGraph StateGraph (BA → Architect → VP → Approval).
+    Invokes the BMAD LangGraph as a single activity with retry + timeout.
 
-    Workflow ID format: bmad-{project_id}-{requirement_id}
+    Workflow ID convention: bmad-{project_id}-{requirement_id}
     """
 
     @workflow.run
     async def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Execute the BMAD planning workflow.
-
-        Args:
-            input_data: Dict with project_id, requirement_id, organization_id,
-                        requirement_text, approval_decision.
-
-        Returns:
-            Dict with workflow outputs, status, and metadata.
-        """
         workflow_id = workflow.info().workflow_id
         logger.info("BMAD workflow started: id=%s", workflow_id)
 
-        # Activity call — the ONLY external operation in this workflow.
-        # Retry policy: max 3 attempts with initial 5s interval.
         result = await workflow.execute_activity(
-            "execute_bmad_graph_activity",
+            execute_bmad_graph_activity,
             input_data,
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=RetryPolicy(

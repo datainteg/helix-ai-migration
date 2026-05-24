@@ -1,7 +1,8 @@
-"""Temporal activities for BMAD workflow execution.
+"""Temporal activity wrapping the BMAD LangGraph (monolithic mode).
 
-All external I/O (graph execution, LLM calls) runs inside activities
-to keep workflow code deterministic.
+`run_bmad_graph` is synchronous (file I/O + subprocess calls + blocking HTTP),
+so this activity is defined as `def` (sync). Temporal runs sync activities in
+a thread pool, which is correct for blocking workloads.
 """
 
 from __future__ import annotations
@@ -17,18 +18,18 @@ logger = logging.getLogger(__name__)
 
 
 @activity.defn
-async def execute_bmad_graph_activity(input_data: dict[str, Any]) -> dict[str, Any]:
+def execute_bmad_graph_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     """Execute the BMAD LangGraph planning workflow.
 
-    This is the single Temporal activity that wraps the entire BMAD graph.
-    It calls `run_bmad_graph` with the input_data parameters.
+    Single Temporal activity that wraps the entire 13-node BMAD graph.
 
     Args:
         input_data: Dict with keys: project_id, requirement_id, organization_id,
-                    requirement_text, approval_decision
+                    requirement_text, approval_decision.
 
     Returns:
-        Serialized workflow result dict with outputs, status, errors
+        Final state dict from `run_bmad_graph` — includes outputs, artifact_paths,
+        status, errors, final_output.
     """
     logger.info(
         "BMAD activity started: project=%s requirement=%s",
@@ -44,10 +45,8 @@ async def execute_bmad_graph_activity(input_data: dict[str, Any]) -> dict[str, A
             requirement_text=input_data.get("requirement_text"),
             approval_decision=input_data.get("approval_decision"),
         )
-        try:
+        if activity.in_activity():
             activity.heartbeat("bmad_graph_completed")
-        except RuntimeError:
-            pass  # Not in activity context (unit test without Temporal server)
 
         logger.info(
             "BMAD activity completed: status=%s agents=%d",
