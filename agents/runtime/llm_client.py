@@ -99,7 +99,10 @@ def call_llm(
             if not provider:
                 return None
 
-            mappings = db.query(LLMAgentMapping).all()
+            mappings_q = db.query(LLMAgentMapping)
+            if org_id:
+                mappings_q = mappings_q.filter(LLMAgentMapping.organization_id == org_id)
+            mappings = mappings_q.all()
             pid, model, temp, max_tokens = resolve_routing(agent_name, provider.id, provider.default_model, mappings)
             provider_obj = db.query(LLMProvider).filter(LLMProvider.id == pid).first()
             if not provider_obj or not provider_obj.secrets:
