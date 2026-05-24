@@ -1,21 +1,59 @@
+# Python build artifacts
 **/__pycache__
 **/*.pyc
 **/*.pyo
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
+
+# Local virtualenvs
 .venv
 venv
 env
 *.egg-info
+
+# Version control + tooling
 .git
 .gitignore
+.github
+
+# Frontend build cache (Next.js builds inside its own image)
 node_modules
 frontend/.next
 frontend/out
+
+# Test fixtures + scratch DBs (backend image runs alembic against real Postgres)
 backend/tests
 backend/test.db
-*.md
-!README.md
+
+# Top-level docs + planning notes — NOT inside agents/bmad/BMAD-METHOD/.
+# Leading slash anchors to repo root; subtree .md files (e.g. SKILL.md) are kept.
+/*.md
+!/README.md
+/docs
+
+# Sample env
 .env.example
-docs/
+
+# BMAD-METHOD vendored tree — keep src/scripts + src/bmm-skills + src/core-skills + LICENSE.
+# Exclude auxiliary dirs the runtime never reads (saves ~9 MB per image).
+agents/bmad/BMAD-METHOD/test
+agents/bmad/BMAD-METHOD/website
+agents/bmad/BMAD-METHOD/evals
+agents/bmad/BMAD-METHOD/tools
+agents/bmad/BMAD-METHOD/docs
+
+# BMAD vendored upstream JS toolchain — not needed inside Python images.
+agents/bmad/BMAD-METHOD/package.json
+agents/bmad/BMAD-METHOD/package-lock.json
+agents/bmad/BMAD-METHOD/eslint.config.mjs
+agents/bmad/BMAD-METHOD/prettier.config.mjs
+agents/bmad/BMAD-METHOD/Wordmark.png
+agents/bmad/BMAD-METHOD/banner-bmad-method.png
+agents/bmad/BMAD-METHOD/CNAME
+agents/bmad/BMAD-METHOD/removals.txt
+agents/bmad/BMAD-METHOD/README_CN.md
+agents/bmad/BMAD-METHOD/README_VN.md
+
+# Generated BMAD artifacts (created at runtime, not part of image)
+_bmad-output

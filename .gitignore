@@ -2,8 +2,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.db
-.env
-.env.local
 .venv/
 frontend/.next/
 frontend/node_modules/
@@ -14,3 +12,23 @@ dist/
 build/
 coverage/
 *.log
+
+# Environment + secrets — never commit
+.env
+.env.local
+.env.production
+.env.*.local
+
+# BMAD runtime output (planning artifacts, project-context.md, etc.)
+_bmad-output/
+
+# Editor / IDE local state
+.vscode/
+.idea/
+*.swp
+
+# Frontend design references (not part of build)
+frontend/Helix Figma Frontend/
+
+# TS incremental build cache
+frontend/tsconfig.tsbuildinfo

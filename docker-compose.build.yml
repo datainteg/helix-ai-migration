@@ -1,10 +1,15 @@
+# Build overlay — use with docker-compose.yml when building from source.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+#
+# Or pre-build and push:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker push <prefix>/backend:<tag>   (etc.)
+
 services:
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-
-  migrate:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -19,4 +24,4 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}

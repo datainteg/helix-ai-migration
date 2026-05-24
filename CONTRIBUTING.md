@@ -1,166 +1,152 @@
-# Contributing
+# Contributing to Helix Migration
 
-## Project Identity
+Thanks for considering a contribution. This repo is Apache 2.0 — code,
+docs, bug reports, and tested fixes all welcome.
 
-| Item | Value |
-|---|---|
-| Product | Helix Migration |
-| Repository | helix-ai-migration |
-| Website | helix.datainteg.io |
-| Tagline | Open-source AI-powered migration and validation platform. |
-| Frontend image | datainteg/helix-ai-migration-frontend |
-| Backend image | datainteg/helix-ai-migration-backend |
-| Worker image | datainteg/helix-ai-migration-worker |
+## Where to contribute
 
-Thank you for contributing to Helix Migration, an open-source AI-powered migration and validation platform.
+| Area | Files |
+|------|-------|
+| AI agents / BMAD pipeline | `agents/` |
+| Backend API | `backend/app/api/` |
+| Backend services | `backend/app/services/` |
+| Temporal worker | `worker/` |
+| Frontend pages | `frontend/src/app/` |
+| Built-in connectors | `connectors/` |
+| Tests | `agents/tests/`, `backend/tests/` |
+| Docs | `README.md`, `DEPLOY.md`, top-level `*.md` |
 
-## Ways to Contribute
+If you want to add a **new BMAD agent skill**, vendor it into
+`agents/bmad/BMAD-METHOD/src/bmm-skills/<phase>/<skill>/` mirroring upstream
+layout. Do NOT author prompts inline in Helix code — Helix loads SKILL.md
++ customize.toml as the source of truth.
 
-- Documentation
-- Frontend UI
-- Backend APIs
-- Agent workflows
-- Connector implementations
-- Validation and reconciliation rules
-- Docker and deployment improvements
-- Tests
-- Example migration projects
-- Developer workspace and Code Review Center UI
-- Artifact metadata APIs
-- Safe code analysis schemas
-- Diff viewer components
-- Validation template examples
+## Local dev setup
 
-## Setup
+### Prerequisites
+
+- Docker 24+ and Docker Compose v2
+- Python 3.11+ (for running tests / agents outside Docker)
+- Node 20+ (for frontend dev outside Docker)
+
+### Get the stack running
 
 ```bash
-git clone https://github.com/datainteg/helix-ai-migration.git
+git clone https://github.com/<your-fork>/helix-ai-migration.git
 cd helix-ai-migration
 
-# Backend
-cd backend
-python -m venv .venv
-.venv\Scripts\Activate.ps1  # Windows
-pip install -r requirements.txt
-alembic upgrade head
-pytest tests/ -v  # 60 tests total — 58 pass, 2 skipped (Temporal integration)
+# Generate secrets (writes .env)
+./scripts/generate-secrets.sh           # or .\scripts\generate-secrets.ps1
 
-# Frontend
+# Bring up the dev compose (hot reload + exposed ports for DB/Redis/Temporal)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml up -d
+docker compose exec backend alembic upgrade head
+
+# Frontend dev mode (outside compose)
 cd frontend
 npm install
-npm run dev
-
-# Or Docker (full stack)
-docker compose -f docker-compose.dev.yml up -d
+npm run dev                              # http://localhost:3000
 ```
 
-See `DEVELOPMENT.md` for detailed local setup. See `CODE_REVIEW.md` for full codebase audit.
+### Run tests
 
-## Branch Naming
+```bash
+# Agents tests (no DB required, runs against vendored BMAD)
+python -m pytest agents/tests/ -v
 
-Use focused branch names:
+# Backend tests (needs Postgres + Redis on localhost:5432/6379)
+cd backend
+python -m pytest tests/ -v
 
-```text
-docs/mvp-scope
-frontend/project-workspace
-backend/auth-api
-agents/bmad-planning-flow
-connectors/postgres-metadata-scan
-validation/row-count-rules
+# Frontend Playwright tests (optional)
+cd frontend
+npx playwright install --with-deps chromium
+npm run test:e2e
 ```
 
-## Commit Style
+### Code style
 
-Use clear commits:
+- Python: Ruff (line length 120). Run `ruff check agents backend connectors worker` before opening a PR.
+- TypeScript: ESLint via `npm run lint`. Tailwind classes via `tailwind-merge`.
+- Commit messages: short imperative subject. No need for emoji prefixes.
 
-```text
-docs: add MVP execution plan
-feat: add project metadata API
-fix: mask provider keys in API response
-test: cover validation rule creation
+### Dependency locking
+
+`backend/requirements.txt` + `worker/requirements.txt` declare top-level deps
+with version ranges. The pinned, fully-resolved versions used at build time
+live in the corresponding `*.lock` files alongside them. **Docker builds
+install from the lock, not the .txt.**
+
+When you add or bump a top-level dep:
+
+```bash
+# Edit backend/requirements.txt (or worker/requirements.txt)
+# Then regenerate the lock — runs pip-compile inside python:3.11-slim so the
+# result matches the production image's Python version:
+./scripts/lock-requirements.sh backend          # or `worker`, or omit for both
+
+# Bump every pinned dep to its latest compatible version
+./scripts/lock-requirements.sh --upgrade
 ```
 
-## Pull Request Checklist
+Commit both the `.txt` AND the regenerated `.lock`. The Dockerfile falls
+back to `.txt` if the lock is missing (with a printed warning), so the
+build still works during a fresh fork's first commit.
 
-Before opening a PR:
+## Pull request checklist
 
-- Read `README.md`.
-- Confirm product naming is `Helix Migration`.
-- Keep the change focused.
-- Add or update tests when implementation changes.
-- Update docs when behavior changes.
-- Do not include secrets.
-- Do not store full customer business data by default.
-- Confirm API keys are masked.
-- Confirm agent outputs are typed if touching agent runtime.
-- Confirm generated code, notebook structures, validation plans, and reconciliation reports are described as drafts requiring human approval before production use.
-- Do not add arbitrary uploaded-code execution.
-- Include screenshots for frontend changes when useful.
+- [ ] Tests for new behavior (or rationale if no test is sensible)
+- [ ] `agents/tests/` still passes (`pytest agents/tests/`)
+- [ ] No new hardcoded prompts (use BMAD SKILL.md via `bmad_loader`)
+- [ ] No new mock data in `frontend/` (use real backend endpoints + EmptyState)
+- [ ] No real secrets committed (run `grep -r "sk-[a-zA-Z0-9]" .` before push)
+- [ ] DEPLOY.md updated if you change env vars / ports / volumes
+- [ ] README.md updated if you change repo layout or top-level features
 
-## Issue Guidance
+## Architectural decisions worth knowing
 
-Good issues include:
+1. **HelixBMAD class is the single entry point.** Backend and worker both
+   import `from agents import HelixBMAD`. Don't reach into `agents.bmad.graph`
+   or `agents.runtime.bmad_executor` from outside the package — extend
+   `HelixBMAD` instead.
 
-- Clear problem statement
-- Expected behavior
-- Actual behavior
-- Steps to reproduce
-- Environment details
-- Screenshots or logs when useful
-- Security sensitivity if relevant
+2. **BMAD-METHOD is the source of truth.** Personas, skill prompts, and
+   customization layers all come from the vendored `agents/bmad/BMAD-METHOD/`
+   tree. Helix does NOT author new agents.
 
-## Coding Standards
+3. **Workflow state lives in two places.** Temporal owns the durable
+   execution state (queryable via Temporal SDK). The `WorkflowStep` table
+   owns the persisted history (queryable via SQL + the
+   `GET /agent-workflows/{id}` API). Both should agree.
 
-- TypeScript for frontend code.
-- Python with Pydantic models for backend and agent contracts.
-- SQLAlchemy or SQLModel for persistence.
-- Alembic for migrations.
-- Typed schemas for agent outputs.
-- Consistent API response formats.
-- Audit logs for sensitive actions.
+4. **No telemetry by default.** Sentry / OpenTelemetry are optional
+   (controlled by `SENTRY_DSN` / `OTEL_ENDPOINT` env vars). Default
+   behavior is fully offline.
 
-## Documentation Standards
+5. **Secrets are never returned via API.** Connector creds + LLM API keys
+   are encrypted with Fernet (`secret_service.encrypt_value`) and only
+   ever returned as masked previews.
 
-- Use Markdown headings clearly.
-- Keep examples accurate.
-- Do not make fake implementation claims.
-- Keep docs aligned with `README.md`.
-- Update related docs when architecture changes.
+6. **Frontend reads from API or shows EmptyState.** No mock-data fallbacks.
+   `frontend/src/lib/mock-data.ts` was deleted on purpose; don't reintroduce.
 
-## Tests Required
+## Reporting bugs
 
-Implementation PRs should include tests for:
+Open a GitHub issue with:
+- Helix version (`docker compose images` output)
+- Repro steps
+- Logs from the failing service (`docker compose logs <service>`)
+- Expected vs. actual behavior
 
-- Backend API behavior
-- RBAC and tenant separation
-- Secret masking
-- Database migrations
-- Agent schema validation
-- Connector contracts
-- Validation and recon logic
+For security issues, see [SECURITY.md](SECURITY.md) — please don't open
+public issues for vulnerabilities.
 
-## Good First Issue Areas
+## Versioning
 
-- Documentation improvements
-- UI empty states
-- API schema examples
-- Connector metadata examples
-- Validation rule examples
-- Report templates
-- Test coverage
+Helix follows semver once we hit 1.0. Pre-1.0 we may make breaking changes
+between minor versions; check CHANGELOG.md (when it exists) before
+upgrading.
 
-## Highest-Impact Open Issues
+## License
 
-See [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) for the full prioritized list. The current top P0 items are:
-
-| ID | Problem | Estimate |
-|---|---|---|
-| C-1 | `worker/Dockerfile` missing `pip install -r requirements.txt` | 5 minutes |
-| C-2 | Validation / reconciliation API + UI return hardcoded fixtures | 1-2 days |
-| C-3 | Cross-org LLM provider leak in code analyzer/reviewer | 1-2 hours |
-| C-5 | No rate limiting on auth / connector test / LLM test | 4-6 hours |
-| C-6 | PostgreSQL connector does not URL-encode credentials | 30 minutes |
-| C-7 | BMAD nodes return hardcoded text, do not call any LLM | 1-2 days |
-| C-9 | Workflow approval endpoint does not persist the decision | 2 hours |
-
-All have file paths, recommended fixes, and verification steps in `FUTURE_IMPROVEMENTS.md`.
+By contributing you agree your contributions are licensed under Apache 2.0.
