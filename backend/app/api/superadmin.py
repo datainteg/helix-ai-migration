@@ -1,6 +1,6 @@
 """Super-admin endpoints: manage all orgs, impersonate, global stats."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.auth.jwt import get_current_user_id, create_access_token
 from app.models.identity import Organization, User, OrganizationMember
 from app.services.auth_service import get_current_user
+from app.rate_limiting import limiter
 
 router = APIRouter(prefix="/superadmin", tags=["superadmin"])
 
@@ -70,7 +71,9 @@ class ImpersonateRequest(BaseModel):
 
 
 @router.post("/impersonate")
+@limiter.limit("5/minute")
 def impersonate_user(
+    request: Request,
     data: ImpersonateRequest,
     admin: User = Depends(_require_super_admin),
     db: Session = Depends(get_db),

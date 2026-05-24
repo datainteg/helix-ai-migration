@@ -1,5 +1,5 @@
-from typing import Optional
-from pydantic import BaseModel
+from typing import Any, Optional
+from pydantic import BaseModel, Field
 
 
 class ProjectCreate(BaseModel):
@@ -54,6 +54,17 @@ class RequirementResponse(BaseModel):
 class ConnectionCreate(BaseModel):
     name: str
     connector_type: str
+    # Full credentials dict (host, port, username, password, etc.).
+    # Encrypted server-side before persistence; never returned via API.
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConnectionUpdate(BaseModel):
+    """Partial update — only provided fields are touched."""
+
+    name: Optional[str] = None
+    status: Optional[str] = None
+    config: Optional[dict[str, Any]] = None
 
 
 class ConnectionResponse(BaseModel):
@@ -63,8 +74,15 @@ class ConnectionResponse(BaseModel):
     name: str
     connector_type: str
     status: str
+    # Safe-to-display masked preview of the config (passwords redacted).
+    config_masked: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class ConnectionTestResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class SchemaCreate(BaseModel):

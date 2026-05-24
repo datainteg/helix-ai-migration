@@ -3,7 +3,13 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # `extra=ignore` so the same .env can hold vars consumed by other
+    # services (Postgres, Temporal compose env, etc.) without rejecting them.
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     APP_NAME: str = "Helix Migration"
     APP_ENV: str = "development"
@@ -24,6 +30,7 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "change_me_32_byte_key"
 
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+    CORS_ORIGIN_REGEX: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     DEFAULT_LLM_PROVIDER: str = "openai"
     DEFAULT_LLM_MODEL: str = "gpt-4.1"
@@ -67,6 +74,9 @@ class Settings(BaseSettings):
             # Reject wildcard CORS origins in production
             if "*" in self.CORS_ORIGINS:
                 raise ValueError("CORS_ORIGINS must not contain '*' in production")
+            # Disallow regex-based origins in production. Use explicit allowlist only.
+            if self.CORS_ORIGIN_REGEX:
+                raise ValueError("CORS_ORIGIN_REGEX must be empty in production; use explicit CORS_ORIGINS")
             # Validate ENCRYPTION_KEY is a proper base64-encoded 32-byte Fernet key
             import base64
             try:

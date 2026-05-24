@@ -6,8 +6,17 @@ from app.db.session import get_db
 from app.auth.dependencies import require_permission
 from app.services.auth_service import get_current_user
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
+from app.api.audit import write_audit
 
 router = APIRouter(tags=["webhooks"])
+
+
+def _resolve_org_id(db: Session, user_id: str) -> str:
+    from fastapi import HTTPException
+    user = get_current_user(db, user_id)
+    if not user.memberships:
+        raise HTTPException(status_code=403, detail="User has no organization membership")
+    return str(user.memberships[0].organization_id)
 
 
 class WebhookCreate(BaseModel):
@@ -19,20 +28,19 @@ class WebhookCreate(BaseModel):
 
 @router.get("/webhooks")
 def list_webhooks(user_id: str = Depends(require_permission("admin:llm:read")), db: Session = Depends(get_db)):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = _resolve_org_id(db, user_id)
     hooks = db.query(WebhookEndpoint).filter(WebhookEndpoint.organization_id == org_id).all()
     return [{"id": h.id, "url": h.url, "events": h.events, "is_active": h.is_active, "description": h.description} for h in hooks]
 
 
 @router.post("/webhooks", status_code=201)
 def create_webhook(
+    request: Request,
     data: WebhookCreate,
     user_id: str = Depends(require_permission("admin:llm:write")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = _resolve_org_id(db, user_id)
     ep = WebhookEndpoint(
         organization_id=org_id,
         url=data.url,
@@ -43,18 +51,21 @@ def create_webhook(
     db.add(ep)
     db.commit()
     db.refresh(ep)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="webhook_created",
+                entity_type="webhook", entity_id=ep.id,
+                meta={"url": data.url, "events": data.events}, request=request)
     return {"id": ep.id, "url": ep.url, "events": ep.events, "is_active": ep.is_active}
 
 
 @router.patch("/webhooks/{webhook_id}")
 def update_webhook(
+    request: Request,
     webhook_id: str,
     data: WebhookCreate,
     user_id: str = Depends(require_permission("admin:llm:write")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = _resolve_org_id(db, user_id)
     ep = db.query(WebhookEndpoint).filter(WebhookEndpoint.id == webhook_id, WebhookEndpoint.organization_id == org_id).first()
     if not ep:
         from fastapi import HTTPException
@@ -69,21 +80,25 @@ def update_webhook(
         ep.description = data.description
     db.commit()
     db.refresh(ep)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="webhook_updated",
+                entity_type="webhook", entity_id=ep.id, request=request)
     return {"id": ep.id, "url": ep.url, "events": ep.events, "is_active": ep.is_active}
 
 
 @router.delete("/webhooks/{webhook_id}", status_code=204)
 def delete_webhook(
+    request: Request,
     webhook_id: str,
     user_id: str = Depends(require_permission("admin:llm:write")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = _resolve_org_id(db, user_id)
     ep = db.query(WebhookEndpoint).filter(WebhookEndpoint.id == webhook_id, WebhookEndpoint.organization_id == org_id).first()
     if ep:
         db.delete(ep)
         db.commit()
+        write_audit(db, org_id=org_id, actor_id=user_id, action="webhook_deleted",
+                    entity_type="webhook", entity_id=webhook_id, request=request)
 
 
 @router.get("/webhooks/{webhook_id}/deliveries")

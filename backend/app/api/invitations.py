@@ -12,6 +12,7 @@ from app.services.invitation_service import (
 from app.schemas.identity import TokenResponse
 from app.core.config import settings
 from app.rate_limiting import limiter
+from app.api.audit import write_audit
 
 router = APIRouter(tags=["invitations"])
 
@@ -77,10 +78,16 @@ def get_invitations(
 
 @router.delete("/invitations/{invitation_id}", status_code=204)
 def delete_invitation(
+    request: Request,
     invitation_id: str,
     user_id: str = Depends(require_permission("admin:users:write")),
     db: Session = Depends(get_db),
 ):
     user = get_current_user(db, user_id)
+    if not user.memberships:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="User has no organization membership")
     org_id = str(user.memberships[0].organization_id)
     revoke_invitation(db, org_id, invitation_id)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="invitation_revoked",
+                entity_type="invitation", entity_id=invitation_id, request=request)

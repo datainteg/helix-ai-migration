@@ -1,7 +1,12 @@
-"""Backend workflow service — starts BMAD planning via Temporal with local fallback.
+"""Backend workflow service — wraps `HelixBMAD` for FastAPI routes.
 
-Production: starts BMADPlanningWorkflow through Temporal. Never silently falls back.
-Dev/Test: falls back to direct run_bmad_graph when Temporal is unavailable.
+Single import point: `from agents import HelixBMAD`. This file translates
+between HTTP-shaped inputs/outputs and the HelixBMAD class API, and persists
+results to the WorkflowRun + WorkflowStep tables.
+
+Production: starts the Temporal-backed workflow via `HelixBMAD.start_temporal()`.
+Dev/test: falls back to `HelixBMAD.run()` (in-process LangGraph) when Temporal
+is unavailable.
 """
 
 from __future__ import annotations
@@ -14,62 +19,17 @@ import uuid
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from agents.bmad.graph import run_bmad_graph
+from agents import HelixBMAD, HelixBMADResult
 from app.db.session import SessionLocal
 from app.models.workflow import WorkflowRun, WorkflowStep
 
 logger = logging.getLogger(__name__)
 
-TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
-TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "helix-bmad-task-queue")
 APP_ENV = os.getenv("APP_ENV", "development")
 
 
 def _is_production() -> bool:
     return APP_ENV == "production"
-
-
-async def _start_temporal_workflow(input_data: dict) -> dict:
-    """Start BMADPlanningWorkflow on Temporal. Returns workflow metadata."""
-    from temporalio.client import Client
-
-    from worker.workflows.bmad_planning_workflow import BMADPlanningWorkflow
-
-    client = await Client.connect(TEMPORAL_ADDRESS)
-    workflow_id = f"bmad-{input_data['project_id']}-{input_data['requirement_id']}"
-
-    handle = await client.start_workflow(
-        BMADPlanningWorkflow.run,
-        input_data,
-        id=workflow_id,
-        task_queue=TASK_QUEUE,
-    )
-
-    return {
-        "workflow_id": workflow_id,
-        "run_id": handle.result_run_id,
-        "status": "started",
-        "mode": "temporal",
-    }
-
-
-def _run_local_fallback(input_data: dict) -> dict:
-    """Fallback: execute BMAD graph directly (dev/test only)."""
-    result = run_bmad_graph(
-        project_id=input_data["project_id"],
-        requirement_id=input_data["requirement_id"],
-        organization_id=input_data.get("organization_id"),
-        requirement_text=input_data.get("requirement_text"),
-        approval_decision=input_data.get("approval_decision"),
-    )
-    workflow_id = f"local-{uuid.uuid4().hex[:12]}"
-    return {
-        "workflow_id": workflow_id,
-        "run_id": workflow_id,
-        "status": result.get("status", "completed"),
-        "mode": "local_fallback",
-        "result": result,
-    }
 
 
 async def start_bmad_planning_workflow(
@@ -78,73 +38,78 @@ async def start_bmad_planning_workflow(
     organization_id: str | None = None,
     requirement_text: str | None = None,
     db: Session | None = None,
+    correlation_id: str | None = None,
 ) -> dict:
-    """Start the BMAD planning workflow.
+    """Start the BMAD planning workflow via Temporal, with a dev-only local fallback.
 
-    Tries Temporal first. Falls back to local run_bmad_graph only in
-    dev/test environments. In production, raises if Temporal is unavailable.
+    `correlation_id` should be the request's X-Request-ID header (injected by
+    `RequestIdMiddleware`) so the trace propagates from HTTP → workflow →
+    activity → executor → artifact frontmatter → Prometheus metrics.
 
-    Args:
-        project_id: Project UUID
-        requirement_id: Migration requirement UUID
-        organization_id: Organization UUID (for scoping)
-        requirement_text: Raw requirement text
-
-    Returns:
-        Dict with workflow_id, run_id, status, mode
+    Returns a dict shaped like `HelixBMADResult.to_dict()` plus `result` for the
+    local-fallback case (which carries the full LangGraph state).
     """
-    input_data = {
-        "project_id": project_id,
-        "requirement_id": requirement_id,
-        "organization_id": organization_id,
-        "requirement_text": requirement_text,
-    }
+    helix = HelixBMAD(
+        project_id=project_id,
+        requirement_id=requirement_id,
+        organization_id=organization_id,
+        requirement_text=requirement_text or "",
+        correlation_id=correlation_id,
+    )
 
-    # Try Temporal first
+    # Try Temporal first.
     try:
-        result = await _start_temporal_workflow(input_data)
+        started = await helix.start_temporal()
         logger.info(
-            "BMAD workflow started via Temporal: %s (mode=%s)",
-            result["workflow_id"],
-            result["mode"],
+            "BMAD workflow started via Temporal: %s (run_id=%s)",
+            started.workflow_id,
+            started.run_id,
         )
-        _persist_started_workflow(db, result, input_data)
-        return result
-    except Exception as exc:
+        _persist_started_workflow(db, started, helix)
+        return started.to_dict()
+    except Exception as exc:  # noqa: BLE001
         if _is_production():
             logger.error("Temporal unavailable in production: %s", exc)
             raise RuntimeError(
                 "Temporal workflow service is unavailable. "
                 "BMAD planning cannot proceed without the workflow engine."
             ) from exc
-
         logger.warning(
-            "Temporal unavailable (dev fallback): %s — using local run_bmad_graph",
+            "Temporal unavailable (dev fallback): %s — using local HelixBMAD.run()",
             exc,
         )
 
-    # Dev/test fallback
-    result = _run_local_fallback(input_data)
+    # Dev/test fallback — run the graph in-process.
+    result = helix.run()
+    # Local runs get a synthetic workflow_id distinct from the Temporal one.
+    result.workflow_id = f"local-{uuid.uuid4().hex[:12]}"
+    result.run_id = result.workflow_id
+    result.mode = "local_fallback"
     logger.info(
-        "BMAD workflow completed via local fallback: %s (mode=%s)",
-        result["workflow_id"],
-        result["mode"],
+        "BMAD workflow completed via local fallback: %s (status=%s)",
+        result.workflow_id,
+        result.status,
     )
 
-    # Persist the workflow run and steps
-    _persist_workflow_result(db, result, input_data)
-
-    return result
+    _persist_workflow_result(db, result, helix)
+    payload = result.to_dict()
+    payload["result"] = {
+        "outputs": result.outputs,
+        "artifact_paths": result.artifact_paths,
+        "final_output": result.final_output,
+        "approval_required": result.status == "pending",
+    }
+    return payload
 
 
 async def get_workflow_status(
     workflow_id: str,
     db: Session | None = None,
 ) -> dict:
-    """Get BMAD workflow status.
+    """Lookup workflow status from the persisted WorkflowRun row.
 
-    Returns persisted workflow run state when available.
-    Does not fake completed status unless data exists.
+    Returns the run header + every persisted step (agent name, status, parsed_output,
+    artifact path). Frontend uses this to render the 13-node BMAD pipeline view.
     """
     if db is None:
         db = SessionLocal()
@@ -155,38 +120,74 @@ async def get_workflow_status(
         logger.warning("Workflow status persistence lookup failed: %s", exc)
         run = None
 
-    if run:
+    if not run:
         return {
-            "workflow_id": run.workflow_id or workflow_id,
-            "run_id": run.run_id,
-            "status": run.status or "unknown",
-            "mode": run.mode,
-            "project_id": run.project_id,
-            "requirement_id": run.requirement_id,
-            "organization_id": run.organization_id,
+            "workflow_id": workflow_id,
+            "status": "unknown",
+            "mode": "temporal" if "bmad-" in workflow_id else "local_fallback",
+            "note": "Workflow run not found in persistence.",
+            "steps": [],
         }
 
+    steps_raw = (
+        db.query(WorkflowStep)
+        .filter(WorkflowStep.workflow_run_id == run.id)
+        .order_by(WorkflowStep.step_order)
+        .all()
+    )
+    steps = []
+    for s in steps_raw:
+        artifact_path: str | None = None
+        if s.raw_output:
+            try:
+                payload = json.loads(s.raw_output)
+                paths = payload.get("artifact_paths") or payload.get("artifact_path")
+                if isinstance(paths, list) and paths:
+                    artifact_path = paths[-1]
+                elif isinstance(paths, str):
+                    artifact_path = paths
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        steps.append({
+            "agent_name": s.agent_name,
+            "step_order": s.step_order,
+            "status": s.status,
+            "parsed_output": s.parsed_output_json,
+            "artifact_path": artifact_path,
+            "provider_name": s.provider_name,
+            "model_name": s.model_name,
+            "error_message": s.error_message,
+            "created_at": str(s.created_at) if s.created_at else None,
+        })
+
     return {
-        "workflow_id": workflow_id,
-        "status": "unknown",
-        "mode": "temporal" if "bmad-" in workflow_id else "local_fallback",
-        "note": "Workflow run not found in persistence.",
+        "workflow_id": run.workflow_id or workflow_id,
+        "run_id": run.run_id,
+        "status": run.status or "unknown",
+        "mode": run.mode,
+        "project_id": run.project_id,
+        "requirement_id": run.requirement_id,
+        "organization_id": run.organization_id,
+        "created_at": str(run.created_at) if run.created_at else None,
+        "steps": steps,
     }
 
 
-def _persist_started_workflow(db: Session | None, result: dict, input_data: dict) -> None:
-    """Persist a Temporal-started workflow run as 'started'."""
+# ── Persistence ──────────────────────────────────────────────────────
+
+
+def _persist_started_workflow(db: Session | None, started: HelixBMADResult, helix: HelixBMAD) -> None:
     own_db = db is None
     if own_db:
         db = SessionLocal()
     try:
         create_workflow_run(
             db,
-            organization_id=input_data.get("organization_id", "unknown"),
-            project_id=input_data["project_id"],
-            requirement_id=input_data["requirement_id"],
-            workflow_id=result["workflow_id"],
-            run_id=result["run_id"],
+            organization_id=helix.organization_id or "unknown",
+            project_id=helix.project_id,
+            requirement_id=helix.requirement_id,
+            workflow_id=started.workflow_id,
+            run_id=started.run_id,
             status="started",
             mode="temporal",
         )
@@ -198,35 +199,87 @@ def _persist_started_workflow(db: Session | None, result: dict, input_data: dict
             db.close()
 
 
-def _persist_workflow_result(db: Session | None, result: dict, input_data: dict) -> None:
-    """Persist a completed workflow run and its agent steps."""
+def _persist_workflow_result(db: Session | None, result: HelixBMADResult, helix: HelixBMAD) -> None:
     own_db = db is None
     if own_db:
         db = SessionLocal()
     try:
         run = create_workflow_run(
             db,
-            organization_id=input_data.get("organization_id", "unknown"),
-            project_id=input_data["project_id"],
-            requirement_id=input_data["requirement_id"],
-            workflow_id=result["workflow_id"],
-            run_id=result["run_id"],
-            status=result["status"],
-            mode=result["mode"],
+            organization_id=helix.organization_id or "unknown",
+            project_id=helix.project_id,
+            requirement_id=helix.requirement_id,
+            workflow_id=result.workflow_id,
+            run_id=result.run_id,
+            status=result.status,
+            mode=result.mode,
         )
 
-        agent_outputs = result.get("result", {}).get("outputs", {})
-        agent_order = ["business_analyst", "architect", "validation_planner", "approval_gate"]
+        agent_order = [
+            "project_context",
+            "analyst",
+            "pm",
+            "ux_designer",
+            "architect",
+            "architect_stories",
+            "architect_readiness",
+            "approval_gate",
+            "dev_story",
+            "dev",
+            "qa",
+            "code_review",
+            "tech_writer",
+        ]
+        # Map output_key → producing BMAD agent_code so step rows can look up
+        # the artifact frontmatter for provider/model provenance.
+        output_key_to_agent_code = {
+            "project_context": "bmad-agent-architect",
+            "analyst": "bmad-agent-analyst",
+            "pm": "bmad-agent-pm",
+            "ux_designer": "bmad-agent-ux-designer",
+            "architect": "bmad-agent-architect",
+            "architect_stories": "bmad-agent-architect",
+            "architect_readiness": "bmad-agent-architect",
+            "dev_story": "bmad-agent-dev",
+            "dev": "bmad-agent-dev",
+            "qa": "bmad-agent-dev",
+            "code_review": "bmad-agent-dev",
+            "tech_writer": "bmad-agent-tech-writer",
+        }
         for idx, agent_name in enumerate(agent_order):
-            if agent_name in agent_outputs:
+            if agent_name in result.outputs:
+                payload = result.outputs[agent_name]
+                agent_code = output_key_to_agent_code.get(agent_name)
+                paths_for_agent = result.artifact_paths.get(agent_code or agent_name, [])
+                # Best-effort: read provider_name (llm_mode) + model_name from
+                # the artifact's YAML frontmatter. Failures are non-fatal.
+                provider_name: str | None = None
+                model_name: str | None = None
+                if paths_for_agent:
+                    try:
+                        import yaml as _yaml
+                        with open(paths_for_agent[-1], "r", encoding="utf-8") as f:
+                            head = f.read(4096)
+                        if head.startswith("---"):
+                            parts = head.split("---", 2)
+                            if len(parts) >= 3:
+                                front = _yaml.safe_load(parts[1]) or {}
+                                provider_name = front.get("llm_mode")
+                                model_name = front.get("model") or front.get("model_name")
+                    except Exception:  # noqa: BLE001 — provenance is best-effort
+                        pass
                 save_workflow_step(
                     db,
                     workflow_run_id=run.id,
                     agent_name=agent_name,
                     step_order=idx + 1,
                     status="completed",
-                    raw_output=json.dumps(agent_outputs[agent_name]),
-                    parsed_output_json=agent_outputs[agent_name],
+                    raw_output=json.dumps(
+                        {**payload, "artifact_paths": paths_for_agent}
+                    ),
+                    parsed_output_json=payload,
+                    provider_name=provider_name,
+                    model_name=model_name,
                 )
     except SQLAlchemyError as exc:
         logger.warning("Failed to persist workflow result: %s", exc)
@@ -236,7 +289,8 @@ def _persist_workflow_result(db: Session | None, result: dict, input_data: dict)
             db.close()
 
 
-# ── Persistence CRUD (Prompt 10) ──────────────────────────────────────
+# ── CRUD ─────────────────────────────────────────────────────────────
+
 
 def create_workflow_run(
     db: Session,
@@ -249,7 +303,6 @@ def create_workflow_run(
     status: str = "pending",
     mode: str = "local_fallback",
 ) -> WorkflowRun:
-    """Create a new workflow run record."""
     run = WorkflowRun(
         organization_id=organization_id,
         project_id=project_id,
@@ -270,7 +323,6 @@ def update_workflow_run_status(
     workflow_id: str,
     status: str,
 ) -> WorkflowRun | None:
-    """Update the status of a workflow run."""
     run = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
     if run:
         run.status = status
@@ -292,7 +344,6 @@ def save_workflow_step(
     model_name: str | None = None,
     error_message: str | None = None,
 ) -> WorkflowStep:
-    """Save an agent step output within a workflow run."""
     step = WorkflowStep(
         workflow_run_id=workflow_run_id,
         agent_name=agent_name,
@@ -311,12 +362,10 @@ def save_workflow_step(
 
 
 def get_workflow_run(db: Session, workflow_id: str) -> WorkflowRun | None:
-    """Get a workflow run by ID."""
     return db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
 
 
 def list_workflow_runs(db: Session, organization_id: str, project_id: str | None = None) -> list[WorkflowRun]:
-    """List workflow runs for an organization, optionally filtered by project."""
     q = db.query(WorkflowRun).filter(WorkflowRun.organization_id == organization_id)
     if project_id:
         q = q.filter(WorkflowRun.project_id == project_id)

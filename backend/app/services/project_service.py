@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -10,14 +12,16 @@ from app.schemas.project import (
     ProjectCreate, ProjectResponse,
     SubProjectCreate, SubProjectResponse,
     RequirementCreate, RequirementResponse,
-    ConnectionCreate, ConnectionResponse,
+    ConnectionCreate, ConnectionUpdate, ConnectionResponse,
     SchemaCreate, SchemaResponse,
     TableCreate, TableResponse,
     ColumnCreate,
 )
+from app.services.secret_service import encrypt_value, decrypt_value
 
 
-# ── Projects ──
+# ── Projects ────────────────────────────────────────────────────────
+
 
 def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate) -> ProjectResponse:
     project = Project(organization_id=org_id, owner_id=owner_id, name=data.name, description=data.description, risk_level=data.risk_level, migration_type=data.migration_type)
@@ -50,7 +54,8 @@ def ensure_project_access(db: Session, org_id: str, project_id: str) -> Project:
     return _get_project(db, org_id, project_id)
 
 
-# ── SubProjects ──
+# ── SubProjects ─────────────────────────────────────────────────────
+
 
 def add_subproject(db: Session, org_id: str, project_id: str, data: SubProjectCreate) -> SubProjectResponse:
     _get_project(db, org_id, project_id)
@@ -61,7 +66,8 @@ def add_subproject(db: Session, org_id: str, project_id: str, data: SubProjectCr
     return SubProjectResponse.model_validate(sp)
 
 
-# ── Requirements ──
+# ── Requirements ────────────────────────────────────────────────────
+
 
 def add_requirement(db: Session, org_id: str, project_id: str, data: RequirementCreate) -> RequirementResponse:
     _get_project(db, org_id, project_id)
@@ -72,11 +78,109 @@ def add_requirement(db: Session, org_id: str, project_id: str, data: Requirement
     return RequirementResponse.model_validate(req)
 
 
-# ── Source / Target Connections ──
+# ── Connection config encryption helpers ────────────────────────────
+
+_SENSITIVE_KEYS = {
+    "password", "secret", "token", "api_key", "access_key", "access_key_id",
+    "secret_access_key", "client_secret", "private_key", "passphrase",
+}
+
+
+def _mask_value(key: str, value) -> str:
+    """Return masked representation of a config value for safe display."""
+    if not isinstance(value, str):
+        return str(value)
+    if key.lower() in _SENSITIVE_KEYS or any(s in key.lower() for s in _SENSITIVE_KEYS):
+        if len(value) <= 4:
+            return "***"
+        return f"***{value[-4:]}"
+    return value
+
+
+def _build_config_mask(config: dict) -> str:
+    """Build a compact human-readable mask of the config dict.
+
+    Example: 'host=db.example.com port=5432 user=admin password=***xyz1'
+    """
+    parts = []
+    for k, v in config.items():
+        if isinstance(v, (dict, list)):
+            parts.append(f"{k}=<{type(v).__name__}>")
+        else:
+            parts.append(f"{k}={_mask_value(k, v)}")
+    return " ".join(parts)[:500]
+
+
+def _encrypt_config(config: dict) -> tuple[str, str]:
+    """Encrypt a config dict. Returns (encrypted_json, masked_preview)."""
+    if not config:
+        return "", ""
+    encrypted = encrypt_value(json.dumps(config, default=str, sort_keys=True))
+    masked = _build_config_mask(config)
+    return encrypted, masked
+
+
+def _decrypt_config(encrypted: str | None) -> dict:
+    """Decrypt a previously encrypted config blob. Empty if missing."""
+    if not encrypted:
+        return {}
+    raw = decrypt_value(encrypted)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def get_source_config(db: Session, org_id: str, project_id: str, source_id: str) -> tuple[SourceConnection, dict]:
+    """Internal helper: load + decrypt a source connection's config.
+
+    Returns (model_row, decrypted_config). 404 if not found / cross-org.
+    """
+    _get_project(db, org_id, project_id)
+    conn = (
+        db.query(SourceConnection)
+        .filter(
+            SourceConnection.id == source_id,
+            SourceConnection.project_id == project_id,
+            SourceConnection.organization_id == org_id,
+        )
+        .first()
+    )
+    if not conn:
+        raise HTTPException(status_code=404, detail="Source connection not found")
+    return conn, _decrypt_config(conn.encrypted_config)
+
+
+def get_target_config(db: Session, org_id: str, project_id: str, target_id: str) -> tuple[TargetConnection, dict]:
+    _get_project(db, org_id, project_id)
+    conn = (
+        db.query(TargetConnection)
+        .filter(
+            TargetConnection.id == target_id,
+            TargetConnection.project_id == project_id,
+            TargetConnection.organization_id == org_id,
+        )
+        .first()
+    )
+    if not conn:
+        raise HTTPException(status_code=404, detail="Target connection not found")
+    return conn, _decrypt_config(conn.encrypted_config)
+
+
+# ── Source / Target Connections ─────────────────────────────────────
+
 
 def add_source(db: Session, org_id: str, project_id: str, data: ConnectionCreate) -> ConnectionResponse:
     _get_project(db, org_id, project_id)
-    conn = SourceConnection(organization_id=org_id, project_id=project_id, name=data.name, connector_type=data.connector_type)
+    encrypted, masked = _encrypt_config(data.config)
+    conn = SourceConnection(
+        organization_id=org_id,
+        project_id=project_id,
+        name=data.name,
+        connector_type=data.connector_type,
+        encrypted_config=encrypted or None,
+        config_masked=masked or None,
+    )
     db.add(conn)
     db.commit()
     db.refresh(conn)
@@ -89,9 +193,38 @@ def list_sources(db: Session, org_id: str, project_id: str) -> list[ConnectionRe
     return [ConnectionResponse.model_validate(c) for c in conns]
 
 
+def update_source(db: Session, org_id: str, project_id: str, source_id: str, data: ConnectionUpdate) -> ConnectionResponse:
+    conn, _ = get_source_config(db, org_id, project_id, source_id)
+    if data.name is not None:
+        conn.name = data.name
+    if data.status is not None:
+        conn.status = data.status
+    if data.config is not None:
+        encrypted, masked = _encrypt_config(data.config)
+        conn.encrypted_config = encrypted or None
+        conn.config_masked = masked or None
+    db.commit()
+    db.refresh(conn)
+    return ConnectionResponse.model_validate(conn)
+
+
+def delete_source(db: Session, org_id: str, project_id: str, source_id: str) -> None:
+    conn, _ = get_source_config(db, org_id, project_id, source_id)
+    db.delete(conn)
+    db.commit()
+
+
 def add_target(db: Session, org_id: str, project_id: str, data: ConnectionCreate) -> ConnectionResponse:
     _get_project(db, org_id, project_id)
-    conn = TargetConnection(organization_id=org_id, project_id=project_id, name=data.name, connector_type=data.connector_type)
+    encrypted, masked = _encrypt_config(data.config)
+    conn = TargetConnection(
+        organization_id=org_id,
+        project_id=project_id,
+        name=data.name,
+        connector_type=data.connector_type,
+        encrypted_config=encrypted or None,
+        config_masked=masked or None,
+    )
     db.add(conn)
     db.commit()
     db.refresh(conn)
@@ -104,7 +237,29 @@ def list_targets(db: Session, org_id: str, project_id: str) -> list[ConnectionRe
     return [ConnectionResponse.model_validate(c) for c in conns]
 
 
-# ── Schema / Table / Column Metadata ──
+def update_target(db: Session, org_id: str, project_id: str, target_id: str, data: ConnectionUpdate) -> ConnectionResponse:
+    conn, _ = get_target_config(db, org_id, project_id, target_id)
+    if data.name is not None:
+        conn.name = data.name
+    if data.status is not None:
+        conn.status = data.status
+    if data.config is not None:
+        encrypted, masked = _encrypt_config(data.config)
+        conn.encrypted_config = encrypted or None
+        conn.config_masked = masked or None
+    db.commit()
+    db.refresh(conn)
+    return ConnectionResponse.model_validate(conn)
+
+
+def delete_target(db: Session, org_id: str, project_id: str, target_id: str) -> None:
+    conn, _ = get_target_config(db, org_id, project_id, target_id)
+    db.delete(conn)
+    db.commit()
+
+
+# ── Schema / Table / Column Metadata ────────────────────────────────
+
 
 def add_schema(db: Session, org_id: str, project_id: str, data: SchemaCreate) -> SchemaResponse:
     _get_project(db, org_id, project_id)

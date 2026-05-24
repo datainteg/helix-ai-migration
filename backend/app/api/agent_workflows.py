@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ router = APIRouter(tags=["agent-workflows"])
 
 @router.post("/projects/{project_id}/agent-workflows", response_model=StartWorkflowResponse)
 async def start_workflow(
+    request: Request,
     project_id: str,
     data: StartWorkflowRequest,
     org_id: str = Depends(get_current_organization_id),
@@ -61,12 +62,16 @@ async def start_workflow(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
+    # RequestIdMiddleware sets state.request_id; propagate it into the workflow
+    # so logs + artifact frontmatter + Prometheus labels share the same trace.
+    correlation_id = getattr(request.state, "request_id", None) if request else None
     result = await start_bmad_planning_workflow(
         project_id=project_id,
         requirement_id=data.requirement_id,
         organization_id=org_id,
         requirement_text=data.requirement_text or requirement.source_text,
         db=db,
+        correlation_id=correlation_id,
     )
 
     return StartWorkflowResponse(
@@ -78,14 +83,78 @@ async def start_workflow(
     )
 
 
+def _assert_workflow_in_org(db: Session, workflow_id: str, org_id: str) -> None:
+    """Cross-org access guard. Raises 404 if workflow belongs to a different org."""
+    from app.models.workflow import WorkflowRun
+
+    run = (
+        db.query(WorkflowRun)
+        .filter(WorkflowRun.workflow_id == workflow_id, WorkflowRun.organization_id == org_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+
 @router.get("/agent-workflows/{workflow_id}")
 async def get_workflow(
     workflow_id: str,
+    org_id: str = Depends(get_current_organization_id),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Get BMAD workflow status by workflow ID."""
+    """Get BMAD workflow status + all persisted steps + artifact paths."""
+    _assert_workflow_in_org(db, workflow_id, org_id)
     return await get_workflow_status(workflow_id, db=db)
+
+
+@router.get("/agent-workflows/{workflow_id}/artifacts")
+async def list_workflow_artifacts(
+    workflow_id: str,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return every artifact path produced by a workflow's agents."""
+    _assert_workflow_in_org(db, workflow_id, org_id)
+    status = await get_workflow_status(workflow_id, db=db)
+    artifacts = []
+    for step in status.get("steps", []):
+        if step.get("artifact_path"):
+            artifacts.append({
+                "agent_name": step["agent_name"],
+                "step_order": step["step_order"],
+                "artifact_path": step["artifact_path"],
+            })
+    return artifacts
+
+
+@router.get("/agent-workflows/{workflow_id}/artifact-content")
+async def read_workflow_artifact(
+    workflow_id: str,
+    path: str,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Read the raw markdown content of one artifact produced by this workflow.
+
+    Path must match one of the artifact_paths persisted on the workflow's steps —
+    guards against arbitrary filesystem reads.
+    """
+    import os
+
+    _assert_workflow_in_org(db, workflow_id, org_id)
+    status = await get_workflow_status(workflow_id, db=db)
+    allowed_paths = {step.get("artifact_path") for step in status.get("steps", [])}
+    allowed_paths.discard(None)
+    if path not in allowed_paths:
+        raise HTTPException(status_code=403, detail="Path not associated with this workflow")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Artifact file missing on disk")
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    return {"path": path, "content": content}
 
 
 @router.post("/agent-workflows/{workflow_id}/approve")
@@ -126,10 +195,13 @@ def approve_step(
 @router.get("/agent-workflows/{workflow_id}/stream")
 async def stream_workflow_progress(
     workflow_id: str,
+    org_id: str = Depends(get_current_organization_id),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     """SSE stream of workflow step events. Client connects once; server pushes updates."""
+
+    _assert_workflow_in_org(db, workflow_id, org_id)
 
     async def event_generator():
         last_step_count = 0
@@ -216,13 +288,32 @@ async def signal_reject(
 @router.get("/projects/{project_id}/agent-workflows")
 def list_workflows(
     project_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     org_id: str = Depends(get_current_organization_id),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """List workflow runs for a project."""
+    """List workflow runs for a project (paginated)."""
     ensure_project_access(db, org_id, project_id)
     runs = list_workflow_runs(db, organization_id=org_id, project_id=project_id)
+    return _serialize_workflow_runs(runs[offset : offset + limit])
+
+
+@router.get("/agent-workflows")
+def list_all_workflows(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """List every workflow run for the current organization (paginated)."""
+    runs = list_workflow_runs(db, organization_id=org_id)
+    return _serialize_workflow_runs(runs[offset : offset + limit])
+
+
+def _serialize_workflow_runs(runs) -> list[dict]:
     return [
         {
             "workflow_id": r.workflow_id,

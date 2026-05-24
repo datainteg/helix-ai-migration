@@ -13,11 +13,15 @@ class LLMProviderType(str, Enum):
 
 SUPPORTED_PROVIDERS = [p.value for p in LLMProviderType]
 
+# BMAD agent codes — single source of truth, matches the 6 personas declared in
+# `_bmad/config.toml`. LLMAgentMapping rows use these codes as `agent_type`.
 AGENT_TYPES = [
-    "business_analyst", "architect", "data_engineer",
-    "qa_validation", "recon", "devops", "pm",
-    "code_analyzer", "code_review", "code_migration",
-    "notebook_generator", "dag_review", "version_control",
+    "bmad-agent-analyst",        # Mary    — Business Analyst
+    "bmad-agent-tech-writer",    # Paige   — Technical Writer
+    "bmad-agent-pm",             # John    — Product Manager
+    "bmad-agent-ux-designer",    # Sally   — UX Designer
+    "bmad-agent-architect",      # Winston — System Architect
+    "bmad-agent-dev",            # Amelia  — Senior Software Engineer
 ]
 
 

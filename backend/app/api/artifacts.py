@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Query, Request, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -31,11 +31,21 @@ async def upload_artifact(request: Request, project_id: str, file: UploadFile = 
 
 
 @router.get("/projects/{project_id}/artifacts")
-def api_list_artifacts(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def api_list_artifacts(
+    project_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
     user = get_current_user(db, user_id)
+    if not user.memberships:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="User has no organization membership")
     org_id = user.memberships[0].organization_id
     ensure_project_access(db, org_id, project_id)
-    return list_artifacts(db, org_id, project_id)
+    rows = list_artifacts(db, org_id, project_id)
+    return rows[offset : offset + limit]
 
 
 @router.get("/artifacts/{artifact_id}")

@@ -162,6 +162,45 @@ def list_agent_mappings(db: Session, org_id: str) -> list[AgentMappingResponse]:
     return [AgentMappingResponse.model_validate(m) for m in mappings]
 
 
+def replace_agent_mappings(
+    db: Session,
+    org_id: str,
+    mappings: list[AgentMappingCreate],
+) -> list[AgentMappingResponse]:
+    """Replace all agent mappings for an org atomically.
+
+    Validates every provider_id belongs to the org before deleting/inserting.
+    Used by the admin agent-mapping page's Save button.
+    """
+    for m in mappings:
+        provider = (
+            db.query(LLMProvider)
+            .filter(LLMProvider.id == m.provider_id, LLMProvider.organization_id == org_id)
+            .first()
+        )
+        if not provider:
+            raise HTTPException(status_code=404, detail=f"Provider {m.provider_id} not found in org")
+
+    db.query(LLMAgentMapping).filter(LLMAgentMapping.organization_id == org_id).delete()
+
+    created = []
+    for m in mappings:
+        row = LLMAgentMapping(
+            organization_id=org_id,
+            agent_type=m.agent_type,
+            provider_id=m.provider_id,
+            model=m.model,
+            temperature=m.temperature,
+            max_tokens=m.max_tokens,
+        )
+        db.add(row)
+        created.append(row)
+    db.commit()
+    for row in created:
+        db.refresh(row)
+    return [AgentMappingResponse.model_validate(m) for m in created]
+
+
 def _to_response(provider: LLMProvider) -> LLMProviderResponse:
     latest_secret = None
     if provider.secrets:

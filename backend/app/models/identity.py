@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, func
 from sqlalchemy.orm import relationship
@@ -78,21 +77,6 @@ class OrgInvitation(BaseModel):
     email = Column(String(255), nullable=False, index=True)
     role_id = Column(String(36), ForeignKey("roles.id"), nullable=True)
     token_hash = Column(String(255), unique=True, nullable=False, index=True)
-
-
-class OrganizationMember(BaseModel):
-    __tablename__ = "organization_members"
-
-    organization_id = Column(String(36), ForeignKey("organizations.id"), nullable=False)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
-    role_id = Column(String(36), ForeignKey("roles.id"), nullable=False)
-    status = Column(String(50), default="active", nullable=False)
-
-    organization = relationship("Organization", back_populates="members")
-    user = relationship("User", back_populates="memberships")
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    accepted_at = Column(DateTime(timezone=True), nullable=True)
-    status = Column(String(50), default="pending", nullable=False)
 
 
 class OrganizationMember(BaseModel):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -7,7 +7,7 @@ from app.schemas.project import (
     ProjectCreate, ProjectResponse,
     SubProjectCreate, SubProjectResponse,
     RequirementCreate, RequirementResponse,
-    ConnectionCreate, ConnectionResponse,
+    ConnectionCreate, ConnectionUpdate, ConnectionResponse, ConnectionTestResponse,
     SchemaCreate, SchemaResponse,
     TableCreate, TableResponse,
     ColumnCreate,
@@ -15,9 +15,17 @@ from app.schemas.project import (
 from app.services.project_service import (
     create_project, list_projects, get_project,
     add_subproject, add_requirement,
-    add_source, list_sources, add_target, list_targets,
+    add_source, list_sources, update_source, delete_source, get_source_config,
+    add_target, list_targets, update_target, delete_target, get_target_config,
     add_schema, add_table, add_column,
 )
+from app.services.connector_service import test_connection as svc_test_connection
+from app.services.connector_service import (
+    discover_schemas as svc_discover_schemas,
+    discover_tables as svc_discover_tables,
+    discover_columns as svc_discover_columns,
+)
+from app.rate_limiting import limiter
 from app.services.auth_service import get_current_user
 from app.api.audit import write_audit
 
@@ -39,8 +47,15 @@ def api_create_project(request: Request, data: ProjectCreate, user_id: str = Dep
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
-def api_list_projects(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db), include_archived: bool = Query(False)):
-    return list_projects(db, _org_id(user_id, db), include_archived=include_archived)
+def api_list_projects(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    include_archived: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    rows = list_projects(db, _org_id(user_id, db), include_archived=include_archived)
+    return rows[offset : offset + limit]
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -106,8 +121,14 @@ def api_add_requirement(project_id: str, data: RequirementCreate, user_id: str =
 # ── Sources ──
 
 @router.post("/projects/{project_id}/sources", response_model=ConnectionResponse, status_code=201)
-def api_add_source(project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return add_source(db, _org_id(user_id, db), project_id, data)
+def api_add_source(request: Request, project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    result = add_source(db, org_id, project_id, data)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="source_connection_created",
+                entity_type="source_connection", entity_id=result.id,
+                meta={"connector_type": data.connector_type, "name": data.name}, request=request)
+    return result
 
 
 @router.get("/projects/{project_id}/sources", response_model=list[ConnectionResponse])
@@ -115,16 +136,109 @@ def api_list_sources(project_id: str, user_id: str = Depends(get_current_user_id
     return list_sources(db, _org_id(user_id, db), project_id)
 
 
+@router.patch("/projects/{project_id}/sources/{source_id}", response_model=ConnectionResponse)
+def api_update_source(project_id: str, source_id: str, data: ConnectionUpdate, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    result = update_source(db, org_id, project_id, source_id, data)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="source_connection_updated",
+                entity_type="source_connection", entity_id=source_id, request=request)
+    return result
+
+
+@router.delete("/projects/{project_id}/sources/{source_id}", status_code=204)
+def api_delete_source(project_id: str, source_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    delete_source(db, org_id, project_id, source_id)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="source_connection_deleted",
+                entity_type="source_connection", entity_id=source_id, request=request)
+
+
+@router.post("/projects/{project_id}/sources/{source_id}/test", response_model=ConnectionTestResponse)
+@limiter.limit("20/minute")
+async def api_test_source(request: Request, project_id: str, source_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Test a stored source connection using its decrypted credentials."""
+    org_id = _org_id(user_id, db)
+    conn, config = get_source_config(db, org_id, project_id, source_id)
+    if not config:
+        raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    result = await svc_test_connection(conn.connector_type, config)
+    conn.status = "active" if result.success else "error"
+    db.commit()
+    return ConnectionTestResponse(success=result.success, message=result.message)
+
+
+@router.post("/projects/{project_id}/sources/{source_id}/discover/schemas")
+@limiter.limit("30/minute")
+async def api_discover_source_schemas(request: Request, project_id: str, source_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    conn, config = get_source_config(db, org_id, project_id, source_id)
+    if not config:
+        raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    result = await svc_discover_schemas(conn.connector_type, config)
+    return [{"schema_name": s.schema_name} for s in result]
+
+
 # ── Targets ──
 
 @router.post("/projects/{project_id}/targets", response_model=ConnectionResponse, status_code=201)
-def api_add_target(project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    return add_target(db, _org_id(user_id, db), project_id, data)
+def api_add_target(request: Request, project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    result = add_target(db, org_id, project_id, data)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="target_connection_created",
+                entity_type="target_connection", entity_id=result.id,
+                meta={"connector_type": data.connector_type, "name": data.name}, request=request)
+    return result
 
 
 @router.get("/projects/{project_id}/targets", response_model=list[ConnectionResponse])
 def api_list_targets(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return list_targets(db, _org_id(user_id, db), project_id)
+
+
+@router.patch("/projects/{project_id}/targets/{target_id}", response_model=ConnectionResponse)
+def api_update_target(project_id: str, target_id: str, data: ConnectionUpdate, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    result = update_target(db, org_id, project_id, target_id, data)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="target_connection_updated",
+                entity_type="target_connection", entity_id=target_id, request=request)
+    return result
+
+
+@router.delete("/projects/{project_id}/targets/{target_id}", status_code=204)
+def api_delete_target(project_id: str, target_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    delete_target(db, org_id, project_id, target_id)
+    from app.api.audit import write_audit
+    write_audit(db, org_id=org_id, actor_id=user_id, action="target_connection_deleted",
+                entity_type="target_connection", entity_id=target_id, request=request)
+
+
+@router.post("/projects/{project_id}/targets/{target_id}/test", response_model=ConnectionTestResponse)
+@limiter.limit("20/minute")
+async def api_test_target(request: Request, project_id: str, target_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    conn, config = get_target_config(db, org_id, project_id, target_id)
+    if not config:
+        raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    result = await svc_test_connection(conn.connector_type, config)
+    conn.status = "active" if result.success else "error"
+    db.commit()
+    return ConnectionTestResponse(success=result.success, message=result.message)
+
+
+@router.post("/projects/{project_id}/targets/{target_id}/discover/schemas")
+@limiter.limit("30/minute")
+async def api_discover_target_schemas(request: Request, project_id: str, target_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    org_id = _org_id(user_id, db)
+    conn, config = get_target_config(db, org_id, project_id, target_id)
+    if not config:
+        raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    result = await svc_discover_schemas(conn.connector_type, config)
+    return [{"schema_name": s.schema_name} for s in result]
 
 
 # ── Schema Metadata ──

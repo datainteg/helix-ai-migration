@@ -70,12 +70,14 @@ def upgrade():
     )
 
     # H-6: columns — nullable String → Boolean, ordinal_position String → Integer
+    op.execute("ALTER TABLE columns ALTER COLUMN nullable DROP DEFAULT")
     op.alter_column("columns", "nullable",
         existing_type=sa.String(10),
         type_=sa.Boolean(),
         existing_nullable=True,
         postgresql_using="CASE WHEN nullable = 'YES' OR nullable = 'true' THEN true ELSE false END",
     )
+    op.execute("ALTER TABLE columns ALTER COLUMN nullable SET DEFAULT false")
     op.alter_column("columns", "ordinal_position",
         existing_type=sa.String(10),
         type_=sa.Integer(),

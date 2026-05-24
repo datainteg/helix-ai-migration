@@ -52,6 +52,11 @@ class SourceConnection(BaseModel):
     name = Column(String(255), nullable=False)
     connector_type = Column(String(50), nullable=False)
     status = Column(String(50), default="draft")
+    # Encrypted JSON blob of the connector config (host, port, username, password, etc.).
+    # Fernet-encrypted using app.services.secret_service. NEVER returned via API.
+    encrypted_config = Column(Text, nullable=True)
+    # Safe-to-display redacted preview of the config (passwords masked).
+    config_masked = Column(String(500), nullable=True)
 
     project = relationship("Project", back_populates="source_connections")
     schemas = relationship("SchemaMetadata", back_populates="source_connection", foreign_keys="SchemaMetadata.source_connection_id")
@@ -65,6 +70,8 @@ class TargetConnection(BaseModel):
     name = Column(String(255), nullable=False)
     connector_type = Column(String(50), nullable=False)
     status = Column(String(50), default="draft")
+    encrypted_config = Column(Text, nullable=True)
+    config_masked = Column(String(500), nullable=True)
 
     project = relationship("Project", back_populates="target_connections")
     schemas = relationship("SchemaMetadata", back_populates="target_connection", foreign_keys="SchemaMetadata.target_connection_id")

@@ -11,7 +11,7 @@ from app.schemas.llm import (
 from app.services.llm_provider_service import (
     create_provider, list_providers, get_provider, update_provider,
     rotate_key, test_connection, delete_provider,
-    create_agent_mapping, list_agent_mappings,
+    create_agent_mapping, list_agent_mappings, replace_agent_mappings,
 )
 from app.api.audit import write_audit
 
@@ -119,3 +119,17 @@ def api_list_mappings(user_id: str = Depends(require_permission("admin:llm:read"
 @router.post("/llm-agent-mappings", response_model=AgentMappingResponse, status_code=201)
 def api_create_mapping(data: AgentMappingCreate, user_id: str = Depends(require_permission("admin:llm:write")), db: Session = Depends(get_db)):
     return create_agent_mapping(db, _org(db, user_id), data)
+
+
+@router.put("/llm-agent-mappings", response_model=list[AgentMappingResponse])
+def api_replace_mappings(
+    data: list[AgentMappingCreate],
+    user_id: str = Depends(require_permission("admin:llm:write")),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    """Atomically replace all agent mappings for the current organization."""
+    org_id = _org(db, user_id)
+    result = replace_agent_mappings(db, org_id, data)
+    write_audit(db, org_id, user_id, "llm_agent_mappings_replaced", "llm_agent_mapping", "*", request=request)
+    return result
