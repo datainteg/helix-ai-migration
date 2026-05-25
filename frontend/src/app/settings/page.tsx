@@ -38,8 +38,10 @@ const PRESET_COLORS = [
 
 const FONT_PRESETS = [11.5, 13.5, 15, 16];
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function SettingsPage() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const t = useTweaks();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -54,7 +56,7 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8 max-w-[1100px]">
         <SectionNav />
         <div className="space-y-8">
-          <ProfileSection user={user} />
+          <ProfileSection user={user} token={token} />
           {mounted && <AppearanceSection t={t} />}
           <NotificationsSection />
           <AccountSection onLogout={logout} />
@@ -92,17 +94,65 @@ function SectionNav() {
 
 // ── Profile ─────────────────────────────────────────────────────────
 
-function ProfileSection({ user }: { user: { email: string; name: string } | null }) {
+function ProfileSection({
+  user,
+  token,
+}: {
+  user: { email: string; name: string } | null;
+  token: string | null;
+}) {
+  const [name, setName] = useState(user?.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    setName(user?.name ?? "");
+  }, [user?.name]);
+
+  const dirty = name.trim() !== "" && name.trim() !== (user?.name ?? "");
+
+  const save = async () => {
+    if (!token || !dirty) return;
+    setSaving(true);
+    setErr("");
+    setSavedAt(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/users/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({ detail: "Save failed" }));
+        throw new Error(j.detail || "Save failed");
+      }
+      setSavedAt(Date.now());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section id="profile">
-      <SectionHeader title="Profile" subtitle="Your identity in this workspace." />
+      <SectionHeader
+        title="Profile"
+        subtitle="Your identity in this workspace."
+        action={
+          <Button variant="primary" size="sm" disabled={!dirty} loading={saving} onClick={save}>
+            {savedAt && !dirty ? "Saved" : "Save"}
+          </Button>
+        }
+      />
       <Card className="p-5 space-y-4">
         <Field label="Name">
           <input
             type="text"
-            value={user?.name ?? ""}
-            readOnly
-            className="w-full h-9 rounded-md border border-hx bg-app-2 px-3 text-[12.5px] text-ink-2"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full h-9 rounded-md border border-hx bg-surface px-3 text-[12.5px] text-ink focus-ring"
           />
         </Field>
         <Field label="Email">
@@ -113,8 +163,9 @@ function ProfileSection({ user }: { user: { email: string; name: string } | null
             className="w-full h-9 rounded-md border border-hx bg-app-2 px-3 text-[12.5px] text-ink-2 font-mono"
           />
         </Field>
+        {err && <p className="text-[11.5px] text-err">{err}</p>}
         <p className="text-[11.5px] text-ink-4">
-          Profile fields are read-only until the backend exposes a self-service update endpoint.
+          Email + password changes go through the auth flow (sign out, then use forgot-password).
         </p>
       </Card>
     </section>

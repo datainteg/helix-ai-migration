@@ -167,12 +167,10 @@ def approve_step(
     db: Session = Depends(get_db),
 ):
     """Record a human approval decision for a workflow step."""
-    run = get_workflow_run(db, workflow_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    _assert_workflow_in_org(db, workflow_id, org_id)
 
     new_status = "approved" if data.decision == "approved" else "rejected"
-    update_workflow_run_status(db, workflow_id, new_status)
+    update_workflow_run_status(db, workflow_id, new_status, organization_id=org_id)
 
     write_audit(
         db,
@@ -246,15 +244,18 @@ async def signal_approve(
     import os
     from temporalio.client import Client
 
+    _assert_workflow_in_org(db, workflow_id, org_id)
     try:
         client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("approve", data.notes)
-        update_workflow_run_status(db, workflow_id, "approved")
+        update_workflow_run_status(db, workflow_id, "approved", organization_id=org_id)
         write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_approved",
                     entity_type="workflow_run", entity_id=workflow_id,
                     meta={"notes": data.notes}, request=request)
         return {"workflow_id": workflow_id, "signal": "approve", "status": "sent"}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
 
@@ -272,15 +273,18 @@ async def signal_reject(
     import os
     from temporalio.client import Client
 
+    _assert_workflow_in_org(db, workflow_id, org_id)
     try:
         client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("reject", data.notes)
-        update_workflow_run_status(db, workflow_id, "rejected")
+        update_workflow_run_status(db, workflow_id, "rejected", organization_id=org_id)
         write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_rejected",
                     entity_type="workflow_run", entity_id=workflow_id,
                     meta={"notes": data.notes}, request=request)
         return {"workflow_id": workflow_id, "signal": "reject", "status": "sent"}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
 

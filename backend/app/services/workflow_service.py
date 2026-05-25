@@ -322,8 +322,15 @@ def update_workflow_run_status(
     db: Session,
     workflow_id: str,
     status: str,
+    organization_id: str | None = None,
 ) -> WorkflowRun | None:
-    run = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
+    """Update a workflow run's status. Pass `organization_id` to enforce
+    tenant isolation — when set, a workflow from another org is treated as
+    not found (silent no-op + returns None) instead of being mutated."""
+    q = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id)
+    if organization_id is not None:
+        q = q.filter(WorkflowRun.organization_id == organization_id)
+    run = q.first()
     if run:
         run.status = status
         db.commit()
@@ -361,8 +368,17 @@ def save_workflow_step(
     return step
 
 
-def get_workflow_run(db: Session, workflow_id: str) -> WorkflowRun | None:
-    return db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id).first()
+def get_workflow_run(
+    db: Session,
+    workflow_id: str,
+    organization_id: str | None = None,
+) -> WorkflowRun | None:
+    """Load a workflow run by id. Pass `organization_id` to scope the lookup
+    to a single tenant — recommended for all API-layer callers."""
+    q = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id)
+    if organization_id is not None:
+        q = q.filter(WorkflowRun.organization_id == organization_id)
+    return q.first()
 
 
 def list_workflow_runs(db: Session, organization_id: str, project_id: str | None = None) -> list[WorkflowRun]:

@@ -67,6 +67,7 @@ export default function LLMSettingsPage() {
   const [catalogue, setCatalogue] = useState<Record<string, CatalogueEntry>>({});
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
   const [error, setError] = useState("");
@@ -110,31 +111,88 @@ export default function LLMSettingsPage() {
   const setExtra = (k: string, v: string) =>
     setForm((f) => ({ ...f, extra_config: { ...f.extra_config, [k]: v } }));
 
-  const addProvider = async (e: React.FormEvent) => {
+  const cleanedExtraConfig = (cfg: Record<string, string>) =>
+    Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== ""));
+
+  const closeForm = () => {
+    setShowAdd(false);
+    setEditingProviderId(null);
+    setForm(EMPTY_FORM);
+    setError("");
+  };
+
+  const startEdit = (p: Provider) => {
+    setEditingProviderId(p.id);
+    setForm({
+      provider_type: p.provider_type,
+      name: p.name,
+      base_url: p.base_url ?? "",
+      default_model: p.default_model,
+      // API key is blank on edit — leaving it blank means "don't rotate".
+      api_key: "",
+      extra_config: (p.extra_config ?? {}) as Record<string, string>,
+    });
+    setShowAdd(true);
+    setError("");
+    setTestResult(null);
+  };
+
+  const addProvider = async (form: FormState) => {
+    const payload = { ...form, extra_config: cleanedExtraConfig(form.extra_config) };
+    const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to add provider" }));
+      throw new Error(err.detail || "Failed to add provider");
+    }
+  };
+
+  const updateProvider = async (id: string, form: FormState) => {
+    const patchBody: Record<string, unknown> = {
+      name: form.name,
+      base_url: form.base_url,
+      default_model: form.default_model,
+      status: "active",
+      extra_config: cleanedExtraConfig(form.extra_config),
+    };
+    const res = await fetch(`${API_BASE}/api/v1/llm-providers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeader },
+      body: JSON.stringify(patchBody),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to update provider" }));
+      throw new Error(err.detail || "Failed to update provider");
+    }
+    if (form.api_key.trim() !== "") {
+      const rotateRes = await fetch(`${API_BASE}/api/v1/llm-providers/${id}/rotate-key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ new_api_key: form.api_key }),
+      });
+      if (!rotateRes.ok) {
+        const err = await rotateRes.json().catch(() => ({ detail: "Failed to rotate API key" }));
+        throw new Error(err.detail || "Failed to rotate API key");
+      }
+    }
+  };
+
+  const submitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     try {
-      const payload = {
-        ...form,
-        // Drop empty extra_config keys so the backend stores null, not {}.
-        extra_config: Object.fromEntries(
-          Object.entries(form.extra_config).filter(([, v]) => v !== "")
-        ),
-      };
-      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to add provider" }));
-        throw new Error(err.detail || "Failed to add provider");
+      if (editingProviderId) {
+        await updateProvider(editingProviderId, form);
+      } else {
+        await addProvider(form);
       }
-      setShowAdd(false);
-      setForm(EMPTY_FORM);
+      closeForm();
       fetchProviders();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add provider");
+      setError(err instanceof Error ? err.message : "Failed to save provider");
     }
   };
 
@@ -161,7 +219,18 @@ export default function LLMSettingsPage() {
       title="LLM Providers"
       subtitle="Configure and manage AI providers, models, and routing for your migration agents."
       actions={
-        <Button onClick={() => { setShowAdd((v) => !v); setError(""); }}>
+        <Button
+          onClick={() => {
+            if (showAdd) {
+              closeForm();
+            } else {
+              setEditingProviderId(null);
+              setForm(EMPTY_FORM);
+              setShowAdd(true);
+              setError("");
+            }
+          }}
+        >
           {showAdd ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {showAdd ? "Cancel" : "Add Provider"}
         </Button>
@@ -182,15 +251,23 @@ export default function LLMSettingsPage() {
       )}
 
       {showAdd && (
-        <Card title="Add Provider" description="Configure a new LLM provider for agents to use.">
-          <form onSubmit={addProvider} className="space-y-4">
+        <Card
+          title={editingProviderId ? `Edit Provider — ${form.name || "—"}` : "Add Provider"}
+          description={
+            editingProviderId
+              ? "Update this provider's settings. Leave the API key blank to keep the current one."
+              : "Configure a new LLM provider for agents to use."
+          }
+        >
+          <form onSubmit={submitForm} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Provider type</label>
                 <select
                   value={form.provider_type}
                   onChange={(e) => handleProviderTypeChange(e.target.value)}
-                  className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] focus-ring"
+                  className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] focus-ring disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={!!editingProviderId}
                 >
                   {Object.entries(PROVIDER_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
@@ -247,7 +324,12 @@ export default function LLMSettingsPage() {
 
             <div>
               <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
-                API key {!apiKeyRequired && <span className="text-ink-4 font-normal">(optional — uses IAM / ADC)</span>}
+                API key{" "}
+                {editingProviderId ? (
+                  <span className="text-ink-4 font-normal">(leave blank to keep current)</span>
+                ) : !apiKeyRequired ? (
+                  <span className="text-ink-4 font-normal">(optional — uses IAM / ADC)</span>
+                ) : null}
               </label>
               <input
                 type="password"
@@ -255,12 +337,13 @@ export default function LLMSettingsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
                 className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
                 placeholder={
-                  form.provider_type === "anthropic" ? "sk-ant-…" :
-                  form.provider_type === "azure"     ? "Azure OpenAI key" :
+                  editingProviderId                   ? "Leave blank to keep current key" :
+                  form.provider_type === "anthropic"  ? "sk-ant-…" :
+                  form.provider_type === "azure"      ? "Azure OpenAI key" :
                   apiKeyRequired                      ? "sk-…" :
                                                         "Leave blank to use cloud auth"
                 }
-                required={apiKeyRequired}
+                required={!editingProviderId && apiKeyRequired}
               />
               {form.provider_type === "deepseek" && (
                 <p className="mt-1.5 text-[11.5px] text-ink-3">

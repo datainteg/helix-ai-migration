@@ -42,7 +42,14 @@ async def deliver_webhook(db: Session, org_id: str, event: str, payload: dict) -
 
             headers = {"Content-Type": "application/json", "X-Helix-Event": event}
             if ep.secret:
-                headers["X-Helix-Signature"] = _sign_payload(ep.secret, body)
+                # Decrypt the stored Fernet ciphertext; fall back to the raw
+                # value to keep pre-encryption rows working through migration.
+                from app.services.secret_service import decrypt_value
+                try:
+                    signing_secret = decrypt_value(ep.secret)
+                except Exception:  # noqa: BLE001
+                    signing_secret = ep.secret
+                headers["X-Helix-Signature"] = _sign_payload(signing_secret, body)
 
             delivery = WebhookDelivery(
                 endpoint_id=ep.id,

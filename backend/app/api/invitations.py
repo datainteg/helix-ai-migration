@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
@@ -17,9 +17,26 @@ from app.api.audit import write_audit
 router = APIRouter(tags=["invitations"])
 
 
+# Roles a non-super-admin caller is allowed to grant via invitation.
+# `admin` and `super_admin` are intentionally excluded — promoting someone to
+# admin must go through the super-admin promotion endpoint, not an invite.
+_INVITABLE_ROLES = {"viewer", "editor", "developer", "analyst"}
+
+
 class InviteRequest(BaseModel):
     email: EmailStr
     role: str = "viewer"
+
+    @field_validator("role")
+    @classmethod
+    def _restrict_role(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in _INVITABLE_ROLES:
+            raise ValueError(
+                f"role must be one of {sorted(_INVITABLE_ROLES)}; "
+                "admin / super_admin require platform-admin promotion"
+            )
+        return v
 
 
 class AcceptInviteRequest(BaseModel):

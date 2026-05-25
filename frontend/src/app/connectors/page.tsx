@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Search,
   Plus,
@@ -12,13 +12,16 @@ import {
   Upload,
   Info,
   AlertTriangle,
+  Plug,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { AppIcon } from "@/components/icons";
-import { Button, Card, Tabs } from "@/components/ui";
+import { Button, Card, Tabs, LoadingState, EmptyState } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 
-// TODO: hydrate from API
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 interface ConnectorRow {
   name: string;
   category: string;
@@ -31,26 +34,54 @@ interface ConnectorRow {
   letter: string;
 }
 
-const CONNECTORS: ConnectorRow[] = [
-  { name: "PostgreSQL", category: "database", instances: 8, status: "ok", p95: "12ms", rows: "412M", authored: "datainteg", color: "#336791", letter: "P" },
-  { name: "Snowflake", category: "warehouse", instances: 5, status: "ok", p95: "28ms", rows: "2.4B", authored: "datainteg", color: "#29B5E8", letter: "S" },
-  { name: "Oracle", category: "database", instances: 4, status: "warn", p95: "184ms", rows: "8.1B", authored: "datainteg", color: "#E11D48", letter: "O" },
-  { name: "SQL Server", category: "database", instances: 6, status: "ok", p95: "22ms", rows: "1.2B", authored: "datainteg", color: "#A91D22", letter: "M" },
-  { name: "MySQL", category: "database", instances: 3, status: "ok", p95: "18ms", rows: "208M", authored: "datainteg", color: "#00758F", letter: "M" },
-  { name: "DB2", category: "database", instances: 2, status: "ok", p95: "98ms", rows: "640M", authored: "datainteg", color: "#1F70C1", letter: "D" },
-  { name: "Snowflake Streams", category: "warehouse", instances: 2, status: "ok", p95: "8ms", rows: "—", authored: "datainteg", color: "#29B5E8", letter: "S" },
-  { name: "Databricks", category: "warehouse", instances: 2, status: "ok", p95: "45ms", rows: "318M", authored: "datainteg", color: "#FF3621", letter: "D" },
-  { name: "BigQuery", category: "warehouse", instances: 1, status: "ok", p95: "62ms", rows: "24M", authored: "datainteg", color: "#4285F4", letter: "B" },
-  { name: "S3", category: "object", instances: 3, status: "ok", p95: "8ms", rows: "—", authored: "datainteg", color: "#FF9900", letter: "S" },
-  { name: "GCS", category: "object", instances: 1, status: "ok", p95: "12ms", rows: "—", authored: "datainteg", color: "#4285F4", letter: "G" },
-  { name: "Azure Blob", category: "object", instances: 1, status: "ok", p95: "14ms", rows: "—", authored: "datainteg", color: "#0078D4", letter: "A" },
-  { name: "Salesforce", category: "saas", instances: 2, status: "warn", p95: "240ms", rows: "8.4M", authored: "datainteg", color: "#00A1E0", letter: "S" },
-  { name: "CSV", category: "file", instances: "n/a", status: "ok", p95: "—", rows: "—", authored: "datainteg", color: "#71717A", letter: "C" },
-  { name: "Excel", category: "file", instances: "n/a", status: "ok", p95: "—", rows: "—", authored: "datainteg", color: "#107C41", letter: "X" },
-  { name: "DataStage", category: "legacy", instances: 1, status: "ok", p95: "—", rows: "—", authored: "datainteg", color: "#054ADA", letter: "D" },
-  { name: "SAS", category: "legacy", instances: 1, status: "warn", p95: "—", rows: "—", authored: "datainteg", color: "#0070C0", letter: "S" },
-  { name: "Custom: Acme ERP", category: "custom", instances: 1, status: "ok", p95: "44ms", rows: "12M", authored: "you", color: "#0A0A0A", letter: "A" },
-];
+// Shape returned by GET /api/v1/connectors/registry.
+// The registry-mode field maps to "authored" (built_in → datainteg, custom → you).
+interface RegistryEntry {
+  connector_type?: string;
+  display_name?: string;
+  name?: string;
+  category?: string;
+  mode?: string;
+  capabilities?: Record<string, boolean>;
+  supports_test?: boolean;
+  supports_discover_schemas?: boolean;
+  supports_discover_tables?: boolean;
+  supports_discover_columns?: boolean;
+  supports_row_count?: boolean;
+}
+
+// Map a connector_type / display_name to a UI category bucket so the tab
+// filter (database / warehouse / object / saas / file / legacy / custom)
+// continues to slice the grid even though the backend doesn't return one.
+function categoryFor(entry: RegistryEntry): string {
+  if (entry.category) return entry.category;
+  if (entry.mode === "custom") return "custom";
+  const slug = (entry.connector_type || entry.name || entry.display_name || "")
+    .toLowerCase();
+  if (["s3", "gcs", "azure", "azure_blob", "minio"].some((k) => slug.includes(k))) return "object";
+  if (["snowflake", "databricks", "bigquery", "redshift", "synapse"].some((k) => slug.includes(k))) return "warehouse";
+  if (["salesforce", "hubspot", "zendesk", "workday", "netsuite"].some((k) => slug.includes(k))) return "saas";
+  if (["csv", "excel", "parquet", "json", "xml"].some((k) => slug === k || slug.includes(k))) return "file";
+  if (["datastage", "informatica", "sas", "abinitio"].some((k) => slug.includes(k))) return "legacy";
+  return "database";
+}
+
+function rowFromEntry(entry: RegistryEntry): ConnectorRow {
+  const name = entry.display_name || entry.name || entry.connector_type || "Unknown";
+  const isCustom = entry.mode === "custom";
+  return {
+    name,
+    category: categoryFor(entry),
+    instances: "—",
+    status: "ok",
+    p95: "—",
+    rows: "—",
+    authored: isCustom ? "you" : "datainteg",
+    // color/letter are unused by AppIcon (it derives its own); keep harmless defaults.
+    color: "#71717A",
+    letter: (name[0] || "?").toUpperCase(),
+  };
+}
 
 // Map a connector display name (or row entry) to an AppIcon slug. AppIcon
 // renders the real brand SVG when available, letter fallback when not. For
@@ -969,22 +1000,61 @@ function ConnectModal({ modal, onClose }: ConnectModalProps) {
 }
 
 export default function ConnectorsPage() {
+  const { token } = useAuth();
   const [cat, setCat] = useState<string>("all");
+  const [query, setQuery] = useState<string>("");
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [connectors, setConnectors] = useState<ConnectorRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    setLoading(true);
+    setLoadError(false);
+    fetch(`${API_BASE}/api/v1/connectors/registry`, { headers })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<RegistryEntry[]>;
+      })
+      .then((entries) => {
+        if (cancelled) return;
+        const rows = Array.isArray(entries) ? entries.map(rowFromEntry) : [];
+        setConnectors(rows);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setConnectors([]);
+        setLoadError(true);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [token]);
 
   const categories = ["database", "warehouse", "object", "saas", "file", "legacy", "custom"];
-  const filtered = cat === "all" ? CONNECTORS : CONNECTORS.filter((c) => c.category === cat);
+  const q = query.trim().toLowerCase();
+  const matchesSearch = (c: ConnectorRow) =>
+    q === "" || c.name.toLowerCase().includes(q) || c.category.toLowerCase().includes(q);
+  const filtered = (cat === "all" ? connectors : connectors.filter((c) => c.category === cat))
+    .filter(matchesSearch);
 
   const counts: Record<string, number> = {
-    all: CONNECTORS.length,
+    all: connectors.length,
     ...Object.fromEntries(
-      categories.map((k) => [k, CONNECTORS.filter((c) => c.category === k).length]),
+      categories.map((k) => [k, connectors.filter((c) => c.category === k).length]),
     ),
   };
 
+  const instancesTotal = connectors.reduce((acc, c) => acc + (typeof c.instances === "number" ? c.instances : 0), 0);
+  const eyebrow = loading
+    ? "CONNECTORS · LOADING…"
+    : `CONNECTORS · ${connectors.length} ACTIVE${instancesTotal ? ` · ${instancesTotal} INSTANCES` : ""}`;
+
   return (
     <AppShell
-      eyebrow="CONNECTORS · 18 ACTIVE · 42 INSTANCES"
+      eyebrow={eyebrow}
       title="Connectors"
       description="First-class connectors for databases, warehouses, files and object storage. Pluggable framework for custom integrations."
       actions={
@@ -1027,6 +1097,8 @@ export default function ConnectorsPage() {
             />
             <input
               placeholder="Search connectors…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               className="bg-transparent border-0 outline-none w-full text-ink"
               style={{ fontSize: 12.5, height: "100%" }}
             />
@@ -1047,6 +1119,25 @@ export default function ConnectorsPage() {
           />
         </div>
 
+        {loading ? (
+          <LoadingState label="Loading connectors…" />
+        ) : connectors.length === 0 ? (
+          <EmptyState
+            icon={<Plug className="h-5 w-5" />}
+            title={loadError ? "Couldn't load connectors" : "No connectors available"}
+            description={
+              loadError
+                ? "The connector registry is unreachable. Check the API and try again."
+                : "No connector types are registered yet. Add a custom connector via the SDK."
+            }
+            action={
+              <Button variant="outline" onClick={() => setModal({ mode: "new" })}>
+                <Plus size={13} /> New connection
+              </Button>
+            }
+          />
+        ) : (
+          <>
         {/* Grid */}
         <div
           className="grid"
@@ -1122,6 +1213,8 @@ export default function ConnectorsPage() {
             </Button>
           </div>
         </div>
+          </>
+        )}
       </div>
       {modal && <ConnectModal modal={modal} onClose={() => setModal(null)} />}
     </AppShell>

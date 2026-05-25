@@ -29,6 +29,12 @@ class UserPreferencesUpdate(BaseModel):
     preferences: dict
 
 
+class UserProfileUpdate(BaseModel):
+    """Self-service update of the caller's name. Email change is intentionally
+    not exposed here — email rotation is an admin-level operation."""
+    name: Optional[str] = None
+
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str

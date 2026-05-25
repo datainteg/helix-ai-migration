@@ -6,20 +6,25 @@
  * Visual layout ported from `Helix Figma Frontend/pages-setup.jsx` (6 steps:
  * Workspace → LLM provider → Agent routing → First connection → First project → Launch).
  *
- * Backend reality: only `POST /api/v1/auth/first-admin` exists today.
- *  - Step 0 (Workspace) is the ONLY step that calls the backend (via
- *    `useAuth().setupFirstAdmin`). It collects org name/slug and admin
- *    credentials and provisions the org.
- *  - Steps 1-5 render the figma UI for visual continuity, but do NOT
- *    persist anything. Each carries a "configure later in /settings"
- *    note. Their primary button just advances `step`.
- *  - Step 5 ("Launch") has an "Open Helix Console" button that routes
- *    to `/dashboard`.
+ * Every step now persists to the backend:
+ *  - Step 0 (Workspace)      → POST /api/v1/auth/first-admin (provisions org + admin,
+ *                              returns access_token used for steps 1-4).
+ *  - Step 1 (LLM provider)   → POST /api/v1/llm-providers for each selected provider.
+ *                              Provider IDs are captured for the routing step.
+ *  - Step 2 (Agent routing)  → PUT  /api/v1/llm-agent-mappings (atomic replace) with
+ *                              the 6 BMAD agents → provider/model pairs.
+ *  - Step 3 (First connection) — collected locally only; persisted in step 4 once a
+ *                              project exists (sources are project-scoped).
+ *  - Step 4 (First project)  → POST /api/v1/projects then, if step 3 was filled,
+ *                              POST /api/v1/projects/{id}/sources.
+ *  - Step 5 (Launch)         → review screen with real IDs; "Open Helix Console" → /dashboard.
  *
- * TODO: wire steps 1-4 when LLM-provider/connector/project endpoints land.
+ * Auth note: step 0 calls the first-admin endpoint directly (not the auth-context
+ * helper) because the helper unconditionally pushes to /dashboard on success. We
+ * still store the token in localStorage so other parts of the app pick it up.
  */
 
-import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -33,10 +38,11 @@ import {
   X,
 } from "lucide-react";
 
-import { useAuth } from "@/lib/auth-context";
 import { HelixLogo } from "@/components/layout/HelixLogo";
 import { LLMIcon, AgentIcon } from "@/components/icons";
 import { Button, Chip, ErrorBanner } from "@/components/ui";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // ─── Step manifest ────────────────────────────────────────────────────
 
@@ -60,10 +66,10 @@ const STEP_TITLES = [
 
 const STEP_DESCRIPTIONS = [
   "Everything below is editable later. Helix uses this to provision your organization and seed your first admin account.",
-  "Helix is BYO-LLM. This step is a preview — wire real provider credentials from /admin/llm-settings after setup.",
-  "BMAD's 6 agents have different cost/quality trade-offs. Configure routing later from /admin/agent-mapping.",
-  "Add a database, warehouse, file source, or S3 bucket. Configure connectors later from /connectors.",
-  "Define a single migration to seed the workflow. You can create projects later from /projects.",
+  "Helix is BYO-LLM. Pick one or more providers, paste the API key, and we'll persist them to /admin/llm-settings.",
+  "BMAD's 6 agents have different cost/quality trade-offs. Set defaults now — change later from /admin/agent-mapping.",
+  "Add a database, warehouse, file source, or S3 bucket. The connection is saved once you create the project in the next step.",
+  "Define a single migration to seed the workflow. You can create more projects later from /projects.",
   "Your workspace is provisioned. Open the console to view dashboards, agents, and your first migration.",
 ];
 
@@ -79,6 +85,8 @@ const LLM_PROVIDERS = [
   { key: "local",      name: "Local (Ollama / LM Studio)", logo: "L", color: "#71717A", models: ["llama4", "qwen3", "gemma3", "mistral-large"], note: "Self-hosted" },
   { key: "custom",     name: "Custom OpenAI-compatible", logo: "C", color: "#52525B", models: [], note: "vLLM, Together, Fireworks, Groq, Cerebras, ..." },
 ];
+
+const KEYLESS_PROVIDERS = new Set(["bedrock", "vertex", "local"]);
 
 const BMAD_AGENTS = [
   { key: "bmad-agent-analyst",     name: "Mary",    role: "Business Analyst",    defaultModel: "claude-haiku-4-5",  recommendedProvider: "anthropic" },
@@ -99,31 +107,76 @@ const CONNECTOR_OPTIONS: { value: string; label: string }[] = [
   { value: "s3",         label: "S3" },
 ];
 
+const TARGET_OPTIONS: { value: string; label: string }[] = [
+  { value: "snowflake",  label: "Snowflake" },
+  { value: "bigquery",   label: "BigQuery" },
+  { value: "databricks", label: "Databricks" },
+  { value: "postgres",   label: "PostgreSQL" },
+];
+
 // ─── Form-state shape ─────────────────────────────────────────────────
 
 interface SelectedProvider {
-  key: string;
+  key: string;            // provider_type (anthropic, openai, …)
   name: string;
+  apiKey: string;
   defaultModel: string;
-  tested: boolean;
+  baseUrl: string;
+  /** Populated after step 1 POSTs to /llm-providers — used by step 2 mappings. */
+  providerId?: string;
+}
+
+interface AgentRouting {
+  agentKey: string;       // e.g. bmad-agent-analyst
+  providerKey: string;    // refers to SelectedProvider.key (provider_type)
+  model: string;
+  temperature: number;
+  maxTokens: number;
+}
+
+interface ConnectionDraft {
+  type: string;           // connector_type (postgres, oracle, …)
+  name: string;
+  host: string;
+  port: string;
+  database: string;
+  username: string;
+  password: string;
+  ssl: string;
+}
+
+interface ProjectDraft {
+  name: string;
+  brief: string;
+  target: string;
+  environment: string;
 }
 
 interface WizardData {
-  // step 0 — REAL (posted to backend)
+  // step 0
   organization_name: string;
   organization_slug: string;
   name: string;
   email: string;
   password: string;
-  // step 0 — visual only
   region: string;
   env: string;
-  // step 1+ — visual only
+  // step 1
   providers: SelectedProvider[];
-  connector: string;
-  connectorName: string;
-  projectName: string;
-  brief: string;
+  // step 2
+  agents: AgentRouting[];
+  // step 3
+  connection: ConnectionDraft;
+  // step 4
+  project: ProjectDraft;
+}
+
+interface PersistedIds {
+  token?: string;
+  providerIds: Record<string, string>;     // providerKey → backend id
+  mappingsSaved: boolean;
+  projectId?: string;
+  sourceConnectionId?: string;
 }
 
 const slugify = (v: string) =>
@@ -134,15 +187,36 @@ const slugify = (v: string) =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
 
+const emptyConnection: ConnectionDraft = {
+  type: "postgres",
+  name: "",
+  host: "",
+  port: "5432",
+  database: "",
+  username: "",
+  password: "",
+  ssl: "require",
+};
+
+const emptyProject: ProjectDraft = {
+  name: "",
+  brief: "",
+  target: "snowflake",
+  environment: "development",
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────
 
 export default function FirstAdminSetupPage() {
   const router = useRouter();
-  const { setupFirstAdmin } = useAuth();
 
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [persisted, setPersisted] = useState<PersistedIds>({
+    providerIds: {},
+    mappingsSaved: false,
+  });
   const [data, setData] = useState<WizardData>({
     organization_name: "",
     organization_slug: "",
@@ -152,10 +226,9 @@ export default function FirstAdminSetupPage() {
     region: "us-east-1",
     env: "development",
     providers: [],
-    connector: "postgres",
-    connectorName: "",
-    projectName: "",
-    brief: "",
+    agents: [],
+    connection: { ...emptyConnection },
+    project: { ...emptyProject },
   });
 
   const update = <K extends keyof WizardData>(field: K, value: WizardData[K]) =>
@@ -166,12 +239,51 @@ export default function FirstAdminSetupPage() {
     setData((d) => ({
       ...d,
       organization_name: next,
-      // auto-slugify only if the user has not customised the slug yet
       organization_slug: d.organization_slug === slugify(d.organization_name)
         ? slugify(next)
         : d.organization_slug,
     }));
   };
+
+  // Whenever the selected providers change, prune / refresh the agent routing rows
+  // so each agent always points at a still-selected provider.
+  useEffect(() => {
+    if (data.providers.length === 0) {
+      if (data.agents.length > 0) update("agents", []);
+      return;
+    }
+    const byKey: Record<string, SelectedProvider> = {};
+    data.providers.forEach((p) => { byKey[p.key] = p; });
+
+    const next: AgentRouting[] = BMAD_AGENTS.map((a) => {
+      const existing = data.agents.find((row) => row.agentKey === a.key);
+      // Prefer existing choice if its provider is still selected
+      if (existing && byKey[existing.providerKey]) {
+        const tpl = LLM_PROVIDERS.find((p) => p.key === existing.providerKey)!;
+        const model = tpl.models.includes(existing.model)
+          ? existing.model
+          : (byKey[existing.providerKey].defaultModel || tpl.models[0] || existing.model);
+        return { ...existing, model };
+      }
+      // Otherwise prefer recommendedProvider if selected, else first selected
+      const preferred = byKey[a.recommendedProvider] ?? data.providers[0];
+      const tpl = LLM_PROVIDERS.find((p) => p.key === preferred.key)!;
+      const model = tpl.models.includes(a.defaultModel)
+        ? a.defaultModel
+        : (preferred.defaultModel || tpl.models[0] || a.defaultModel);
+      return {
+        agentKey: a.key,
+        providerKey: preferred.key,
+        model,
+        temperature: 0.2,
+        maxTokens: 4096,
+      };
+    });
+    update("agents", next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.providers.map((p) => p.key).join("|")]);
+
+  // ─── Step validators ───────────────────────────────────────────────
 
   const step0Valid =
     data.organization_name.trim().length > 0 &&
@@ -180,58 +292,209 @@ export default function FirstAdminSetupPage() {
     /^\S+@\S+\.\S+$/.test(data.email) &&
     data.password.length >= 8;
 
-  const handleSubmitStep0 = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      // setupFirstAdmin in auth-context navigates to /dashboard on success.
-      // We don't want to navigate yet — we want to advance to the launch
-      // step in the wizard. So we call the endpoint directly, then advance.
-      // But the context's helper is the source of truth (stores token).
-      // The router push it triggers will be cancelled by our setStep below
-      // since the wizard is still mounted; in practice we let the redirect
-      // take over to /dashboard. To match the brief ("call setupFirstAdmin
-      // on step 0 finish then jump to step 5"), we delay the auto-redirect
-      // by intercepting via a manual fetch first if helper would redirect.
-      await setupFirstAdmin({
+  const step1Valid =
+    data.providers.length > 0 &&
+    data.providers.every((p) => KEYLESS_PROVIDERS.has(p.key) || p.apiKey.trim().length > 0);
+
+  const step2Valid =
+    data.agents.length === BMAD_AGENTS.length &&
+    data.agents.every((row) => row.providerKey && row.model);
+
+  // Step 3 is optional; if the user fills the name we require a host
+  const step3Valid =
+    !data.connection.name.trim() ||
+    (data.connection.host.trim().length > 0 && data.connection.name.trim().length > 0);
+
+  const step4Valid = data.project.name.trim().length > 0;
+
+  // ─── Persistence handlers ──────────────────────────────────────────
+
+  const persistStep0 = async () => {
+    const res = await fetch(`${API_BASE}/api/v1/auth/first-admin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         email: data.email,
         name: data.name,
         password: data.password,
         organization_name: data.organization_name,
         organization_slug: data.organization_slug,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Workspace setup failed");
+    }
+    const body = (await res.json()) as { access_token: string };
+    try { localStorage.setItem("helix_token", body.access_token); } catch { /* SSR safe */ }
+    setPersisted((p) => ({ ...p, token: body.access_token }));
+  };
+
+  const persistStep1 = async () => {
+    const token = persisted.token;
+    if (!token) throw new Error("Missing auth token — restart at step 1");
+    const ids: Record<string, string> = { ...persisted.providerIds };
+    const updatedProviders: SelectedProvider[] = [];
+
+    for (const p of data.providers) {
+      if (ids[p.key]) {
+        // Already created in a previous attempt — reuse the id.
+        updatedProviders.push({ ...p, providerId: ids[p.key] });
+        continue;
+      }
+      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          provider_type: p.key,
+          name: p.name,
+          api_key: p.apiKey || "",
+          base_url: p.baseUrl || undefined,
+          default_model: p.defaultModel,
+        }),
       });
-      // If the helper's router push has not yet committed (it's a microtask
-      // in next/navigation), this state update will be discarded and the
-      // user lands on /dashboard. That's an acceptable terminal — they're
-      // signed in and the org exists. If the redirect is suppressed in a
-      // future refactor, the wizard advances visually here.
-      setStep(5);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(`Failed to save provider "${p.name}": ${body.detail || res.statusText}`);
+      }
+      const created = (await res.json()) as { id: string };
+      ids[p.key] = created.id;
+      updatedProviders.push({ ...p, providerId: created.id });
+    }
+    setPersisted((s) => ({ ...s, providerIds: ids }));
+    update("providers", updatedProviders);
+  };
+
+  const persistStep2 = async () => {
+    const token = persisted.token;
+    if (!token) throw new Error("Missing auth token");
+    const payload = data.agents
+      .map((row) => {
+        const providerId = persisted.providerIds[row.providerKey];
+        if (!providerId) return null;
+        return {
+          agent_type: row.agentKey,
+          provider_id: providerId,
+          model: row.model,
+          temperature: row.temperature,
+          max_tokens: row.maxTokens,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    if (payload.length !== BMAD_AGENTS.length) {
+      throw new Error("Each BMAD agent needs a provider — go back and review step 1.");
+    }
+    const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`Failed to save agent routing: ${body.detail || res.statusText}`);
+    }
+    setPersisted((s) => ({ ...s, mappingsSaved: true }));
+  };
+
+  const persistStep4 = async () => {
+    const token = persisted.token;
+    if (!token) throw new Error("Missing auth token");
+
+    // 1) Create the project.
+    let projectId = persisted.projectId;
+    if (!projectId) {
+      const res = await fetch(`${API_BASE}/api/v1/projects`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: data.project.name,
+          description: data.project.brief || `Migration → ${data.project.target}`,
+          migration_type: `${data.connection.type || "source"} → ${data.project.target}`,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(`Failed to create project: ${body.detail || res.statusText}`);
+      }
+      const project = (await res.json()) as { id: string };
+      projectId = project.id;
+      setPersisted((s) => ({ ...s, projectId }));
+    }
+
+    // 2) If the user filled in a source connection in step 3, persist it now.
+    if (data.connection.name.trim() && !persisted.sourceConnectionId) {
+      const config: Record<string, string | number> = {};
+      const c = data.connection;
+      if (c.host) config.host = c.host;
+      if (c.port) config.port = Number(c.port) || c.port;
+      if (c.database) config.database = c.database;
+      if (c.username) config.username = c.username;
+      if (c.password) config.password = c.password;
+      if (c.ssl) config.ssl = c.ssl;
+
+      const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/sources`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: c.name,
+          connector_type: c.type,
+          config,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(`Project created, but source connection failed: ${body.detail || res.statusText}`);
+      }
+      const src = (await res.json()) as { id: string };
+      setPersisted((s) => ({ ...s, sourceConnectionId: src.id }));
+    }
+  };
+
+  // ─── Step button orchestration ────────────────────────────────────
+
+  const stepValidity = [step0Valid, step1Valid, step2Valid, step3Valid, step4Valid, true];
+  const canAdvance = stepValidity[step];
+
+  const onPrimary = async () => {
+    setError("");
+    if (step === SETUP_STEPS.length - 1) {
+      router.push("/dashboard");
+      return;
+    }
+    setLoading(true);
+    try {
+      if (step === 0) await persistStep0();
+      else if (step === 1) await persistStep1();
+      else if (step === 2) await persistStep2();
+      else if (step === 4) await persistStep4();
+      // step 3 has nothing to POST yet (no project) — pure local capture.
+      setStep((s) => s + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Setup failed");
+      setError(err instanceof Error ? err.message : "Step failed");
     } finally {
       setLoading(false);
     }
   };
 
-  const canAdvance = useMemo(() => {
-    if (step === 0) return step0Valid;
-    return true; // steps 1-4 are visual; always allow Continue
-  }, [step, step0Valid]);
-
-  const onPrimary = () => {
-    if (step === 0) {
-      void handleSubmitStep0();
-      return;
-    }
-    if (step < SETUP_STEPS.length - 1) {
-      setStep(step + 1);
-      return;
-    }
-    router.push("/dashboard");
-  };
-
   const primaryLabel =
     step === 0 ? "Create workspace" :
+    step === 1 ? "Save providers" :
+    step === 2 ? "Save routing" :
+    step === 3 ? (data.connection.name.trim() ? "Continue" : "Skip — add later") :
+    step === 4 ? "Create project" :
     step === SETUP_STEPS.length - 1 ? "Open Helix Console" :
     "Continue";
 
@@ -350,19 +613,19 @@ export default function FirstAdminSetupPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-12 py-7">
-            {step > 0 && step < 5 && (
+            {/* Step 3 alone remains optional — keep its banner.
+                Steps 1/2/4 now persist; no banner needed. */}
+            {step === 3 && (
               <div className="mb-5 flex items-start gap-2 p-3 bg-app-2 border border-hx rounded-lg text-[12px] text-ink-3 max-w-[680px]">
                 <Info className="h-3.5 w-3.5 text-ink-4 mt-0.5 shrink-0" />
                 <div>
-                  Visual preview only — this step is not persisted.{" "}
-                  <span className="text-ink-2 font-medium">
-                    Configure later in /settings and /admin.
-                  </span>
+                  Optional — leave name blank to skip. The connection is saved when you
+                  create the project in the next step (sources are project-scoped).
                 </div>
               </div>
             )}
 
-            {error && step === 0 && (
+            {error && (
               <div className="mb-5 max-w-[680px]">
                 <ErrorBanner message={error} onDismiss={() => setError("")} />
               </div>
@@ -376,10 +639,10 @@ export default function FirstAdminSetupPage() {
               />
             )}
             {step === 1 && <StepProvider data={data} update={update} />}
-            {step === 2 && <StepAgents data={data} />}
+            {step === 2 && <StepAgents data={data} update={update} />}
             {step === 3 && <StepConnection data={data} update={update} />}
             {step === 4 && <StepProject data={data} update={update} />}
-            {step === 5 && <StepLaunch data={data} />}
+            {step === 5 && <StepLaunch data={data} persisted={persisted} />}
           </div>
 
           {/* Footer */}
@@ -403,7 +666,7 @@ export default function FirstAdminSetupPage() {
               )}
               <Button
                 variant="primary"
-                disabled={!canAdvance}
+                disabled={!canAdvance || loading}
                 loading={loading}
                 onClick={onPrimary}
               >
@@ -521,8 +784,21 @@ function StepProvider({
     if (!tpl) return;
     update("providers", [
       ...selected,
-      { key, name: tpl.name, defaultModel: tpl.models[0], tested: false },
+      {
+        key,
+        name: tpl.name,
+        apiKey: "",
+        defaultModel: tpl.models[0] ?? "",
+        baseUrl: "",
+      },
     ]);
+  };
+
+  const patchProvider = (key: string, patch: Partial<SelectedProvider>) => {
+    update(
+      "providers",
+      selected.map((p) => (p.key === key ? { ...p, ...patch } : p)),
+    );
   };
 
   return (
@@ -566,6 +842,7 @@ function StepProvider({
             {selected.map((p) => {
               const tpl = LLM_PROVIDERS.find((t) => t.key === p.key);
               if (!tpl) return null;
+              const keyless = KEYLESS_PROVIDERS.has(p.key);
               return (
                 <div
                   key={p.key}
@@ -575,20 +852,33 @@ function StepProvider({
                     <div className="flex items-center gap-2">
                       <LLMIcon provider={tpl.key} size={22} className="rounded" />
                       <span className="text-[13px] font-semibold">{p.name}</span>
+                      {p.providerId && <Chip tone="ok" dot>Saved</Chip>}
                     </div>
-                    {p.tested && <Chip tone="ok" dot>Test passed</Chip>}
+                    {keyless && <span className="text-[11px] text-ink-4">{tpl.note || "Auth via cloud SDK"}</span>}
                   </div>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: "1.4fr 1fr 100px" }}>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
                     <Input
                       type="password"
-                      placeholder={p.key === "ollama" ? "n/a · local model" : "sk-…"}
-                      disabled={p.key === "ollama"}
+                      placeholder={keyless ? "n/a · cloud IAM / ADC" : "sk-…"}
+                      disabled={keyless}
+                      value={p.apiKey}
+                      onChange={(e) => patchProvider(p.key, { apiKey: e.target.value })}
                     />
-                    <Select options={tpl.models} defaultValue={p.defaultModel} />
-                    <Button variant="outline">
-                      <Play className="h-3 w-3" /> Test
-                    </Button>
+                    <Select
+                      value={p.defaultModel}
+                      options={tpl.models.length > 0 ? tpl.models : [p.defaultModel || ""]}
+                      onChange={(e) => patchProvider(p.key, { defaultModel: e.target.value })}
+                    />
                   </div>
+                  {(p.key === "custom" || p.key === "local") && (
+                    <div className="mt-2">
+                      <Input
+                        placeholder={p.key === "local" ? "http://localhost:11434" : "https://api.together.xyz/v1"}
+                        value={p.baseUrl}
+                        onChange={(e) => patchProvider(p.key, { baseUrl: e.target.value })}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -596,7 +886,7 @@ function StepProvider({
         </div>
       ) : (
         <div className="mt-5 px-4 py-3.5 bg-app border border-dashed border-hx-2 rounded-lg text-center text-[12px] text-ink-3">
-          Pick one or more providers above (visual only). We recommend{" "}
+          Pick one or more providers above. We recommend{" "}
           <strong className="text-ink-2">Anthropic</strong> for planning agents and{" "}
           <strong className="text-ink-2">DeepSeek</strong> for the code agent.
         </div>
@@ -605,16 +895,26 @@ function StepProvider({
   );
 }
 
-function StepAgents({ data }: { data: WizardData }) {
+function StepAgents({
+  data,
+  update,
+}: {
+  data: WizardData;
+  update: <K extends keyof WizardData>(field: K, value: WizardData[K]) => void;
+}) {
   const providers = data.providers;
-  const providerOptions: { value: string; label: string }[] = providers.flatMap((p) => {
-    const tpl = LLM_PROVIDERS.find((t) => t.key === p.key);
-    if (!tpl) return [];
-    return tpl.models.map((m) => ({
-      value: `${p.key}/${m}`,
-      label: `${tpl.name} · ${m}`,
-    }));
-  });
+  // Build a (providerKey/model) option list for the Select dropdowns.
+  const optionsForProvider = (providerKey: string): string[] => {
+    const tpl = LLM_PROVIDERS.find((p) => p.key === providerKey);
+    return tpl ? tpl.models : [];
+  };
+
+  const patchRow = (agentKey: string, patch: Partial<AgentRouting>) => {
+    update(
+      "agents",
+      data.agents.map((row) => (row.agentKey === agentKey ? { ...row, ...patch } : row)),
+    );
+  };
 
   return (
     <div className="max-w-[920px]">
@@ -627,7 +927,7 @@ function StepAgents({ data }: { data: WizardData }) {
         <table className="w-full border-collapse text-[12.5px]">
           <thead>
             <tr className="bg-surface-hi">
-              {["Agent", "Role", "Routing", "Temperature", "Max tokens"].map((h) => (
+              {["Agent", "Role", "Provider", "Model", "Temperature", "Max tokens"].map((h) => (
                 <th
                   key={h}
                   className="px-3.5 py-2.5 font-medium text-ink-4 text-[10.5px] uppercase tracking-[0.08em] font-mono text-left border-b border-hx"
@@ -638,51 +938,97 @@ function StepAgents({ data }: { data: WizardData }) {
             </tr>
           </thead>
           <tbody>
-            {BMAD_AGENTS.map((a, i) => (
-              <tr
-                key={a.key}
-                className={i === BMAD_AGENTS.length - 1 ? "" : "border-b border-hx"}
-              >
-                <td className="px-3.5 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <AgentIcon name={a.name} size={22} />
-                    <div>
-                      <div className="font-medium">{a.name}</div>
-                      <div className="font-mono text-[10px] text-ink-4">{a.key}</div>
+            {BMAD_AGENTS.map((a, i) => {
+              const row = data.agents.find((r) => r.agentKey === a.key);
+              const providerKey = row?.providerKey ?? "";
+              const modelOptions = optionsForProvider(providerKey);
+              return (
+                <tr
+                  key={a.key}
+                  className={i === BMAD_AGENTS.length - 1 ? "" : "border-b border-hx"}
+                >
+                  <td className="px-3.5 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <AgentIcon name={a.name} size={22} />
+                      <div>
+                        <div className="font-medium">{a.name}</div>
+                        <div className="font-mono text-[10px] text-ink-4">{a.key}</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-3.5 py-2.5 text-ink-3">{a.role}</td>
-                <td className="px-3.5 py-2.5 w-[260px]">
-                  {providerOptions.length === 0 ? (
-                    <span className="font-mono text-[11px] text-ink-5">
-                      configure a provider first
-                    </span>
-                  ) : (
-                    <Select
-                      options={providerOptions}
-                      defaultValue={`${a.recommendedProvider}/${a.defaultModel}`}
+                  </td>
+                  <td className="px-3.5 py-2.5 text-ink-3">{a.role}</td>
+                  <td className="px-3.5 py-2.5 w-[160px]">
+                    {providers.length === 0 || !row ? (
+                      <span className="font-mono text-[11px] text-ink-5">
+                        configure a provider first
+                      </span>
+                    ) : (
+                      <Select
+                        value={row.providerKey}
+                        options={providers.map((p) => ({ value: p.key, label: p.name }))}
+                        onChange={(e) => {
+                          const nextKey = e.target.value;
+                          const nextModels = optionsForProvider(nextKey);
+                          patchRow(a.key, {
+                            providerKey: nextKey,
+                            model: nextModels[0] ?? row.model,
+                          });
+                        }}
+                        className="h-[30px]"
+                      />
+                    )}
+                  </td>
+                  <td className="px-3.5 py-2.5 w-[200px]">
+                    {row && modelOptions.length > 0 ? (
+                      <Select
+                        value={row.model}
+                        options={modelOptions}
+                        onChange={(e) => patchRow(a.key, { model: e.target.value })}
+                        className="h-[30px]"
+                      />
+                    ) : row ? (
+                      <Input
+                        value={row.model}
+                        onChange={(e) => patchRow(a.key, { model: e.target.value })}
+                        className="h-[30px]"
+                      />
+                    ) : (
+                      <span className="font-mono text-[11px] text-ink-5">—</span>
+                    )}
+                  </td>
+                  <td className="px-3.5 py-2.5 w-[100px]">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={row?.temperature ?? 0.2}
+                      onChange={(e) =>
+                        patchRow(a.key, { temperature: Number(e.target.value) || 0 })
+                      }
                       className="h-[30px]"
                     />
-                  )}
-                </td>
-                <td className="px-3.5 py-2.5 w-[100px]">
-                  <Input type="number" defaultValue="0.2" className="h-[30px]" />
-                </td>
-                <td className="px-3.5 py-2.5 w-[110px]">
-                  <Input type="number" defaultValue="4096" className="h-[30px]" />
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3.5 py-2.5 w-[110px]">
+                    <Input
+                      type="number"
+                      value={row?.maxTokens ?? 4096}
+                      onChange={(e) =>
+                        patchRow(a.key, { maxTokens: Number(e.target.value) || 0 })
+                      }
+                      className="h-[30px]"
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
       <div className="mt-3.5 p-3 bg-app border border-hx rounded-lg flex gap-2 items-start">
         <Info className="h-3 w-3 text-ink-4 mt-0.5 shrink-0" />
         <div className="text-[11.5px] text-ink-3 leading-relaxed">
-          Routing will be hot-swappable mid-workflow. If a model rate-limits, Helix
+          Routing is hot-swappable mid-workflow. If a model rate-limits, Helix
           falls back to the next-cheapest model from the same provider, then across
-          providers. The audit log will capture every routing decision.
+          providers. The audit log captures every routing decision.
         </div>
       </div>
     </div>
@@ -696,6 +1042,9 @@ function StepConnection({
   data: WizardData;
   update: <K extends keyof WizardData>(field: K, value: WizardData[K]) => void;
 }) {
+  const c = data.connection;
+  const patch = (p: Partial<ConnectionDraft>) => update("connection", { ...c, ...p });
+
   return (
     <div className="max-w-[620px]">
       <p className="text-[12.5px] text-ink-3 mb-4">
@@ -705,36 +1054,70 @@ function StepConnection({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         <FormRow label="Connector type" span={2}>
           <Select
-            value={data.connector}
-            onChange={(e) => update("connector", e.target.value)}
+            value={c.type}
+            onChange={(e) => patch({ type: e.target.value })}
             options={CONNECTOR_OPTIONS}
           />
         </FormRow>
         <FormRow
           label="Connection name"
           span={2}
-          hint="Used in the connector list and project source dropdown."
+          hint="Used in the connector list and project source dropdown. Leave blank to skip."
         >
           <Input
             placeholder="Acme Production Postgres"
-            value={data.connectorName}
-            onChange={(e) => update("connectorName", e.target.value)}
+            value={c.name}
+            onChange={(e) => patch({ name: e.target.value })}
           />
         </FormRow>
-        <FormRow label="Host"><Input placeholder="db.acme.com" /></FormRow>
-        <FormRow label="Port"><Input type="number" defaultValue="5432" /></FormRow>
-        <FormRow label="Database"><Input placeholder="warehouse" /></FormRow>
-        <FormRow label="SSL">
-          <Select options={["require", "verify-ca", "disable"]} defaultValue="require" />
+        <FormRow label="Host">
+          <Input
+            placeholder="db.acme.com"
+            value={c.host}
+            onChange={(e) => patch({ host: e.target.value })}
+          />
         </FormRow>
-        <FormRow label="Username"><Input placeholder="helix_reader" /></FormRow>
-        <FormRow label="Password"><Input type="password" placeholder="••••••••" /></FormRow>
+        <FormRow label="Port">
+          <Input
+            type="number"
+            value={c.port}
+            onChange={(e) => patch({ port: e.target.value })}
+          />
+        </FormRow>
+        <FormRow label="Database">
+          <Input
+            placeholder="warehouse"
+            value={c.database}
+            onChange={(e) => patch({ database: e.target.value })}
+          />
+        </FormRow>
+        <FormRow label="SSL">
+          <Select
+            value={c.ssl}
+            onChange={(e) => patch({ ssl: e.target.value })}
+            options={["require", "verify-ca", "disable"]}
+          />
+        </FormRow>
+        <FormRow label="Username">
+          <Input
+            placeholder="helix_reader"
+            value={c.username}
+            onChange={(e) => patch({ username: e.target.value })}
+          />
+        </FormRow>
+        <FormRow label="Password">
+          <Input
+            type="password"
+            placeholder="••••••••"
+            value={c.password}
+            onChange={(e) => patch({ password: e.target.value })}
+          />
+        </FormRow>
       </div>
       <div className="mt-3.5 flex gap-2">
-        <Button variant="outline">
-          <Play className="h-3 w-3" /> Test connection
+        <Button variant="ghost" onClick={() => update("connection", { ...emptyConnection })}>
+          <Play className="h-3 w-3" /> Reset fields
         </Button>
-        <Button variant="ghost">Skip — add later</Button>
       </div>
     </div>
   );
@@ -747,6 +1130,9 @@ function StepProject({
   data: WizardData;
   update: <K extends keyof WizardData>(field: K, value: WizardData[K]) => void;
 }) {
+  const p = data.project;
+  const patch = (next: Partial<ProjectDraft>) => update("project", { ...p, ...next });
+
   return (
     <div className="max-w-[620px]">
       <p className="text-[12.5px] text-ink-3 mb-4">
@@ -757,26 +1143,33 @@ function StepProject({
         <FormRow label="Project name" span={2}>
           <Input
             placeholder="GL → Snowflake migration"
-            value={data.projectName}
-            onChange={(e) => update("projectName", e.target.value)}
+            value={p.name}
+            onChange={(e) => patch({ name: e.target.value })}
+            required
           />
         </FormRow>
-        <FormRow label="Source">
-          <Select
-            options={[
-              data.connectorName || "Add a connection first",
-              "Add another…",
-            ]}
+        <FormRow label="Source" hint="From the connection above.">
+          <Input
+            value={data.connection.name || "—  add a connection in step 3 to attach"}
+            disabled
           />
         </FormRow>
         <FormRow label="Target">
-          <Select options={["Snowflake", "BigQuery", "Databricks"]} />
+          <Select
+            value={p.target}
+            onChange={(e) => patch({ target: e.target.value })}
+            options={TARGET_OPTIONS}
+          />
         </FormRow>
         <FormRow label="Owner">
-          <Select options={[`You · ${data.name || "First admin"}`, "Invite someone…"]} />
+          <Input value={`You · ${data.name || "First admin"}`} disabled />
         </FormRow>
         <FormRow label="Environment">
-          <Select options={["development", "staging", "production"]} defaultValue={data.env} />
+          <Select
+            value={p.environment}
+            onChange={(e) => patch({ environment: e.target.value })}
+            options={["development", "staging", "production"]}
+          />
         </FormRow>
         <FormRow
           label="Requirement brief"
@@ -786,8 +1179,8 @@ function StepProject({
           <textarea
             rows={4}
             placeholder="Migrate the GL_LEDGER, GL_TRANS, GL_RECON tables from Oracle production to Snowflake. Preserve audit columns. Run nightly delta until cutover."
-            value={data.brief}
-            onChange={(e) => update("brief", e.target.value)}
+            value={p.brief}
+            onChange={(e) => patch({ brief: e.target.value })}
             className="w-full px-3 py-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] font-mono text-ink outline-none resize-y focus-ring"
           />
         </FormRow>
@@ -796,15 +1189,44 @@ function StepProject({
   );
 }
 
-function StepLaunch({ data }: { data: WizardData }) {
+function StepLaunch({ data, persisted }: { data: WizardData; persisted: PersistedIds }) {
+  const providerCount = Object.keys(persisted.providerIds).length;
   const items: { label: string; value: string; mono?: boolean }[] = [
     { label: "Workspace",     value: data.organization_name || "—" },
     { label: "Slug",          value: data.organization_slug || "—", mono: true },
     { label: "Region",        value: data.region, mono: true },
-    { label: "LLM providers", value: `${data.providers.length} configured`, mono: true },
-    { label: "Agent routing", value: "6 agents · defaults", mono: true },
-    { label: "Connections",   value: data.connectorName || "Configure later" },
-    { label: "First project", value: data.projectName || "Configure later" },
+    {
+      label: "LLM providers",
+      value:
+        providerCount > 0
+          ? `${providerCount} saved · ${data.providers.map((p) => p.name).join(", ")}`
+          : "Configure later",
+      mono: true,
+    },
+    {
+      label: "Agent routing",
+      value: persisted.mappingsSaved ? `6 agents · saved` : "Configure later",
+      mono: true,
+    },
+    {
+      label: "Source connection",
+      value: persisted.sourceConnectionId
+        ? data.connection.name
+        : data.connection.name
+          ? `${data.connection.name} (pending)`
+          : "Configure later",
+    },
+    {
+      label: "First project",
+      value: persisted.projectId
+        ? `${data.project.name}`
+        : data.project.name || "Configure later",
+    },
+    {
+      label: "Project ID",
+      value: persisted.projectId || "—",
+      mono: true,
+    },
     { label: "Owner",         value: data.email || data.name || "—", mono: true },
   ];
 
@@ -815,8 +1237,8 @@ function StepLaunch({ data }: { data: WizardData }) {
         <div>
           <div className="text-[14px] font-semibold text-ok">Workspace provisioned</div>
           <div className="text-[11.5px] text-ink-3 mt-0.5">
-            Your org and admin account are saved. Open the console to start configuring
-            providers, connectors, and projects.
+            Your org, providers, agent routing, and first project are saved. Open
+            the console to start the BMAD planning chain.
           </div>
         </div>
       </div>
@@ -843,10 +1265,10 @@ function StepLaunch({ data }: { data: WizardData }) {
       <div className="mt-5 px-4 py-3.5 bg-surface-hi border border-hx rounded-[10px]">
         <div className="eyebrow mb-2">WHAT HAPPENS NEXT</div>
         <ol className="list-decimal pl-4 text-[12px] text-ink-2 leading-relaxed space-y-0.5">
-          <li>Add real LLM credentials from <span className="font-mono text-ink">/admin/llm-settings</span></li>
-          <li>Map each BMAD agent to a model in <span className="font-mono text-ink">/admin/agent-mapping</span></li>
-          <li>Register source / target connectors at <span className="font-mono text-ink">/connectors</span></li>
-          <li>Create your first migration project from <span className="font-mono text-ink">/projects/new</span></li>
+          <li>Review or rotate LLM credentials in <span className="font-mono text-ink">/admin/llm-settings</span></li>
+          <li>Tune agent-to-model mappings in <span className="font-mono text-ink">/admin/agent-mapping</span></li>
+          <li>Add more source / target connectors at <span className="font-mono text-ink">/connectors</span></li>
+          <li>Open your first project in <span className="font-mono text-ink">/projects</span></li>
           <li>Mary (Analyst) reads your brief and starts the BMAD planning chain</li>
         </ol>
         <Link

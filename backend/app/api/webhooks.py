@@ -5,6 +5,7 @@ from pydantic import BaseModel, HttpUrl
 from app.db.session import get_db
 from app.auth.dependencies import require_permission
 from app.services.auth_service import get_current_user
+from app.services.secret_service import encrypt_value
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
 from app.api.audit import write_audit
 
@@ -41,10 +42,12 @@ def create_webhook(
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org_id(db, user_id)
+    # HMAC signing secret is stored encrypted; the signer decrypts on send.
+    encrypted_secret = encrypt_value(data.secret) if data.secret else None
     ep = WebhookEndpoint(
         organization_id=org_id,
         url=data.url,
-        secret=data.secret,
+        secret=encrypted_secret,
         events=data.events,
         description=data.description,
     )
@@ -75,7 +78,7 @@ def update_webhook(
     if data.events:
         ep.events = data.events
     if data.secret is not None:
-        ep.secret = data.secret
+        ep.secret = encrypt_value(data.secret) if data.secret else None
     if data.description is not None:
         ep.description = data.description
     db.commit()
@@ -107,6 +110,22 @@ def list_deliveries(
     user_id: str = Depends(require_permission("admin:llm:read")),
     db: Session = Depends(get_db),
 ):
+    from fastapi import HTTPException
+
+    org_id = _resolve_org_id(db, user_id)
+    # Verify the webhook endpoint actually belongs to the caller's org before
+    # exposing its delivery history (payload + response_body may contain secrets).
+    endpoint = (
+        db.query(WebhookEndpoint)
+        .filter(
+            WebhookEndpoint.id == webhook_id,
+            WebhookEndpoint.organization_id == org_id,
+        )
+        .first()
+    )
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
     deliveries = (
         db.query(WebhookDelivery)
         .filter(WebhookDelivery.endpoint_id == webhook_id)
