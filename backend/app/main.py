@@ -2,11 +2,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.rate_limiting import limiter
 from app.core.logging_config import configure_logging, RequestIdMiddleware
+from app.utils.idempotency import IdempotencyMiddleware
+from app.utils.rate_limit_handler import rate_limit_exceeded_handler
 from app.api.health import router as health_router
 from app.api.auth import router as auth_router
 from app.api.llm_providers import router as llm_router
@@ -102,8 +103,19 @@ async def _stop_cdc_engine() -> None:
         pass
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+# Use our own 429 handler so the body matches the FastAPI-standard
+# `{detail, retry_after_seconds}` envelope and a `Retry-After` header is
+# always set. Replaces slowapi's default `{"error": "..."}` body which
+# diverged from every other error in the API (see REVIEW_API_CONTRACT
+# `Cross-cutting: Rate-limit responses`).
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(RequestIdMiddleware)
+# IdempotencyMiddleware stashes the `Idempotency-Key` header on
+# `request.state.idempotency_key`. The actual cache lookup lives in
+# `@idempotent("...")` decorators on the few POST handlers that mutate
+# expensive state. The middleware alone is cheap (one header read +
+# attribute set per request).
+app.add_middleware(IdempotencyMiddleware)
 
 _MAX_BODY_BYTES = (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024
 
@@ -155,7 +167,17 @@ app.add_middleware(
     allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    # `Idempotency-Key` lets browsers + SDK consumers opt into POST
+    # de-duplication on retries (API-C4). `X-Active-Org-Id` is read by
+    # the per-org rate limiter (`rate_limiting._org_key`) — must be on
+    # the allow list or the browser strips it before forwarding.
+    allow_headers=[
+        "Authorization", "Content-Type", "Accept",
+        "Idempotency-Key", "X-Active-Org-Id",
+    ],
+    # Surface the replay marker so SDKs can detect cache hits and the
+    # standardized retry hint on 429s.
+    expose_headers=["Idempotency-Replayed", "Retry-After"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
