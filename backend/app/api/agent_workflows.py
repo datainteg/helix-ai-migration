@@ -192,51 +192,85 @@ def approve_step(
 
 @router.get("/agent-workflows/{workflow_id}/stream")
 async def stream_workflow_progress(
+    request: Request,
     workflow_id: str,
     token: str,
-    db: Session = Depends(get_db),
 ):
     """SSE stream of workflow step events.
 
     Auth via `?token=` query string because the browser EventSource API
     cannot send custom headers. Frontend must mint a 60-second scope=sse
     ticket via POST /auth/sse-ticket and pass it here.
+
+    PERF-2 (REVIEW_PERFORMANCE.md / H-8): does NOT take a
+    `Depends(get_db)` session because that would pin one DB
+    connection for the full 2-minute polling window. Auth + access
+    check run on a short-lived `SessionLocal()` that's closed
+    before the generator starts; each loop iteration opens a fresh
+    session, runs the status query, and closes the session before
+    `asyncio.sleep` — so the pool is held only for the ~ms-long
+    query. Each tick also calls `await request.is_disconnected()`
+    so a closed browser tab tears the loop down immediately
+    instead of running to the 2-min cap.
     """
     from app.auth.jwt import decode_access_token
     from app.auth.dependencies import resolve_active_org_id
+    from app.db.session import SessionLocal
 
+    # ── Auth + access check on a short-lived session ────────────────
+    auth_db = SessionLocal()
     try:
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("missing sub")
-        if payload.get("scope") != "sse":
-            raise ValueError("token is not an sse ticket")
-        org_id = resolve_active_org_id(db, user_id)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid stream token")
+        try:
+            payload = decode_access_token(token)
+            user_id = payload.get("sub")
+            if not user_id:
+                raise ValueError("missing sub")
+            if payload.get("scope") != "sse":
+                raise ValueError("token is not an sse ticket")
+            org_id = resolve_active_org_id(auth_db, user_id)
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid stream token")
 
-    _assert_workflow_in_org(db, workflow_id, org_id)
+        _assert_workflow_in_org(auth_db, workflow_id, org_id)
+    finally:
+        auth_db.close()
 
     async def event_generator():
         last_step_count = 0
-        for _ in range(120):  # max 2 min polling at 1s intervals
-            status = await get_workflow_status(workflow_id, db=db)
-            steps = status.get("steps", [])
-            if len(steps) > last_step_count:
-                for step in steps[last_step_count:]:
-                    data = json.dumps({"type": "step", "step": step})
+        try:
+            for _ in range(120):  # max 2 min polling at 1s intervals
+                # Tear down immediately when the client goes away.
+                if await request.is_disconnected():
+                    return
+
+                # Fresh DB session per tick; closed before the
+                # asyncio.sleep so the pool is never held idle.
+                tick_db = SessionLocal()
+                try:
+                    status = await get_workflow_status(workflow_id, db=tick_db)
+                finally:
+                    tick_db.close()
+
+                steps = status.get("steps", [])
+                if len(steps) > last_step_count:
+                    for step in steps[last_step_count:]:
+                        data = json.dumps({"type": "step", "step": step})
+                        yield f"data: {data}\n\n"
+                    last_step_count = len(steps)
+
+                run_status = status.get("status", "")
+                if run_status in ("completed", "approved", "rejected", "failed"):
+                    data = json.dumps({"type": "done", "status": run_status})
                     yield f"data: {data}\n\n"
-                last_step_count = len(steps)
+                    return
 
-            run_status = status.get("status", "")
-            if run_status in ("completed", "approved", "rejected", "failed"):
-                data = json.dumps({"type": "done", "status": run_status})
-                yield f"data: {data}\n\n"
-                return
-
-            await asyncio.sleep(1)
-        yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+                await asyncio.sleep(1)
+            yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+        except asyncio.CancelledError:
+            # Client closed the connection mid-yield. Re-raise so
+            # Starlette can clean up cancellation without logging an
+            # unhandled-exception traceback.
+            raise
 
     return StreamingResponse(
         event_generator(),
