@@ -12,6 +12,7 @@ add a materialised view + 15s cache if this becomes hot.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -24,17 +25,58 @@ from app.models.validation import ValidationResult, ValidationRun, ReconResult, 
 router = APIRouter(tags=["dashboard"])
 
 
+class DashboardProjects(BaseModel):
+    active: int
+    archived: int
+    by_status: dict[str, int]
+
+
+class DashboardWorkflows(BaseModel):
+    running: int
+    pending: int
+    completed: int
+    failed: int
+    total: int
+
+
+class DashboardValidation(BaseModel):
+    total_results: int
+    passed: int
+    # `None` when there are no validation results — caller must handle.
+    pass_rate: float | None = None
+
+
+class DashboardRecon(BaseModel):
+    total_results: int
+    clean: int
+    score: float | None = None
+
+
+class DashboardStats(BaseModel):
+    """Single-call aggregator response for the Operations Overview dashboard.
+
+    Replaces the hand-built dict so OpenAPI documents every field;
+    consumers can generate types instead of guessing at the shape.
+    """
+
+    projects: DashboardProjects
+    workflows: DashboardWorkflows
+    validation: DashboardValidation
+    recon: DashboardRecon
+    has_any_data: bool
+
+
 _RUNNING = {"running", "started", "in_progress"}
 _PENDING = {"pending", "awaiting_approval"}
 _DONE = {"completed", "approved"}
 _FAILED = {"failed", "rejected", "expired"}
 
 
-@router.get("/dashboard/stats")
+@router.get("/dashboard/stats", response_model=DashboardStats)
 def dashboard_stats(
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
-) -> dict:
+) -> DashboardStats:
     """Single-call aggregator for the Operations Overview dashboard."""
     # ── Projects ──
     projects = (
@@ -107,28 +149,28 @@ def dashboard_stats(
         or r_total > 0
     )
 
-    return {
-        "projects": {
-            "active": active_projects,
-            "archived": archived_projects,
-            "by_status": proj_counts,
-        },
-        "workflows": {
-            "running": running,
-            "pending": pending,
-            "completed": completed,
-            "failed": failed,
-            "total": total_workflows,
-        },
-        "validation": {
-            "total_results": v_total,
-            "passed": v_passed,
-            "pass_rate": validation_pass_rate,
-        },
-        "recon": {
-            "total_results": r_total,
-            "clean": r_clean,
-            "score": recon_score,
-        },
-        "has_any_data": has_any_data,
-    }
+    return DashboardStats(
+        projects=DashboardProjects(
+            active=active_projects,
+            archived=archived_projects,
+            by_status=proj_counts,
+        ),
+        workflows=DashboardWorkflows(
+            running=running,
+            pending=pending,
+            completed=completed,
+            failed=failed,
+            total=total_workflows,
+        ),
+        validation=DashboardValidation(
+            total_results=v_total,
+            passed=v_passed,
+            pass_rate=validation_pass_rate,
+        ),
+        recon=DashboardRecon(
+            total_results=r_total,
+            clean=r_clean,
+            score=recon_score,
+        ),
+        has_any_data=has_any_data,
+    )

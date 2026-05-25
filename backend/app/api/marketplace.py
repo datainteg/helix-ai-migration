@@ -129,19 +129,26 @@ CATALOG: list[MarketplaceEntry] = [
 _BY_ID = {e.id: e for e in CATALOG}
 
 
-@router.get("/marketplace")
+from typing import Literal
+
+# Kind values are constrained to the union below so a typo
+# (`?kind=Connecter`) returns 422 instead of silently `[]`.
+MarketplaceKind = Literal["connector", "agent", "validator", "recipe"]
+
+
+@router.get("/marketplace", response_model=list[MarketplaceEntry])
 def list_marketplace(
-    kind: str | None = None,
+    kind: MarketplaceKind | None = None,
     user_id: str = Depends(get_current_user_id),
 ):
     """List marketplace entries. Filter with `?kind=connector|agent|validator|recipe`."""
     rows = CATALOG if not kind else [e for e in CATALOG if e.kind == kind]
-    return [e.model_dump() for e in rows]
+    return rows
 
 
-@router.get("/marketplace/{entry_id}")
+@router.get("/marketplace/{entry_id}", response_model=MarketplaceEntry)
 def get_marketplace_entry(entry_id: str, user_id: str = Depends(get_current_user_id)):
     entry = _BY_ID.get(entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Marketplace entry {entry_id!r} not found")
-    return entry.model_dump()
+    return entry
