@@ -38,13 +38,17 @@ export function Hero() {
           </p>
 
           <div className="flex flex-wrap items-center gap-3 mt-8">
-            <Link
-              to={HERO_CTAS.primary.href}
+            {/* Primary CTA opens the static HTML console mock in a new tab
+                — see HERO_CTAS in site-content.ts. */}
+            <a
+              href={HERO_CTAS.primary.href}
+              target="_blank"
+              rel="noreferrer"
               className="inline-flex items-center gap-2 px-4 h-10 rounded-md bg-ink text-white text-[13.5px] font-medium hover:bg-zinc-800 focus-ring"
             >
               {HERO_CTAS.primary.label}
               <ArrowRight className="h-4 w-4" />
-            </Link>
+            </a>
             <Link
               to={HERO_CTAS.secondary.href}
               className="inline-flex items-center gap-2 px-4 h-10 rounded-md border border-zinc-300 text-ink-2 text-[13.5px] font-medium hover:bg-zinc-100 focus-ring"

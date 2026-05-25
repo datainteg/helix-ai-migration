@@ -2,7 +2,7 @@ import { Link, NavLink } from "react-router-dom";
 import { Github, Menu, X } from "lucide-react";
 import { useState } from "react";
 
-import { NAV, SITE } from "@/data/site-content";
+import { NAV, SITE, STATIC_DEMO_URL } from "@/data/site-content";
 
 export function Navbar() {
   const [open, setOpen] = useState(false);
@@ -37,12 +37,16 @@ export function Navbar() {
             <Github className="h-4 w-4" />
             GitHub
           </a>
-          <Link
-            to="/demo"
+          {/* View demo opens the static HTML console mock in a new tab. The
+              interactive React walkthrough stays reachable via the NAV link. */}
+          <a
+            href={STATIC_DEMO_URL}
+            target="_blank"
+            rel="noreferrer"
             className="inline-flex items-center px-3.5 py-1.5 rounded-md text-[13px] font-medium bg-ink text-white hover:bg-zinc-800 focus-ring"
           >
             View demo
-          </Link>
+          </a>
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
