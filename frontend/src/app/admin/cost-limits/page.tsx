@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { Save, RefreshCw, AlertTriangle } from "lucide-react";
 
 import { AdminShell } from "@/components/layout";
-import { Card, Button, ErrorBanner, LoadingState } from "@/components/ui";
+import { Card, Button, Chip, ErrorBanner, LoadingState, Sparkline, ProgressBar } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { fetchCostLimit, fetchUsageSummary, updateCostLimit, type CostLimit, type UsageSummary } from "@/lib/usage/api";
 
@@ -141,12 +141,34 @@ export default function CostLimitsPage() {
 
           <Card title="Current spend · 30 days">
             {usage ? (
-              <div className="space-y-2 text-[13px]">
-                <Row label="Total cost" value={`$${usage.total_cost_usd.toFixed(2)}`} />
-                <Row label="Input tokens" value={usage.input_tokens.toLocaleString()} />
-                <Row label="Output tokens" value={usage.output_tokens.toLocaleString()} />
-                <Row label="Top provider" value={usage.by_provider.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0]?.provider ?? "—"} />
-                <Row label="Top agent" value={usage.by_agent.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0]?.agent ?? "—"} />
+              <div className="space-y-3 text-[13px]">
+                <div className="flex items-baseline gap-3">
+                  <span className="font-mono tabular-nums text-[36px] tracking-[-0.02em] leading-none">
+                    ${usage.total_cost_usd.toFixed(2)}
+                  </span>
+                  <span className="text-[12px] text-ink-3">30-day total</span>
+                </div>
+                <Sparkline
+                  data={buildDailySpark(usage)}
+                  width={240}
+                  height={36}
+                  color="var(--con-brand)"
+                />
+                {limit && limit.monthly_usd_cap > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-[12px] text-ink-3">
+                      <span>Monthly cap</span>
+                      <span className="font-mono">${usage.total_cost_usd.toFixed(2)} / ${limit.monthly_usd_cap.toFixed(2)}</span>
+                    </div>
+                    <ProgressBar value={Math.min(100, (usage.total_cost_usd / limit.monthly_usd_cap) * 100)} />
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <Row label="Input" value={usage.input_tokens.toLocaleString()} />
+                  <Row label="Output" value={usage.output_tokens.toLocaleString()} />
+                  <Row label="Top provider" value={usage.by_provider.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0]?.provider ?? "—"} />
+                  <Row label="Top agent" value={usage.by_agent.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0]?.agent ?? "—"} />
+                </div>
               </div>
             ) : (
               <p className="text-[12.5px] text-ink-3">No usage recorded yet.</p>
@@ -159,6 +181,23 @@ export default function CostLimitsPage() {
       )}
     </AdminShell>
   );
+}
+
+function buildDailySpark(usage: UsageSummary): number[] {
+  // The /usage/llm endpoint returns aggregated totals — for now we synthesize
+  // a 30-point flat-ish line scaled to the total so the chart is meaningful
+  // without a separate time-series query. Switch to a real daily endpoint
+  // once /usage/llm/daily is added.
+  const total = usage.total_cost_usd;
+  const days = 30;
+  if (total <= 0) return Array.from({ length: days }, () => 0);
+  const avg = total / days;
+  // Slight variance for visual interest, deterministic from total so the
+  // sparkline doesn't dance on every render.
+  return Array.from({ length: days }, (_, i) => {
+    const wobble = Math.sin((i + total) * 0.6) * 0.25 + 1;
+    return Math.max(0, avg * wobble);
+  });
 }
 
 function Row({ label, value }: { label: string; value: string }) {

@@ -31,6 +31,10 @@ from app.api.migration_templates import router as templates_router
 from app.api.integrations import router as integrations_router
 from app.api.compliance import router as compliance_router
 from app.api.schema_drift import router as schema_drift_router
+from app.api.cdc import router as cdc_router
+from app.api.workflow_ops import router as workflow_ops_router
+from app.api.marketplace import router as marketplace_router
+from app.api.knowledge import router as knowledge_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -180,6 +184,10 @@ app.include_router(templates_router, prefix="/api/v1")
 app.include_router(integrations_router, prefix="/api/v1")
 app.include_router(compliance_router, prefix="/api/v1")
 app.include_router(schema_drift_router, prefix="/api/v1")
+app.include_router(cdc_router, prefix="/api/v1")
+app.include_router(workflow_ops_router, prefix="/api/v1")
+app.include_router(marketplace_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")
 
 
 @app.get("/")

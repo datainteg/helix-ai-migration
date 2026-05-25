@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import get_read_db as get_db
 from app.auth.dependencies import get_current_organization_id
 from app.models.project import Project
 from app.models.workflow import WorkflowRun

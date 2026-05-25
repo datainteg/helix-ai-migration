@@ -1,0 +1,17 @@
+{
+  "name": "@helix/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Helix Migration platform",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "module": "dist/index.mjs",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.12.0"
+  }
+}
