@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,8 @@ from app.auth.jwt import get_current_user_id
 from app.api.audit import write_audit
 from app.models.cutover import MigrationCutover, ALLOWED_TRANSITIONS, VALID_STATES
 from app.services.project_service import ensure_project_access
+from app.schemas.pagination import PaginatedResponse, paginate
+from app.utils.idempotency import idempotent
 
 router = APIRouter(tags=["cutovers"])
 
@@ -45,11 +47,51 @@ class CutoverTransition(BaseModel):
 
 
 class CutoverDiff(BaseModel):
-    source_count: int
-    target_count: int
-    diff_pct: float
-    sample_size: int
-    sample_hash: Optional[str] = None
+    # Cap row counts at 1e18 so an upstream INT overflow can't poison the
+    # diff_summary column (Postgres BIGINT max ~9.2e18; we stay under).
+    source_count: int = Field(ge=0, le=10**18)
+    target_count: int = Field(ge=0, le=10**18)
+    diff_pct: float = Field(ge=0.0, le=100.0)
+    sample_size: int = Field(ge=0, le=10**12)
+    sample_hash: Optional[str] = Field(default=None, max_length=255)
+
+
+class CutoverTimestamps(BaseModel):
+    """ISO-8601 timestamps for each cutover state transition.
+
+    Each field is the moment the cutover ENTERED that state; `None` means
+    it has not yet entered it. Field names match `_STATE_TIMESTAMP_COL`.
+    """
+
+    bulk: Optional[str] = None
+    tail: Optional[str] = None
+    freeze: Optional[str] = None
+    diff: Optional[str] = None
+    flip: Optional[str] = None
+    done: Optional[str] = None
+    rolled_back: Optional[str] = None
+
+
+class CutoverResponse(BaseModel):
+    """Persisted cutover row, returned from every cutover endpoint.
+
+    Replaces the previous hand-built dict so OpenAPI describes the shape
+    and SDK generators stop emitting `any`. `state` is the only string
+    field whose values are constrained by `VALID_STATES` in
+    `app.models.cutover`; a real `Literal[...]` will be added once the
+    state enum is hoisted to a single source of truth.
+    """
+
+    id: str
+    project_id: str
+    workflow_id: Optional[str] = None
+    source_ref: str
+    target_ref: str
+    state: str
+    notes: Optional[str] = None
+    diff_summary: Optional[dict] = None
+    timestamps: CutoverTimestamps
+    created_at: Optional[str] = None
 
 
 _STATE_TIMESTAMP_COL = {
@@ -63,31 +105,44 @@ _STATE_TIMESTAMP_COL = {
 }
 
 
-def _serialize(c: MigrationCutover) -> dict:
-    return {
-        "id": c.id,
-        "project_id": c.project_id,
-        "workflow_id": c.workflow_id,
-        "source_ref": c.source_ref,
-        "target_ref": c.target_ref,
-        "state": c.state,
-        "notes": c.notes,
-        "diff_summary": json.loads(c.diff_summary) if c.diff_summary else None,
-        "timestamps": {
-            "bulk":        str(c.bulk_started_at) if c.bulk_started_at else None,
-            "tail":        str(c.tail_started_at) if c.tail_started_at else None,
-            "freeze":      str(c.freeze_started_at) if c.freeze_started_at else None,
-            "diff":        str(c.diff_started_at) if c.diff_started_at else None,
-            "flip":        str(c.flip_started_at) if c.flip_started_at else None,
-            "done":        str(c.done_at) if c.done_at else None,
-            "rolled_back": str(c.rolled_back_at) if c.rolled_back_at else None,
-        },
-        "created_at": str(c.created_at) if c.created_at else None,
-    }
+def _iso(value) -> Optional[str]:
+    """Return `value.isoformat()` or `None`. Replaces every legacy
+    `str(datetime)` call site so timestamps are ISO-8601 instead of
+    Python's `__str__` repr (the latter broke Safari `Date` parsing)."""
+    return value.isoformat() if value else None
 
 
-@router.post("/projects/{project_id}/cutovers", status_code=201)
-def api_create_cutover(
+def _serialize(c: MigrationCutover) -> CutoverResponse:
+    """Build the typed CutoverResponse used by every cutover endpoint."""
+    return CutoverResponse(
+        id=c.id,
+        project_id=c.project_id,
+        workflow_id=c.workflow_id,
+        source_ref=c.source_ref,
+        target_ref=c.target_ref,
+        state=c.state,
+        notes=c.notes,
+        diff_summary=json.loads(c.diff_summary) if c.diff_summary else None,
+        timestamps=CutoverTimestamps(
+            bulk=_iso(c.bulk_started_at),
+            tail=_iso(c.tail_started_at),
+            freeze=_iso(c.freeze_started_at),
+            diff=_iso(c.diff_started_at),
+            flip=_iso(c.flip_started_at),
+            done=_iso(c.done_at),
+            rolled_back=_iso(c.rolled_back_at),
+        ),
+        created_at=_iso(c.created_at),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/cutovers",
+    status_code=201,
+    response_model=CutoverResponse,
+)
+@idempotent("create_cutover")
+async def api_create_cutover(
     project_id: str,
     data: CutoverCreate,
     request: Request,
@@ -95,6 +150,11 @@ def api_create_cutover(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    """Create a new cutover row.
+
+    Idempotent on `Idempotency-Key` header (API-C4): a network retry will
+    NOT create a duplicate cutover for the same source→target.
+    """
     ensure_project_access(db, org_id, project_id)
     now = datetime.now(timezone.utc)
     row = MigrationCutover(
@@ -117,23 +177,49 @@ def api_create_cutover(
     return _serialize(row)
 
 
-@router.get("/projects/{project_id}/cutovers")
+@router.get(
+    "/projects/{project_id}/cutovers",
+    response_model=PaginatedResponse[CutoverResponse],
+)
 def api_list_cutovers(
     project_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
+    """List cutovers for a project (paginated envelope).
+
+    Breaking change vs v0.x: response is now `{items,total,limit,offset}`
+    instead of a bare array. See REVIEW_API_CONTRACT.md §API-C2.
+    """
+    from sqlalchemy import func
     ensure_project_access(db, org_id, project_id)
+    base_filter = (
+        MigrationCutover.organization_id == org_id,
+        MigrationCutover.project_id == project_id,
+    )
+    total = int(
+        db.query(func.count(MigrationCutover.id))
+        .filter(*base_filter)
+        .scalar()
+        or 0
+    )
     rows = (
         db.query(MigrationCutover)
-        .filter(MigrationCutover.organization_id == org_id, MigrationCutover.project_id == project_id)
+        .filter(*base_filter)
         .order_by(MigrationCutover.created_at.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
-    return [_serialize(r) for r in rows]
+    items = [_serialize(r) for r in rows]
+    return PaginatedResponse[CutoverResponse](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
-@router.get("/cutovers/{cutover_id}")
+@router.get("/cutovers/{cutover_id}", response_model=CutoverResponse)
 def api_get_cutover(
     cutover_id: str,
     org_id: str = Depends(get_current_organization_id),
@@ -149,7 +235,7 @@ def api_get_cutover(
     return _serialize(row)
 
 
-@router.post("/cutovers/{cutover_id}/transition")
+@router.post("/cutovers/{cutover_id}/transition", response_model=CutoverResponse)
 def api_transition_cutover(
     cutover_id: str,
     data: CutoverTransition,
@@ -166,13 +252,26 @@ def api_transition_cutover(
     if not row:
         raise HTTPException(status_code=404, detail="Cutover not found")
     if data.target_state not in VALID_STATES:
-        raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of {VALID_STATES}")
+        # Structured error body so clients can parse the allowed list
+        # without scraping the Python-tuple repr.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid target_state.",
+                "allowed": sorted(VALID_STATES),
+                "received": data.target_state,
+            },
+        )
     allowed = ALLOWED_TRANSITIONS.get(row.state, set())
     if data.target_state not in allowed:
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot transition from {row.state!r} to {data.target_state!r}. "
-                   f"Allowed: {sorted(allowed) or 'none (terminal)'}",
+            detail={
+                "message": f"Illegal transition from {row.state!r} to {data.target_state!r}.",
+                "allowed": sorted(allowed),
+                "current_state": row.state,
+                "received": data.target_state,
+            },
         )
 
     row.state = data.target_state
@@ -189,7 +288,7 @@ def api_transition_cutover(
     return _serialize(row)
 
 
-@router.post("/cutovers/{cutover_id}/diff")
+@router.post("/cutovers/{cutover_id}/diff", response_model=CutoverResponse)
 def api_record_diff(
     cutover_id: str,
     data: CutoverDiff,

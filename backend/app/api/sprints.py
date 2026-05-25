@@ -9,7 +9,7 @@ inside every service call.
 
 import asyncio
 import json
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -32,7 +32,9 @@ from app.schemas.sprint import (
     MigrationReleaseResponse, MappingGraphOut, MappingNodeOut, MappingEdgeOut,
     AgentExecutionOut, VelocityPointOut, BurndownPointOut, SeedResult,
 )
+from app.schemas.pagination import PaginatedResponse, paginate
 from app.api.audit import write_audit
+from app.utils.idempotency import idempotent
 
 
 router = APIRouter(tags=["sprints"])
@@ -40,14 +42,25 @@ router = APIRouter(tags=["sprints"])
 
 # ── Project-scoped lists ────────────────────────────────────────────
 
-@router.get("/projects/{project_id}/sprints", response_model=list[SprintResponse])
+@router.get(
+    "/projects/{project_id}/sprints",
+    response_model=PaginatedResponse[SprintResponse],
+)
 def api_list_sprints(
     project_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
+    """List sprints for a project (paginated envelope).
+
+    Breaking change vs v0.x: response is now `{items,total,limit,offset}`
+    instead of a bare array. See REVIEW_API_CONTRACT.md §API-C2.
+    """
     ensure_project_access(db, org_id, project_id)
-    return list_sprints(db, org_id, project_id)
+    rows = list_sprints(db, org_id, project_id)
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/projects/{project_id}/sprints/active", response_model=SprintResponse | None)
@@ -87,10 +100,12 @@ def api_mapping(
 @router.get("/projects/{project_id}/sprints/executions", response_model=list[AgentExecutionOut])
 def api_executions(
     project_id: str,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
+    """List agent executions for a project. Hard-capped at 200 rows to
+    align with the standard pagination cap used elsewhere."""
     ensure_project_access(db, org_id, project_id)
     return list_executions(db, org_id, project_id, limit=limit)
 
@@ -225,13 +240,24 @@ def api_get_sprint(
     return get_sprint(db, org_id, sprint_id)
 
 
-@router.get("/sprints/{sprint_id}/tasks", response_model=list[SprintTaskResponse])
+@router.get(
+    "/sprints/{sprint_id}/tasks",
+    response_model=PaginatedResponse[SprintTaskResponse],
+)
 def api_list_tasks(
     sprint_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
-    return list_tasks_for_sprint(db, org_id, sprint_id)
+    """List tasks for a sprint (paginated envelope).
+
+    Breaking change vs v0.x: response is now `{items,total,limit,offset}`
+    instead of a bare array. See REVIEW_API_CONTRACT.md §API-C2.
+    """
+    rows = list_tasks_for_sprint(db, org_id, sprint_id)
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/sprints/{sprint_id}/risks", response_model=list[SprintRiskResponse])
@@ -264,7 +290,8 @@ def api_burndown(
 # ── Mutations ──────────────────────────────────────────────────────
 
 @router.post("/projects/{project_id}/sprints", response_model=SprintResponse, status_code=201)
-def api_create_sprint(
+@idempotent("create_sprint")
+async def api_create_sprint(
     project_id: str,
     data: SprintCreate,
     request: Request,
@@ -272,7 +299,11 @@ def api_create_sprint(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Create a new sprint under a project. Index auto-assigned if omitted."""
+    """Create a new sprint under a project. Index auto-assigned if omitted.
+
+    Idempotent on `Idempotency-Key` header (API-C4) so retries from a flaky
+    network don't insert duplicate sprint rows.
+    """
     ensure_project_access(db, org_id, project_id)
     sp = create_sprint(db, org_id, project_id, data)
     write_audit(
@@ -286,7 +317,8 @@ def api_create_sprint(
 
 
 @router.post("/sprints/{sprint_id}/tasks", response_model=SprintTaskResponse, status_code=201)
-def api_create_task(
+@idempotent("create_sprint_task")
+async def api_create_task(
     sprint_id: str,
     data: SprintTaskCreate,
     request: Request,
@@ -294,7 +326,10 @@ def api_create_task(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Create a task inside a sprint."""
+    """Create a task inside a sprint.
+
+    Idempotent on `Idempotency-Key` header (API-C4).
+    """
     task = create_task(db, org_id, sprint_id, data)
     write_audit(
         db, org_id=org_id, actor_id=user_id,
@@ -310,15 +345,30 @@ def api_create_task(
 def api_patch_task(
     task_id: str,
     data: SprintTaskUpdate,
+    request: Request,
     org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     # Currently only status is wired end-to-end; other fields are accepted
     # but only `status` flows to the kanban DnD path.
-    if data.status:
-        return update_task_status(db, org_id, task_id, data.status)
-    from fastapi import HTTPException
-    raise HTTPException(status_code=400, detail="No mutable field provided")
+    if not data.status:
+        from fastapi import HTTPException
+        # 422 (semantic validation) matches FastAPI's body-validation
+        # convention better than the previous 400.
+        raise HTTPException(
+            status_code=422,
+            detail="status is the only mutable field currently wired; provide a status value or use the kanban DnD endpoint",
+        )
+    task = update_task_status(db, org_id, task_id, data.status)
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="sprint_task_status_updated",
+        entity_type="sprint_task", entity_id=task_id,
+        meta={"new_status": data.status},
+        request=request,
+    )
+    return task
 
 
 @router.post("/sprint-approvals/{approval_id}/decide", response_model=SprintApprovalResponse)

@@ -4,17 +4,36 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import resolve_active_org_id
+from app.auth.dependencies import resolve_active_org_id, get_current_organization_id
 from app.models.artifacts import CodeArtifact
 from app.services.artifact_version_service import create_artifact_metadata, list_artifacts, get_artifact, list_versions
 from app.services.project_service import ensure_project_access
 from app.storage.local import sanitize_filename, save_artifact_file, validate_upload
 from app.api.audit import write_audit
+from app.schemas.pagination import PaginatedResponse, paginate
+from app.utils.idempotency import idempotent
 
 router = APIRouter(tags=["artifacts"])
 
 
-@router.get("/artifacts")
+class ArtifactSummary(BaseModel):
+    """Lightweight artifact row used by list endpoints.
+
+    Replaces the previous hand-built dict in `api_list_org_artifacts` so the
+    OpenAPI schema enumerates real fields. `created_at` is an ISO-8601 string
+    (e.g. `"2026-05-26T14:33:21+00:00"`) — the legacy `str(datetime)` repr
+    that broke Safari's `Date` parser is gone.
+    """
+
+    id: str
+    project_id: str
+    filename: str
+    file_type: str | None = None
+    status: str | None = None
+    created_at: str | None = None
+
+
+@router.get("/artifacts", response_model=PaginatedResponse[ArtifactSummary])
 def api_list_org_artifacts(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
@@ -23,11 +42,22 @@ def api_list_org_artifacts(
 ):
     """Org-wide artifact list — every artifact across all projects.
 
+    Returns a `{items,total,limit,offset}` envelope (breaking change vs v0.x
+    bare array — see REVIEW_API_CONTRACT.md §API-C2).
+
     Used by /developer-workspace (top-level IDE view) so operators can scan
     artifacts without first picking a project. Per-project list lives at
     /projects/{project_id}/artifacts.
     """
+    from sqlalchemy import func
     org_id = resolve_active_org_id(db, user_id)
+    # Cheap COUNT(*) for the envelope — same WHERE clause as the SELECT.
+    total = (
+        db.query(func.count(CodeArtifact.id))
+        .filter(CodeArtifact.organization_id == org_id)
+        .scalar()
+        or 0
+    )
     rows = (
         db.query(CodeArtifact)
         .filter(CodeArtifact.organization_id == org_id)
@@ -36,17 +66,22 @@ def api_list_org_artifacts(
         .limit(limit)
         .all()
     )
-    return [
-        {
-            "id": a.id,
-            "project_id": a.project_id,
-            "filename": a.filename,
-            "file_type": a.file_type,
-            "status": a.status,
-            "created_at": str(a.created_at) if a.created_at else None,
-        }
+    items = [
+        ArtifactSummary(
+            id=a.id,
+            project_id=a.project_id,
+            filename=a.filename,
+            file_type=a.file_type,
+            status=a.status,
+            created_at=a.created_at.isoformat() if a.created_at else None,
+        )
         for a in rows
     ]
+    # Already paginated at the DB level — pass full COUNT(*) as total and
+    # the raw page as items; do NOT re-slice.
+    return PaginatedResponse[ArtifactSummary](
+        items=items, total=int(total), limit=limit, offset=offset,
+    )
 
 
 @router.post("/projects/{project_id}/artifacts/upload")
@@ -67,7 +102,10 @@ async def upload_artifact(request: Request, project_id: str, file: UploadFile = 
     return result
 
 
-@router.get("/projects/{project_id}/artifacts")
+@router.get(
+    "/projects/{project_id}/artifacts",
+    response_model=PaginatedResponse[dict],
+)
 def api_list_artifacts(
     project_id: str,
     user_id: str = Depends(get_current_user_id),
@@ -75,10 +113,16 @@ def api_list_artifacts(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    """List artifacts for a project (paginated envelope).
+
+    Breaking change vs v0.x: response is now `{items,total,limit,offset}`.
+    `items` keeps the existing row shape returned by `list_artifacts`
+    until that service is migrated to a typed schema.
+    """
     org_id = resolve_active_org_id(db, user_id)
     ensure_project_access(db, org_id, project_id)
     rows = list_artifacts(db, org_id, project_id)
-    return rows[offset : offset + limit]
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/artifacts/{artifact_id}")
@@ -99,6 +143,7 @@ class RollbackLink(BaseModel):
 def api_link_rollback(
     artifact_id: str,
     data: "RollbackLink",
+    request: Request,
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -124,6 +169,15 @@ def api_link_rollback(
     forward.rollback_artifact_id = reverse.id
     db.commit()
     db.refresh(forward)
+    # Audit emission was missing — REVIEW_API_CONTRACT lists this endpoint
+    # among the no-audit set.
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="artifact_rollback_linked",
+        entity_type="artifact", entity_id=forward.id,
+        meta={"rollback_artifact_id": reverse.id},
+        request=request,
+    )
     return {
         "id": forward.id,
         "filename": forward.filename,
@@ -132,10 +186,12 @@ def api_link_rollback(
 
 
 @router.post("/artifacts/{artifact_id}/generate-rollback")
-def api_generate_rollback(
+@idempotent("generate_rollback")
+async def api_generate_rollback(
     artifact_id: str,
     request: Request,
     user_id: str = Depends(get_current_user_id),
+    org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
     """LLM-generate an inverse migration script and link it as the rollback.
@@ -144,7 +200,10 @@ def api_generate_rollback(
     a fixed system prompt, saves the output as a paired *.rollback.<ext>
     artifact, sets rollback_artifact_id, and records the LLM usage row.
 
-    Idempotent at the link level — re-running overwrites the previous rollback.
+    Idempotent on `Idempotency-Key` header (API-C4) — retries don't burn
+    a second LLM call + duplicate the rollback artifact. The link itself
+    was already idempotent at the data-model level (re-running overwrote
+    the previous pointer); the API-level cache also avoids the LLM cost.
     """
     from pathlib import Path
     from fastapi import HTTPException
@@ -156,7 +215,8 @@ def api_generate_rollback(
     from app.models.llm import LLMProvider, LLMAgentMapping
     from agents.runtime.providers import CallContext, get_provider as get_llm_provider
 
-    org_id = resolve_active_org_id(db, user_id)
+    # `org_id` is now resolved by the dependency injector — needed by the
+    # @idempotent decorator to scope the cache key per-org.
     forward = db.query(CodeArtifact).filter(
         CodeArtifact.id == artifact_id, CodeArtifact.organization_id == org_id
     ).first()
@@ -285,5 +345,6 @@ def api_get_rollback(
         "storage_path": reverse.storage_path,
         "content_hash": reverse.content_hash,
         "status": reverse.status,
-        "created_at": str(reverse.created_at) if reverse.created_at else None,
+        # ISO-8601 (API-C3)
+        "created_at": reverse.created_at.isoformat() if reverse.created_at else None,
     }
