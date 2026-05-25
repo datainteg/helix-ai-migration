@@ -39,6 +39,73 @@ class ReplayRequest(BaseModel):
     model_override: str | None = Field(default=None, description="Force a specific model id for this replay")
 
 
+# SEC-016: cap per-agent override length, strip control chars, and reject
+# anything that is not a known BMAD agent code. The override string lands
+# in the LLM system prompt verbatim — without a length+content guard, any
+# project member can craft a prompt-injection-as-feature override that
+# convinces the LLM to leak prior context (api_key in frontmatter, etc.).
+_MAX_OVERRIDE_CHARS = 4000
+_VALID_AGENT_CODES = {
+    "bmad-agent-analyst",
+    "bmad-agent-architect",
+    "bmad-agent-pm",
+    "bmad-agent-po",
+    "bmad-agent-sm",
+    "bmad-agent-dev",
+    "bmad-agent-qa",
+    "bmad-agent-ux",
+    "bmad-agent-bmad",
+    # legacy shorthand still produced by some clients
+    "analyst", "architect", "pm", "po", "sm", "dev", "qa", "ux",
+}
+
+
+def _validate_prompt_overrides(overrides: dict[str, str]) -> dict[str, str]:
+    """Validate replay prompt-overrides.
+
+    Raises HTTPException(400) on any violation. Returns the cleaned dict
+    (control chars stripped) for downstream consumption.
+    """
+    from fastapi import HTTPException
+
+    if not overrides:
+        return {}
+    if len(overrides) > 32:
+        raise HTTPException(status_code=400, detail="Too many agent overrides (max 32)")
+
+    cleaned: dict[str, str] = {}
+    for agent_code, override in overrides.items():
+        if not isinstance(agent_code, str) or not isinstance(override, str):
+            raise HTTPException(status_code=400, detail="Override keys/values must be strings")
+        if agent_code not in _VALID_AGENT_CODES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown agent code {agent_code!r}; allowed: {sorted(_VALID_AGENT_CODES)}",
+            )
+        if len(override) > _MAX_OVERRIDE_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Override for {agent_code} exceeds {_MAX_OVERRIDE_CHARS} chars",
+            )
+        # Strip ASCII control chars (except tab/newline) — prevents
+        # role-injection via embedded \r, \x00, etc.
+        sanitised = "".join(
+            ch for ch in override
+            if ch in ("\t", "\n") or (ord(ch) >= 0x20 and ord(ch) != 0x7F)
+        )
+        # Reject obvious chat-template role markers that could break out
+        # of the operator-override append into a forged system/assistant turn.
+        lowered = sanitised.lower()
+        for marker in ("<|im_start|>", "<|im_end|>", "<|system|>", "<|assistant|>", "<|user|>"):
+            if marker in lowered:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Override for {agent_code} contains forbidden role marker {marker!r}",
+                )
+        cleaned[agent_code] = sanitised
+    return cleaned
+
+
 @router.post("/workflows/{workflow_id}/replay")
 def replay_workflow(
     workflow_id: str,
@@ -61,6 +128,10 @@ def replay_workflow(
     if not parent:
         raise HTTPException(status_code=404, detail="Parent workflow not found")
 
+    # SEC-016: validate overrides BEFORE we burn LLM tokens. Rejects
+    # unknown agent codes, oversize bodies, control chars, role markers.
+    safe_overrides = _validate_prompt_overrides(data.agent_prompt_overrides or {})
+
     # Delegate to the planning entrypoint. Real per-agent prompt overrides
     # require threading them through the executor — for now we record them
     # in audit metadata + the requirement_text, and let the operator paste
@@ -77,13 +148,15 @@ def replay_workflow(
         organization_id=org_id,
         requirement_text=data.requirement_text or "",
         db=db,
-        prompt_overrides=data.agent_prompt_overrides or None,
+        prompt_overrides=safe_overrides or None,
     ))
 
+    # Audit captures the full sanitised overrides so an operator can see
+    # exactly what the LLM saw — not just the agent codes.
     write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_replay",
                 entity_type="workflow_run", entity_id=new_run.get("workflow_id", ""),
                 meta={"parent_workflow_id": workflow_id,
-                      "agent_overrides": list(data.agent_prompt_overrides.keys()),
+                      "agent_overrides": safe_overrides,
                       "model_override": data.model_override},
                 request=request)
     return {
