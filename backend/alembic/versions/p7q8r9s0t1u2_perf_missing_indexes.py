@@ -25,7 +25,7 @@ CONCURRENTLY is not transaction-safe. Operators running into lock pressure
 should drop+rebuild concurrently outside alembic.
 
 Revision ID: p7q8r9s0t1u2
-Revises: eadec18c9cfc
+Revises: 8f881cfc333e
 Create Date: 2026-05-26
 """
 
@@ -33,7 +33,7 @@ from alembic import op
 
 
 revision = "p7q8r9s0t1u2"
-down_revision = "eadec18c9cfc"
+down_revision = "8f881cfc333e"
 
 
 # (index_name, table, columns_sql, optional WHERE clause)
