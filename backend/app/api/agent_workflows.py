@@ -20,6 +20,8 @@ from app.services.workflow_service import (
 )
 from app.models.project import MigrationRequirement
 from app.api.audit import write_audit
+from app.schemas.pagination import PaginatedResponse, paginate
+from app.utils.idempotency import idempotent
 
 
 class StartWorkflowRequest(BaseModel):
@@ -40,10 +42,57 @@ class ApprovalRequest(BaseModel):
     notes: str = ""
 
 
+class WorkflowRunSummary(BaseModel):
+    """Per-row shape returned by the list endpoints.
+
+    Used as the `T` in `PaginatedResponse[WorkflowRunSummary]` so the
+    OpenAPI schema enumerates real fields instead of a bare `dict`.
+    The shape mirrors what `_serialize_workflow_runs` produced before.
+    `created_at` is an ISO-8601 string (pydantic's default `datetime`
+    encoding) rather than the legacy `str(datetime)` repr.
+    """
+
+    workflow_id: str
+    run_id: str | None = None
+    status: str | None = None
+    mode: str | None = None
+    project_id: str | None = None
+    requirement_id: str | None = None
+    created_at: str | None = None
+
+
+class ApprovalSignalResponse(BaseModel):
+    """Acknowledgement returned by /approve, /signal-approve, /signal-reject."""
+
+    workflow_id: str
+    status: str
+    decision: str | None = None
+    signal: str | None = None
+
+
+class WorkflowArtifactRef(BaseModel):
+    agent_name: str
+    step_order: int
+    artifact_path: str
+
+
+class WorkflowArtifactContent(BaseModel):
+    """Artifact file content returned by /artifact-content.
+
+    NOTE: `path` echoes the on-disk path because the existing UI passes it
+    back as the lookup key. Path-traversal is blocked by the per-workflow
+    allowlist check before this endpoint reads the file.
+    """
+
+    path: str
+    content: str
+
+
 router = APIRouter(tags=["agent-workflows"])
 
 
 @router.post("/projects/{project_id}/agent-workflows", response_model=StartWorkflowResponse)
+@idempotent("start_workflow")
 async def start_workflow(
     request: Request,
     project_id: str,
@@ -52,7 +101,12 @@ async def start_workflow(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Start a BMAD planning workflow for a project requirement."""
+    """Start a BMAD planning workflow for a project requirement.
+
+    Idempotent on `Idempotency-Key` header (API-C4). Network retries with
+    the same key + body return the cached response for 24h instead of
+    starting a second workflow + paying 2x LLM cost.
+    """
     ensure_project_access(db, org_id, project_id)
 
     requirement = db.query(MigrationRequirement).filter(
@@ -108,7 +162,10 @@ async def get_workflow(
     return await get_workflow_status(workflow_id, db=db)
 
 
-@router.get("/agent-workflows/{workflow_id}/artifacts")
+@router.get(
+    "/agent-workflows/{workflow_id}/artifacts",
+    response_model=list[WorkflowArtifactRef],
+)
 async def list_workflow_artifacts(
     workflow_id: str,
     org_id: str = Depends(get_current_organization_id),
@@ -118,18 +175,23 @@ async def list_workflow_artifacts(
     """Return every artifact path produced by a workflow's agents."""
     _assert_workflow_in_org(db, workflow_id, org_id)
     status = await get_workflow_status(workflow_id, db=db)
-    artifacts = []
+    artifacts: list[WorkflowArtifactRef] = []
     for step in status.get("steps", []):
         if step.get("artifact_path"):
-            artifacts.append({
-                "agent_name": step["agent_name"],
-                "step_order": step["step_order"],
-                "artifact_path": step["artifact_path"],
-            })
+            artifacts.append(
+                WorkflowArtifactRef(
+                    agent_name=step["agent_name"],
+                    step_order=step["step_order"],
+                    artifact_path=step["artifact_path"],
+                )
+            )
     return artifacts
 
 
-@router.get("/agent-workflows/{workflow_id}/artifact-content")
+@router.get(
+    "/agent-workflows/{workflow_id}/artifact-content",
+    response_model=WorkflowArtifactContent,
+)
 async def read_workflow_artifact(
     workflow_id: str,
     path: str,
@@ -157,7 +219,10 @@ async def read_workflow_artifact(
     return {"path": path, "content": content}
 
 
-@router.post("/agent-workflows/{workflow_id}/approve")
+@router.post(
+    "/agent-workflows/{workflow_id}/approve",
+    response_model=ApprovalSignalResponse,
+)
 def approve_step(
     workflow_id: str,
     data: ApprovalRequest,
@@ -183,11 +248,11 @@ def approve_step(
         request=request,
     )
 
-    return {
-        "workflow_id": workflow_id,
-        "decision": data.decision,
-        "status": new_status,
-    }
+    return ApprovalSignalResponse(
+        workflow_id=workflow_id,
+        decision=data.decision,
+        status=new_status,
+    )
 
 
 @router.get("/agent-workflows/{workflow_id}/stream")
@@ -282,7 +347,10 @@ async def stream_workflow_progress(
     )
 
 
-@router.post("/agent-workflows/{workflow_id}/signal-approve")
+@router.post(
+    "/agent-workflows/{workflow_id}/signal-approve",
+    response_model=ApprovalSignalResponse,
+)
 async def signal_approve(
     workflow_id: str,
     data: ApprovalRequest,
@@ -304,14 +372,22 @@ async def signal_approve(
         write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_approved",
                     entity_type="workflow_run", entity_id=workflow_id,
                     meta={"notes": data.notes}, request=request)
-        return {"workflow_id": workflow_id, "signal": "approve", "status": "sent"}
+        return ApprovalSignalResponse(workflow_id=workflow_id, signal="approve", status="sent")
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
+    except Exception:
+        # Never echo Temporal's raw exception (would expose internal addresses
+        # / stack traces to clients). Log + return a generic 503; operators get
+        # the full trace from server logs.
+        import logging
+        logging.getLogger(__name__).exception("Temporal signal failure (approve) for workflow %s", workflow_id)
+        raise HTTPException(status_code=503, detail="Workflow signal backend unavailable")
 
 
-@router.post("/agent-workflows/{workflow_id}/signal-reject")
+@router.post(
+    "/agent-workflows/{workflow_id}/signal-reject",
+    response_model=ApprovalSignalResponse,
+)
 async def signal_reject(
     workflow_id: str,
     data: ApprovalRequest,
@@ -333,14 +409,20 @@ async def signal_reject(
         write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_signal_rejected",
                     entity_type="workflow_run", entity_id=workflow_id,
                     meta={"notes": data.notes}, request=request)
-        return {"workflow_id": workflow_id, "signal": "reject", "status": "sent"}
+        return ApprovalSignalResponse(workflow_id=workflow_id, signal="reject", status="sent")
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Failed to signal workflow: {exc}") from exc
+    except Exception:
+        # Sanitize: never echo Temporal's raw exception to API clients.
+        import logging
+        logging.getLogger(__name__).exception("Temporal signal failure (reject) for workflow %s", workflow_id)
+        raise HTTPException(status_code=503, detail="Workflow signal backend unavailable")
 
 
-@router.get("/projects/{project_id}/agent-workflows")
+@router.get(
+    "/projects/{project_id}/agent-workflows",
+    response_model=PaginatedResponse[WorkflowRunSummary],
+)
 def list_workflows(
     project_id: str,
     limit: int = Query(50, ge=1, le=200),
@@ -349,13 +431,18 @@ def list_workflows(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """List workflow runs for a project (paginated)."""
+    """List workflow runs for a project (paginated envelope)."""
     ensure_project_access(db, org_id, project_id)
     runs = list_workflow_runs(db, organization_id=org_id, project_id=project_id)
-    return _serialize_workflow_runs(runs[offset : offset + limit])
+    rows = _serialize_workflow_runs(runs)
+    # `rows` is the full result set here, so `paginate()` infers total from it.
+    return paginate(rows, limit=limit, offset=offset)
 
 
-@router.get("/agent-workflows")
+@router.get(
+    "/agent-workflows",
+    response_model=PaginatedResponse[WorkflowRunSummary],
+)
 def list_all_workflows(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -363,21 +450,26 @@ def list_all_workflows(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """List every workflow run for the current organization (paginated)."""
+    """List every workflow run for the current organization (paginated envelope)."""
     runs = list_workflow_runs(db, organization_id=org_id)
-    return _serialize_workflow_runs(runs[offset : offset + limit])
+    rows = _serialize_workflow_runs(runs)
+    return paginate(rows, limit=limit, offset=offset)
 
 
-def _serialize_workflow_runs(runs) -> list[dict]:
+def _serialize_workflow_runs(runs) -> list[WorkflowRunSummary]:
+    # Return typed objects so the envelope serializer can document the
+    # row shape in OpenAPI. `.isoformat()` produces a real ISO-8601 string
+    # (e.g. "2026-05-26T14:33:21+00:00"), replacing the previous
+    # `str(datetime)` repr that JS parsers in Safari rejected.
     return [
-        {
-            "workflow_id": r.workflow_id,
-            "run_id": r.run_id,
-            "status": r.status,
-            "mode": r.mode,
-            "project_id": r.project_id,
-            "requirement_id": r.requirement_id,
-            "created_at": str(r.created_at) if r.created_at else None,
-        }
+        WorkflowRunSummary(
+            workflow_id=r.workflow_id,
+            run_id=r.run_id,
+            status=r.status,
+            mode=r.mode,
+            project_id=r.project_id,
+            requirement_id=r.requirement_id,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        )
         for r in runs
     ]

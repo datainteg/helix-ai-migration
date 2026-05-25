@@ -29,8 +29,27 @@ from app.auth.jwt import get_current_user_id
 from app.api.audit import write_audit
 from app.models.artifacts import CodeArtifact, ArtifactReview, CodeArtifactVersion
 from app.models.workflow import WorkflowRun
+from app.utils.idempotency import idempotent
 
 router = APIRouter(tags=["workflow-ops"])
+
+
+class ReplayResponse(BaseModel):
+    parent_workflow_id: str
+    replay_workflow_id: str | None = None
+    status: str | None = None
+    mode: str | None = None
+
+
+class PairReviewResponse(BaseModel):
+    review_id: str
+    artifact_id: str
+    reviewer_provider: str
+    reviewer_model: str
+    # Truncated at 600 chars by the endpoint; full critique lives at
+    # GET /code-reviews/{review_id}. Consumers wanting the full body
+    # MUST follow up with that call.
+    findings_preview: str
 
 
 class ReplayRequest(BaseModel):
@@ -106,8 +125,9 @@ def _validate_prompt_overrides(overrides: dict[str, str]) -> dict[str, str]:
     return cleaned
 
 
-@router.post("/workflows/{workflow_id}/replay")
-def replay_workflow(
+@router.post("/workflows/{workflow_id}/replay", response_model=ReplayResponse)
+@idempotent("replay_workflow")
+async def replay_workflow(
     workflow_id: str,
     data: ReplayRequest,
     request: Request,
@@ -119,6 +139,9 @@ def replay_workflow(
 
     Records the parent_workflow_id in the new run's metadata so the UI can
     diff artifact-by-artifact later.
+
+    Idempotent on `Idempotency-Key` header (API-C4) — retries don't spawn
+    a second replay workflow + double LLM spend.
     """
     parent = (
         db.query(WorkflowRun)
@@ -159,12 +182,12 @@ def replay_workflow(
                       "agent_overrides": safe_overrides,
                       "model_override": data.model_override},
                 request=request)
-    return {
-        "parent_workflow_id": workflow_id,
-        "replay_workflow_id": new_run.get("workflow_id"),
-        "status": new_run.get("status"),
-        "mode": new_run.get("mode"),
-    }
+    return ReplayResponse(
+        parent_workflow_id=workflow_id,
+        replay_workflow_id=new_run.get("workflow_id"),
+        status=new_run.get("status"),
+        mode=new_run.get("mode"),
+    )
 
 
 class PairReviewRequest(BaseModel):
@@ -172,8 +195,9 @@ class PairReviewRequest(BaseModel):
     reviewer_provider_type: str | None = Field(default=None)
 
 
-@router.post("/artifacts/{artifact_id}/pair-review")
-def pair_review_artifact(
+@router.post("/artifacts/{artifact_id}/pair-review", response_model=PairReviewResponse)
+@idempotent("pair_review_artifact")
+async def pair_review_artifact(
     artifact_id: str,
     data: PairReviewRequest,
     request: Request,
@@ -185,6 +209,10 @@ def pair_review_artifact(
 
     Choice of reviewer is independent of the generator: e.g. Claude-generated
     DDL gets reviewed by GPT-4 to catch model-specific blind spots.
+
+    Idempotent on `Idempotency-Key` header (API-C4) — pair-review is a
+    paid LLM call; a retry without the key would store a second
+    ArtifactReview row and bill the org twice.
     """
     forward = (
         db.query(CodeArtifact)
@@ -298,10 +326,10 @@ def pair_review_artifact(
                 entity_type="artifact", entity_id=forward.id,
                 meta={"reviewer_provider": reviewer.provider_type, "reviewer_model": model, "review_id": review.id},
                 request=request)
-    return {
-        "review_id": review.id,
-        "artifact_id": forward.id,
-        "reviewer_provider": reviewer.provider_type,
-        "reviewer_model": model,
-        "findings_preview": critique[:600],
-    }
+    return PairReviewResponse(
+        review_id=review.id,
+        artifact_id=forward.id,
+        reviewer_provider=reviewer.provider_type,
+        reviewer_model=model,
+        findings_preview=critique[:600],
+    )
