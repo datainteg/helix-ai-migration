@@ -11,7 +11,13 @@ from app.services.auth_service import get_current_user
 from app.rate_limiting import limiter
 from app.api.audit import write_audit
 
-router = APIRouter(prefix="/superadmin", tags=["superadmin"])
+# NOTE: Prefix is intentionally declared here AND mounted under /api/v1 in
+# main.py so the final URL is /api/v1/superadmin/.... Every other router
+# leaves prefix off and relies on main.py to mount it; superadmin is the
+# only exception. Do not "harmonise" by moving it — see REVIEW_API_CONTRACT
+# §1 API-C1 (CRITICAL). The smoke test in test_api_contract_pagination.py
+# asserts the full path is reachable so accidental removal will fail CI.
+router = APIRouter(tags=["superadmin"])
 
 
 def _audit_super(db: Session, admin: User, action: str, entity_type: str = "", entity_id: str = "", meta: dict | None = None, request: Request | None = None) -> None:
