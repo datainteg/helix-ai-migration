@@ -8,10 +8,11 @@
  * render.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon, Sliders, Sun, X, Laptop, RotateCcw } from "lucide-react";
 
 import { Density, ThemeMode, useTweaks } from "@/lib/theme-store";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 
 const PRESET_COLORS = [
   "#4F46E5", // indigo (default)
@@ -33,60 +34,23 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
   const t = useTweaks();
   const [mounted, setMounted] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
 
   useEffect(() => setMounted(true), []);
 
-  // Focus trap + Escape + body scroll lock while open.
-  useEffect(() => {
-    if (!open) return;
-    previouslyFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const node = panelRef.current;
-    if (node) {
-      const focusable = node.querySelector<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
-      (focusable ?? node).focus();
-    }
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab" || !panelRef.current) return;
-      const focusables = Array.from(
-        panelRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"),
-      ).filter((el) => el.offsetParent !== null);
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused.current?.focus?.();
-    };
-  }, [open, onClose]);
+  // Shared focus-trap hook (Modal + TweaksPanel + future drawers).
+  const onEscape = useCallback(() => onClose(), [onClose]);
+  useFocusTrap(panelRef, open, onEscape);
 
   if (!mounted || !open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        aria-label="Close tweaks"
-        className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
+      {/* Backdrop is decorative — keep it out of the tab order so SR users
+          don't hear two "close" affordances. The explicit close button in
+          the header owns the close semantics. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-black/30 motion-safe:backdrop-blur-[2px]"
         onClick={onClose}
       />
       <aside
@@ -99,23 +63,24 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
         {/* Header */}
         <header className="sticky top-0 z-10 bg-surface border-b border-hx px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sliders className="h-4 w-4 text-ink-3" />
+            <Sliders className="h-4 w-4 text-ink-3" aria-hidden />
             <h2 id="tweaks-title" className="text-[13.5px] font-semibold text-ink">Tweaks</h2>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={t.reset}
               title="Reset to defaults"
-              className="grid place-items-center h-7 w-7 rounded-md text-ink-3 hover:bg-app-2"
+              aria-label="Reset to defaults"
+              className="grid place-items-center h-9 w-9 rounded-md text-ink-3 hover:bg-app-2"
             >
-              <RotateCcw className="h-[14px] w-[14px]" />
+              <RotateCcw className="h-[14px] w-[14px]" aria-hidden />
             </button>
             <button
-              aria-label="Close"
+              aria-label="Close tweaks panel"
               onClick={onClose}
-              className="grid place-items-center h-7 w-7 rounded-md text-ink-3 hover:bg-app-2"
+              className="grid place-items-center h-9 w-9 rounded-md text-ink-3 hover:bg-app-2"
             >
-              <X className="h-4 w-4" />
+              <X className="h-4 w-4" aria-hidden />
             </button>
           </div>
         </header>
@@ -155,6 +120,7 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
               max="18"
               step="0.5"
               value={t.fontSizePx}
+              aria-label={`Font size: ${t.fontSizePx} pixels`}
               onChange={(e) => t.setFontSize(parseFloat(e.target.value))}
               className="w-full accent-[var(--con-brand)]"
             />
@@ -208,13 +174,17 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
               ))}
             </div>
             <div className="mt-2 flex items-center gap-2">
+              <label className="sr-only" htmlFor="tweaks-primary-color-swatch">Pick primary color</label>
               <input
+                id="tweaks-primary-color-swatch"
                 type="color"
                 value={t.primaryColor}
                 onChange={(e) => t.setPrimaryColor(e.target.value)}
                 className="h-7 w-10 rounded-md border border-hx bg-surface cursor-pointer"
               />
+              <label className="sr-only" htmlFor="tweaks-primary-color-hex">Primary color hex value</label>
               <input
+                id="tweaks-primary-color-hex"
                 type="text"
                 value={t.primaryColor}
                 onChange={(e) => t.setPrimaryColor(e.target.value)}
@@ -264,6 +234,7 @@ function Segmented<T extends string>({
           <button
             key={String(o.value)}
             onClick={() => onChange(o.value)}
+            aria-pressed={active}
             className={
               "flex-1 inline-flex items-center justify-center gap-1.5 h-7 px-2 text-[11.5px] font-medium rounded transition-colors " +
               (active
@@ -271,7 +242,7 @@ function Segmented<T extends string>({
                 : "text-ink-3 hover:text-ink-2")
             }
           >
-            {Icon && <Icon className="h-[13px] w-[13px]" />}
+            {Icon && <Icon className="h-[13px] w-[13px]" aria-hidden />}
             {o.label}
           </button>
         );
