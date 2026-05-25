@@ -21,10 +21,10 @@ const REPO_TREE = [
 ];
 
 const RECENT_ACTIVITY = [
-  { msg: "feat(p3): implement all 10 P3 backlog enhancements", when: "2d ago" },
-  { msg: "feat(p2): implement all 12 remaining P2 medium-priority improvements", when: "5d ago" },
-  { msg: "feat: Docker Compose, frontend admin pages, and backend refinements", when: "1w ago" },
-  { msg: "fix: accept NEXT_PUBLIC_API_URL build arg in frontend Dockerfile", when: "1w ago" },
+  { msg: "Sprint management: kanban, mapping showcase, dependency graph", when: "Latest" },
+  { msg: "10-provider LLM adapter layer (Bedrock + Vertex + Azure)",       when: "Latest" },
+  { msg: "Cross-tenant isolation audit + 4 audit-finding closes",          when: "Latest" },
+  { msg: "Public marketing + demo + docs site (this site)",                when: "Latest" },
 ];
 
 export function OpenSourcePage() {

@@ -86,21 +86,34 @@ export function DemoSprintMapping() {
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-5 mb-5">
         {/* Kanban */}
         <div className="xl:col-span-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {(["Backlog", "In progress", "Review", "Done"] as const).map((col) => (
-              <div key={col} className="bg-surface-muted rounded-xl border border-zinc-200 p-3 min-h-[280px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <h4 className="text-[12.5px] font-semibold text-ink">{col}</h4>
-                  <span className="text-[11px] font-mono text-ink-4 bg-surface px-1.5 py-0.5 rounded">{cols[col].length}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {(["Backlog", "In progress", "Review", "Done", "Blocked"] as const).map((col) => {
+              const isBlocked = col === "Blocked";
+              return (
+                <div
+                  key={col}
+                  className={
+                    "rounded-xl border p-3 min-h-[280px] " +
+                    (isBlocked ? "bg-rose-50/40 border-rose-200" : "bg-surface-muted border-zinc-200")
+                  }
+                >
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <h4 className={`text-[12.5px] font-semibold ${isBlocked ? "text-rose-700" : "text-ink"}`}>
+                      {col}
+                    </h4>
+                    <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${isBlocked ? "bg-rose-100 text-rose-700" : "bg-surface text-ink-4"}`}>
+                      {cols[col].length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {cols[col].map((t) => <TaskCard key={t.id} t={t} />)}
+                    {cols[col].length === 0 && (
+                      <div className="text-[11.5px] text-ink-5 text-center py-6">— empty —</div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {cols[col].map((t) => <TaskCard key={t.id} t={t} />)}
-                  {cols[col].length === 0 && (
-                    <div className="text-[11.5px] text-ink-5 text-center py-6">— empty —</div>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

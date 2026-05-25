@@ -63,7 +63,7 @@ export function DemoReconDashboard() {
                   <td className="px-3 py-2.5 text-right font-mono text-ink-2">{fmt(r.sourceCount)}</td>
                   <td className="px-3 py-2.5 text-right font-mono text-ink-2">{fmt(r.targetCount)}</td>
                   <td className="px-3 py-2.5 text-right font-mono text-ink-2">{r.diff === 0 ? "—" : fmt(r.diff)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-ink">{r.parity.toFixed(5)}%</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-ink">{(r.parity >= 99.999 ? 99.99 : r.parity).toFixed(2)}%</td>
                   <td className="px-3 py-2.5"><StatusPill status={r.status} /></td>
                   <td className="px-3 py-2.5 text-ink-3">{r.ranAt}</td>
                 </tr>
