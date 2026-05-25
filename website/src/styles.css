@@ -42,4 +42,16 @@
   .focus-ring {
     @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2;
   }
+  /* Horizontal-scroll fade hint — applied to `overflow-x-auto` wrappers so
+     mobile users see a faded right edge when the table extends off-screen. */
+  .scroll-fade-x {
+    -webkit-mask-image: linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%);
+    mask-image: linear-gradient(to right, black 0, black calc(100% - 32px), transparent 100%);
+  }
+  @media (min-width: 1024px) {
+    .scroll-fade-x {
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
 }

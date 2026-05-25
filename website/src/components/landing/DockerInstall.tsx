@@ -43,9 +43,7 @@ export function DockerInstall() {
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <pre className="px-5 py-4 font-mono text-[12.5px] text-ink-2 leading-relaxed whitespace-pre overflow-x-auto">
-{DOCKER_INSTALL}
-          </pre>
+          <pre className="px-5 py-4 font-mono text-[12.5px] text-ink-2 leading-relaxed whitespace-pre-wrap break-all md:whitespace-pre md:break-normal overflow-x-auto">{DOCKER_INSTALL}</pre>
         </div>
 
         <div className="mt-5 flex justify-center">

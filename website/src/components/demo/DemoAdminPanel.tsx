@@ -48,7 +48,7 @@ export function DemoAdminPanel() {
         {/* LLM Providers */}
         <div className={`${card} p-0 overflow-hidden`}>
           <Header icon={Cpu} title="LLM providers" sub={`${DEMO_LLM_PROVIDERS.length} configured`} />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-fade-x">
             <table className="w-full text-[12.5px]">
               <thead className="bg-surface-subtle text-ink-3">
                 <tr>
@@ -77,7 +77,7 @@ export function DemoAdminPanel() {
         {/* Agent model mapping */}
         <div className={`${card} p-0 overflow-hidden`}>
           <Header icon={Workflow} title="Agent model mapping" sub="6 BMAD agents" />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-fade-x">
             <table className="w-full text-[12.5px]">
               <thead className="bg-surface-subtle text-ink-3">
                 <tr>
@@ -126,7 +126,7 @@ export function DemoAdminPanel() {
         {/* Audit logs */}
         <div className={`${card} p-0 overflow-hidden`}>
           <Header icon={ScrollText} title="Audit logs" sub="HMAC-signed chain" />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-fade-x">
             <table className="w-full text-[12.5px]">
               <thead className="bg-surface-subtle text-ink-3">
                 <tr>

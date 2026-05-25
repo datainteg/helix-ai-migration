@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FileCode, Notebook, ScrollText, FileJson, FileType, AlertTriangle, AlertCircle, Info, CheckCircle2 } from "lucide-react";
 import { DemoShell } from "./DemoShell";
-import { DEMO_ARTIFACTS, DEMO_DIFF_SAMPLE } from "@/data/demo-data";
+import { DEMO_ARTIFACTS, DEMO_DIFF_SAMPLE, DEMO_RUN } from "@/data/demo-data";
 
 const card = "bg-surface border border-zinc-200 rounded-xl shadow-soft p-5";
 
@@ -12,7 +12,7 @@ const REVIEW_FINDINGS = [
   { severity: "medium", message: "Connection not closed in exception path; use context manager.",          line: "L 38" },
   { severity: "low",    message: "Consider adding type hints to upsert(rows) for downstream agents.",     line: "L 4" },
   { severity: "info",   message: "Batch size of 5000 is good. Snowflake recommends 1k-10k for MERGE.",     line: "L 22" },
-  { severity: "ok",     message: "Unit tests cover empty input and dedupe path.",                          line: "tests/" },
+  { severity: "passed", message: "Unit tests cover empty input and dedupe path.",                          line: "tests/" },
 ];
 
 function ArtifactIcon({ kind }: { kind: string }) {
@@ -39,7 +39,7 @@ function SeverityIcon({ s }: { s: string }) {
   if (s === "high")   return <AlertCircle className="h-4 w-4 text-rose-600" />;
   if (s === "medium") return <AlertTriangle className="h-4 w-4 text-amber-600" />;
   if (s === "low")    return <Info className="h-4 w-4 text-cyan-500" />;
-  if (s === "ok")     return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+  if (s === "passed") return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
   return <Info className="h-4 w-4 text-ink-4" />;
 }
 
@@ -54,7 +54,7 @@ export function DemoDeveloperWorkspace() {
         <div className={`${card} p-0 overflow-hidden lg:col-span-4`}>
           <div className="px-5 py-3 border-b border-zinc-200">
             <h3 className="text-[14px] font-semibold text-ink">Artifacts</h3>
-            <p className="text-[11.5px] text-ink-4 mt-0.5">{DEMO_ARTIFACTS.length} files · BMAD-a8f3c2</p>
+            <p className="text-[11.5px] text-ink-4 mt-0.5">{DEMO_ARTIFACTS.length} files · {DEMO_RUN.workflowId}</p>
           </div>
           <ul className="divide-y divide-zinc-200">
             {DEMO_ARTIFACTS.map((a) => {

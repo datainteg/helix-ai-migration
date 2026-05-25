@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -24,6 +25,18 @@ const ITEMS = [
 ];
 
 export function DemoSidebar() {
+  const { pathname } = useLocation();
+  const mobileNavRef = useRef<HTMLElement | null>(null);
+
+  // Mobile horizontal nav: scroll the active chip into view so the current
+  // page is always visible without manual horizontal scrolling.
+  useEffect(() => {
+    const root = mobileNavRef.current;
+    if (!root) return;
+    const active = root.querySelector<HTMLElement>("a[aria-current='page']");
+    active?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [pathname]);
+
   return (
     <>
       {/* Desktop vertical sidebar */}
@@ -55,8 +68,8 @@ export function DemoSidebar() {
       </aside>
 
       {/* Mobile horizontal nav */}
-      <div className="md:hidden -mx-6 px-6 mb-4 overflow-x-auto">
-        <nav className="flex gap-1 pb-2 min-w-max">
+      <div className="md:hidden -mx-6 px-6 mb-4 overflow-x-auto scroll-fade-x">
+        <nav ref={mobileNavRef} className="flex gap-1 pb-2 min-w-max">
           {ITEMS.map((item) => {
             const Icon = item.icon;
             return (

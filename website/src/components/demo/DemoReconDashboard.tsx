@@ -40,7 +40,7 @@ export function DemoReconDashboard() {
         <div className="px-5 py-3 border-b border-zinc-200">
           <h3 className="text-[14px] font-semibold text-ink">Recon runs</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto scroll-fade-x">
           <table className="w-full text-[12.5px]">
             <thead className="bg-surface-subtle text-ink-3">
               <tr>

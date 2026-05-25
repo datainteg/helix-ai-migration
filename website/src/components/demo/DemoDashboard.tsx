@@ -80,7 +80,7 @@ export function DemoDashboard() {
             <h3 className="text-[14px] font-semibold text-ink">Active projects</h3>
             <span className="text-[11px] text-ink-4">{DEMO_PROJECTS.length} running</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-fade-x">
             <table className="w-full text-[12.5px]">
               <thead className="bg-surface-subtle text-ink-3">
                 <tr>

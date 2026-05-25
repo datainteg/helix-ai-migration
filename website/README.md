@@ -73,6 +73,17 @@ website/
 Adding a new docs page = appending an entry to the `DOCS` array in
 `docs-content.ts`. No new component files required.
 
+## Linking from the auth product
+
+To point the authenticated app at this marketing site (Help, Docs, About
+links inside `/admin` etc.), set in `frontend/.env`:
+
+```
+NEXT_PUBLIC_MARKETING_URL=https://helix.datainteg.io
+```
+
+The Next.js app then renders `<a href={process.env.NEXT_PUBLIC_MARKETING_URL + "/docs"}>` so deep links to documentation don't duplicate content.
+
 ## Separation from `frontend/`
 
 This site is the **public marketing + docs surface**. The authenticated

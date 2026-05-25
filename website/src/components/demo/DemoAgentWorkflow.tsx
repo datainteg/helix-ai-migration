@@ -1,6 +1,6 @@
 import { ArrowDown, CheckCircle2, CircleDot, Circle, UserCheck, Cpu } from "lucide-react";
 import { DemoShell } from "./DemoShell";
-import { DEMO_AGENT_FLOW } from "@/data/demo-data";
+import { DEMO_AGENT_FLOW, DEMO_RUN } from "@/data/demo-data";
 
 const card = "bg-surface border border-zinc-200 rounded-xl shadow-soft p-5";
 
@@ -96,7 +96,7 @@ export function DemoAgentWorkflow() {
           <div className={card}>
             <h3 className="text-[14px] font-semibold text-ink mb-2">Run summary</h3>
             <dl className="text-[12.5px] space-y-2">
-              <Row k="Workflow ID"  v="bmad-a8f3c2" mono />
+              <Row k="Workflow ID"  v={DEMO_RUN.workflowId} mono />
               <Row k="Project"      v="P-1042" mono />
               <Row k="Started"      v="08:11 UTC" />
               <Row k="Elapsed"      v="2h 14m" />
