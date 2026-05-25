@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="helixGradient" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#4F46E5"/>
       <stop offset="100%" stop-color="#06B6D4"/>
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="6" fill="url(#g)"/>
-  <text x="16" y="22" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="18" font-weight="700" text-anchor="middle" fill="#FFFFFF" letter-spacing="-1">H</text>
+  <rect width="64" height="64" rx="14" fill="url(#helixGradient)"/>
+  <path d="M15 20h8v8h18v-8h8v24h-8v-8H23v8h-8V20z" fill="#ffffff"/>
 </svg>

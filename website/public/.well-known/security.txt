@@ -1,0 +1,5 @@
+Contact: mailto:contact@datainteg.io
+Expires: 2027-05-25T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://helix.datainteg.io/.well-known/security.txt
+Policy: https://helix.datainteg.io/docs/security-model

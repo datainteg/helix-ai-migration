@@ -7,11 +7,14 @@
     height: 100%;
   }
   body {
-    background: theme("colors.surface.muted");
+    background:
+      radial-gradient(1100px 520px at -8% -14%, rgba(79, 70, 229, 0.15), transparent 60%),
+      radial-gradient(900px 440px at 108% -10%, rgba(6, 182, 212, 0.12), transparent 58%),
+      linear-gradient(180deg, #fcfcff 0%, #f7f9fc 100%);
     color: theme("colors.ink.DEFAULT");
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   }
 }
 
@@ -22,10 +25,10 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: theme("colors.ink.4");
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
   }
   .font-mono {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
   }
   .grid-faint-bg {
     background-image:
@@ -42,6 +45,15 @@
   .focus-ring {
     @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2;
   }
+  .gradient-text {
+    background: linear-gradient(135deg, #4338ca 0%, #0e7490 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .section-fade-in {
+    animation: fade-up 0.6s ease both;
+  }
   /* Horizontal-scroll fade hint — applied to `overflow-x-auto` wrappers so
      mobile users see a faded right edge when the table extends off-screen. */
   .scroll-fade-x {
@@ -53,5 +65,16 @@
       -webkit-mask-image: none;
       mask-image: none;
     }
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

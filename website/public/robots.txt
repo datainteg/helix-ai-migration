@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://helix.datainteg.io/sitemap.xml

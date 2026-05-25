@@ -18,7 +18,7 @@
     <rect width="96" height="96" rx="20" fill="url(#brand)"/>
     <text x="48" y="68" font-family="Inter, sans-serif" font-size="58" font-weight="700" text-anchor="middle" fill="#FFFFFF" letter-spacing="-3">H</text>
   </g>
-  <text x="96" y="296" font-family="Inter, sans-serif" font-size="72" font-weight="700" fill="#0A0A0A" letter-spacing="-2.5">Helix Migration</text>
+  <text x="96" y="296" font-family="Inter, sans-serif" font-size="72" font-weight="700" fill="#0A0A0A" letter-spacing="-2.5">Helix</text>
   <text x="96" y="356" font-family="Inter, sans-serif" font-size="34" font-weight="500" fill="#52525B" letter-spacing="-0.5">Open-source AI-powered migration</text>
   <text x="96" y="400" font-family="Inter, sans-serif" font-size="34" font-weight="500" fill="#52525B" letter-spacing="-0.5">and validation platform.</text>
   <g transform="translate(96, 470)">

@@ -13,7 +13,7 @@ function DocsIndex() {
         <SectionHeader
           eyebrow="Documentation"
           title="Documentation"
-          description="Helix Migration A-to-Z. Pick a topic from the sidebar or jump in here."
+          description="Helix A-to-Z. Pick a topic from the sidebar or jump in here."
         />
       </div>
       <div className="grid sm:grid-cols-2 gap-4">

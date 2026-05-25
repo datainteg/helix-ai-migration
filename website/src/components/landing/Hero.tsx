@@ -18,7 +18,7 @@ export function Hero() {
   };
 
   return (
-    <section className="relative overflow-hidden">
+    <section className="relative overflow-hidden section-fade-in">
       <div className="absolute inset-0 grid-faint-bg pointer-events-none" />
       <div
         className="absolute inset-0 pointer-events-none"
@@ -28,10 +28,11 @@ export function Hero() {
         }}
       />
       <div className="relative container-tight pt-20 md:pt-28 pb-16 md:pb-24">
-        <div className="max-w-[820px]">
+        <div className="max-w-[880px]">
           <div className="eyebrow mb-4">{SITE.tagline}</div>
-          <h1 className="text-[34px] md:text-[46px] font-semibold tracking-tight text-ink leading-[1.08]">
-            Plan, validate, and reconcile complex enterprise migrations with a multi-agent AI brain.
+          <h1 className="text-[36px] md:text-[54px] font-semibold tracking-tight text-ink leading-[1.02]">
+            Plan, validate, and reconcile complex enterprise migrations with a{" "}
+            <span className="gradient-text">multi-agent AI brain</span>.
           </h1>
           <p className="text-[15px] md:text-[16px] text-ink-3 mt-5 leading-relaxed max-w-[640px]">
             {SITE.oneLiner}
@@ -44,14 +45,14 @@ export function Hero() {
               href={HERO_CTAS.primary.href}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 px-4 h-10 rounded-md bg-ink text-white text-[13.5px] font-medium hover:bg-zinc-800 focus-ring"
+              className="inline-flex items-center gap-2 px-4 h-10 rounded-full bg-gradient-to-r from-brand-600 to-cyan-600 text-white text-[13.5px] font-medium hover:opacity-95 focus-ring"
             >
               {HERO_CTAS.primary.label}
               <ArrowRight className="h-4 w-4" />
             </a>
             <Link
               to={HERO_CTAS.secondary.href}
-              className="inline-flex items-center gap-2 px-4 h-10 rounded-md border border-zinc-300 text-ink-2 text-[13.5px] font-medium hover:bg-zinc-100 focus-ring"
+              className="inline-flex items-center gap-2 px-4 h-10 rounded-full border border-zinc-300 text-ink-2 text-[13.5px] font-medium hover:bg-zinc-100 focus-ring"
             >
               {HERO_CTAS.secondary.label}
             </Link>
@@ -59,16 +60,23 @@ export function Hero() {
               href={HERO_CTAS.tertiary.href}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 px-3 h-10 rounded-md text-ink-3 text-[13.5px] font-medium hover:text-ink hover:bg-zinc-100/70 focus-ring"
+              className="inline-flex items-center gap-2 px-3 h-10 rounded-full text-ink-3 text-[13.5px] font-medium hover:text-ink hover:bg-zinc-100/70 focus-ring"
             >
               <Github className="h-4 w-4" />
               {HERO_CTAS.tertiary.label}
             </a>
           </div>
         </div>
+        <div className="mt-7 flex flex-wrap gap-2.5">
+          {["13-step pipeline", "10 LLM providers", "8 connectors", "Self-hosted Apache 2.0"].map((item) => (
+            <span key={item} className="inline-flex items-center h-8 px-3 rounded-full border border-zinc-200 bg-white/90 text-[12px] text-ink-2 shadow-soft">
+              {item}
+            </span>
+          ))}
+        </div>
 
         <div className="mt-12 md:mt-16 max-w-[760px]">
-          <div className="bg-surface border border-zinc-200 rounded-xl shadow-soft overflow-hidden">
+          <div className="bg-white/92 border border-zinc-200 rounded-2xl shadow-lg overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-200 bg-zinc-50/70">
               <div className="flex items-center gap-2">
                 <div className="flex gap-1.5">
