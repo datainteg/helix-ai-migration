@@ -41,21 +41,31 @@ def _execute(
     upstream_agents: list[str] | None = None,
     artifact_filename: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve output model by name and run an agent+skill (synchronous)."""
+    """Resolve output model by name and run an agent+skill (synchronous).
+
+    The agent call is run in a worker thread + periodic heartbeats are
+    emitted from the activity thread every HEARTBEAT_INTERVAL_SEC seconds
+    so Temporal does not kill long Anthropic/Opus runs (which can take
+    >60s) on heartbeat_timeout.
+    """
     from agents.bmad import schemas as bmad_schemas
     from agents.runtime.bmad_executor import execute_agent_skill
 
     output_model = getattr(bmad_schemas, output_model_name)
-    result = execute_agent_skill(
-        agent_code=agent_code,
-        skill_name=skill_name,
-        project_id=input_data.get("project_id", "unknown"),
-        requirement_text=input_data.get("requirement_text", "") or "",
-        output_model=output_model,
-        upstream_agents=upstream_agents or [],
-        org_id=input_data.get("organization_id"),
-        artifact_filename=artifact_filename,
-        correlation_id=input_data.get("correlation_id"),
+
+    result = _run_with_heartbeats(
+        lambda: execute_agent_skill(
+            agent_code=agent_code,
+            skill_name=skill_name,
+            project_id=input_data.get("project_id", "unknown"),
+            requirement_text=input_data.get("requirement_text", "") or "",
+            output_model=output_model,
+            upstream_agents=upstream_agents or [],
+            org_id=input_data.get("organization_id"),
+            artifact_filename=artifact_filename,
+            correlation_id=input_data.get("correlation_id"),
+        ),
+        detail_prefix=f"{agent_code}:{skill_name}",
     )
     return {
         "agent": agent_code,
@@ -66,6 +76,36 @@ def _execute(
         "artifact_path": str(result.artifact.path) if result.artifact else None,
         "parsed": result.parsed.model_dump() if result.parsed else None,
     }
+
+
+HEARTBEAT_INTERVAL_SEC = 10.0
+
+
+def _run_with_heartbeats(fn, detail_prefix: str):
+    """Execute `fn()` while heartbeating every HEARTBEAT_INTERVAL_SEC.
+
+    The work runs in a worker thread; the calling thread (the Temporal
+    activity thread) blocks on `future.result(timeout=interval)` so it
+    wakes up every interval to emit a heartbeat. Without this an LLM call
+    that takes >60s exceeds Temporal's default activity heartbeat_timeout
+    and the entire workflow step fails + retries.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
+
+    if not activity.in_activity():
+        # Outside Temporal (unit tests, manual run) — just call directly.
+        return fn()
+
+    seq = 0
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="helix-act") as pool:
+        future = pool.submit(fn)
+        while True:
+            try:
+                return future.result(timeout=HEARTBEAT_INTERVAL_SEC)
+            except FutTimeout:
+                seq += 1
+                _safe_heartbeat(f"{detail_prefix}#{seq}")
 
 
 def _safe_heartbeat(detail: str) -> None:

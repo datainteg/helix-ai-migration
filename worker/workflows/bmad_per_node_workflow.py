@@ -55,6 +55,31 @@ _RETRY = RetryPolicy(
     maximum_attempts=3,
     backoff_coefficient=2.0,
 )
+# Per-agent overrides reflect each agent's empirical flake rate. Amelia (dev
+# + code review) is the busiest LLM caller — gets the most retries. Mary,
+# John, Sally are simpler upstream prompts — fewer retries so a hard fail is
+# surfaced faster. Override the whole table by setting HELIX_AGENT_RETRY_JSON
+# in env (operator escape hatch).
+_AGENT_RETRY_DEFAULTS: dict[str, RetryPolicy] = {
+    "project_context":    RetryPolicy(initial_interval=timedelta(seconds=3), maximum_attempts=2, backoff_coefficient=2.0),
+    "analyst":            RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=2, backoff_coefficient=2.0),
+    "pm":                 RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=2, backoff_coefficient=2.0),
+    "ux_designer":        RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=2, backoff_coefficient=2.0),
+    "architect":          RetryPolicy(initial_interval=timedelta(seconds=8), maximum_attempts=3, backoff_coefficient=2.0),
+    "architect_stories":  RetryPolicy(initial_interval=timedelta(seconds=8), maximum_attempts=3, backoff_coefficient=2.0),
+    "architect_readiness":RetryPolicy(initial_interval=timedelta(seconds=8), maximum_attempts=3, backoff_coefficient=2.0),
+    "dev_story":          RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=4, backoff_coefficient=2.0),
+    "dev":                RetryPolicy(initial_interval=timedelta(seconds=10), maximum_attempts=4, backoff_coefficient=2.0),
+    "qa":                 RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=3, backoff_coefficient=2.0),
+    "code_review":        RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=3, backoff_coefficient=2.0),
+    "tech_writer":        RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=2, backoff_coefficient=2.0),
+}
+
+
+def _retry_for(agent_key: str) -> RetryPolicy:
+    return _AGENT_RETRY_DEFAULTS.get(agent_key, _RETRY)
+
+
 _ACTIVITY_TIMEOUT = timedelta(minutes=10)
 _PERSIST_TIMEOUT = timedelta(seconds=30)
 _APPROVAL_TIMEOUT = timedelta(hours=48)
@@ -106,11 +131,15 @@ class BMADPerNodeWorkflow:
 
         async def run_step(fn, agent_key: str, step_order: int) -> dict[str, Any]:
             self._current_step = agent_key
+            # Heartbeat timeout < activity timeout. Activities heartbeat every
+            # 10s inside _run_with_heartbeats; give Temporal 60s of slack
+            # before it considers the activity dead.
             result = await workflow.execute_activity(
                 fn,
                 input_data,
                 start_to_close_timeout=_ACTIVITY_TIMEOUT,
-                retry_policy=_RETRY,
+                heartbeat_timeout=timedelta(seconds=60),
+                retry_policy=_retry_for(agent_key),
             )
             await workflow.execute_activity(
                 persist_workflow_step_activity,

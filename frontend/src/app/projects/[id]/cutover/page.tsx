@@ -15,6 +15,7 @@ import { Plus, RefreshCw } from "lucide-react";
 
 import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Button, Card, Chip, EmptyState, LoadingState, ErrorBanner } from "@/components/ui";
+import { SchemaDriftCard } from "@/components/SchemaDriftCard";
 import { useAuth } from "@/lib/auth-context";
 import {
   ALLOWED_NEXT,
@@ -85,7 +86,14 @@ export default function ProjectCutoverPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {items.map((c) => (
-            <CutoverCard key={c.id} c={c} onChange={refresh} setError={setError} />
+            <div key={c.id} className="flex flex-col gap-3">
+              <CutoverCard c={c} onChange={refresh} setError={setError} />
+              {/* Drift watcher per cutover. Source mutations during the
+                  tail-sync window are the single biggest gotcha; surface
+                  them next to the state machine so operators see the alert
+                  before they advance to flip. */}
+              <SchemaDriftCard projectId={c.project_id} sourceRef={c.source_ref} />
+            </div>
           ))}
         </div>
       )}

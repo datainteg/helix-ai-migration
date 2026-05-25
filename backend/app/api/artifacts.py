@@ -58,7 +58,8 @@ async def upload_artifact(request: Request, project_id: str, file: UploadFile = 
     content = await file.read()
     validate_upload(original_filename, content)
 
-    path = save_artifact_file(project_id, original_filename, content)
+    from app.storage.s3 import save_artifact as save_artifact_dispatch
+    path = save_artifact_dispatch(project_id, original_filename, content)
 
     ext = sanitize_filename(original_filename).rsplit(".", 1)[-1].lower()
     result = create_artifact_metadata(db, org_id, project_id, original_filename, ext, str(path), content)
@@ -163,7 +164,8 @@ def api_generate_rollback(
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     try:
-        content = Path(forward.storage_path).read_text(encoding="utf-8")
+        from app.storage.s3 import read_artifact_bytes
+        content = read_artifact_bytes(forward.storage_path).decode("utf-8")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Failed to read forward artifact: {exc}")
 
@@ -217,9 +219,10 @@ def api_generate_rollback(
     if not rollback_text.strip():
         rollback_text = str(parsed)
 
+    from app.storage.s3 import save_artifact as save_artifact_dispatch
     base = sanitize_filename(forward.filename)
     rollback_name = f"{base}.rollback.{forward.file_type or 'sql'}"
-    rollback_path = save_artifact_file(forward.project_id, rollback_name, rollback_text.encode("utf-8"))
+    rollback_path = save_artifact_dispatch(forward.project_id, rollback_name, rollback_text.encode("utf-8"))
     reverse = create_artifact_metadata(
         db, org_id, forward.project_id, rollback_name, forward.file_type or "sql",
         str(rollback_path), rollback_text.encode("utf-8"),
