@@ -78,6 +78,13 @@ class OrgInvitation(BaseModel):
     email = Column(String(255), nullable=False, index=True)
     role_id = Column(String(36), ForeignKey("roles.id"), nullable=True)
     token_hash = Column(String(255), unique=True, nullable=False, index=True)
+    # Columns previously only declared in migration e6f7a8b9c0d1 — added here
+    # so ORM filters like `OrgInvitation.status == "pending"` compile against
+    # an attribute that actually exists at the Python level. Without these,
+    # invitation_service.py raises AttributeError at first use.
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), default="pending", nullable=False)
 
 
 class OrganizationMember(BaseModel):
