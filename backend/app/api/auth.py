@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.schemas.identity import UserLogin, TokenResponse, FirstAdminSetup, UserResponse
 from app.services.auth_service import setup_first_admin, login, get_current_user
 from app.services.password_reset_service import request_password_reset, confirm_password_reset
-from app.auth.jwt import create_access_token, get_current_user_id, revoke_token
+from app.auth.jwt import create_access_token, get_current_user_id, revoke_token, register_sse_ticket
 from app.api.audit import write_audit
 from app.rate_limiting import limiter
 from app.core.config import settings
@@ -56,7 +56,11 @@ def user_logout(request: Request, credentials: HTTPAuthorizationCredentials = De
 
 @router.post("/auth/sse-ticket")
 @limiter.limit("60/minute")
-def issue_sse_ticket(request: Request, user_id: str = Depends(get_current_user_id)):
+def issue_sse_ticket(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    user_id: str = Depends(get_current_user_id),
+):
     """Mint a short-lived SSE-only token for use as a `?token=` URL param.
 
     Browser EventSource cannot set Authorization headers, so SSE endpoints must
@@ -64,14 +68,20 @@ def issue_sse_ticket(request: Request, user_id: str = Depends(get_current_user_i
     into proxy/server logs and Referer headers. This endpoint trades a normal
     bearer token (sent in the request body via Authorization header) for a
     60-second token scoped to SSE only, narrowing the leak window.
+
+    SEC-003: bind the ticket to the bearer that minted it — when the
+    operator hits /auth/logout (or /auth/refresh), the ticket is revoked
+    too, so a stolen SSE ticket cannot outlive its parent session.
     """
     from datetime import timedelta
+    ttl_seconds = 60
     ticket = create_access_token(
         user_id,
-        expires_delta=timedelta(seconds=60),
+        expires_delta=timedelta(seconds=ttl_seconds),
         extra_claims={"scope": "sse"},
     )
-    return {"ticket": ticket, "expires_in": 60}
+    register_sse_ticket(credentials.credentials, ticket, ttl_seconds)
+    return {"ticket": ticket, "expires_in": ttl_seconds}
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)
