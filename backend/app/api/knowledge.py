@@ -11,8 +11,10 @@ runbooks, schema dictionaries).
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -25,11 +27,37 @@ from app.models.knowledge import KnowledgeDoc
 router = APIRouter(tags=["knowledge"])
 
 
+_ALLOWED_URL_SCHEMES = {"http", "https"}
+
+
 class DocUpload(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     source_url: str | None = Field(default=None, max_length=500)
     tags: str | None = Field(default=None, max_length=500)
     content: str = Field(min_length=1, max_length=200_000)
+
+    @field_validator("source_url")
+    @classmethod
+    def _validate_source_url(cls, v: str | None) -> str | None:
+        """SEC-017: reject `javascript:`/`data:`/`file:`/etc. — only http(s).
+
+        Strips control chars before persisting (prevents log injection +
+        broken anchor rendering downstream)."""
+        if v is None:
+            return v
+        # Strip ASCII control chars (anything < 0x20 or DEL).
+        cleaned = "".join(ch for ch in v if ord(ch) >= 0x20 and ord(ch) != 0x7F).strip()
+        if not cleaned:
+            return None
+        parsed = urlparse(cleaned)
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in _ALLOWED_URL_SCHEMES:
+            raise ValueError(
+                f"source_url scheme must be one of {sorted(_ALLOWED_URL_SCHEMES)}, got {scheme!r}"
+            )
+        if not parsed.netloc:
+            raise ValueError("source_url must include a host")
+        return cleaned
 
 
 @router.post("/knowledge/docs", status_code=201)
@@ -42,6 +70,17 @@ def upload_doc(
 ):
     """Upload a knowledge-base document. Cap is 200 KB / doc to keep the
     table cheap; chunking pipeline is the caller's responsibility."""
+    # SEC-017: run the SSRF guard against the source URL so a `http://`
+    # link cannot resolve to AWS IMDS / RFC1918 — the field gets shown as
+    # an anchor in the operator UI; clicking it would CSRF the metadata
+    # endpoint with their session.
+    if data.source_url:
+        try:
+            from app.security.ssrf import validate_external_url, SSRFViolation
+            validate_external_url(data.source_url)
+        except SSRFViolation as exc:
+            raise HTTPException(status_code=400, detail=f"source_url rejected: {exc}")
+
     row = KnowledgeDoc(
         organization_id=org_id,
         title=data.title,
