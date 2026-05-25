@@ -30,7 +30,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -39,17 +39,24 @@ from app.models.encryption import OrgDataEncryptionKey
 logger = logging.getLogger(__name__)
 
 
-def _kek() -> Fernet:
-    """Master Key Encryption Key derived from settings.ENCRYPTION_KEY.
+def _kek_direct() -> Fernet:
+    """Preferred: ENCRYPTION_KEY env var IS the Fernet key (no derivation)."""
+    return Fernet(settings.ENCRYPTION_KEY.encode("utf-8"))
 
-    NOTE: We still sha256-derive here for back-compat with existing
-    ciphertext sealed by the prior implementation. New direct-key
-    derivation is being rolled out in secret_service via a re-encryption
-    shim; the envelope layer must keep this path until all org DEKs
-    have been re-wrapped by the migration tool.
+
+def _kek_legacy() -> Fernet:
+    """Backward-compatible: sha256(ENCRYPTION_KEY) wrapped as Fernet.
+
+    Matches the prior implementation. Kept ONLY to decrypt existing
+    KEK-wrapped DEKs sealed before the fix.
     """
     raw = hashlib.sha256(settings.ENCRYPTION_KEY.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(raw))
+
+
+def _kek() -> MultiFernet:
+    """Encryption uses the direct key; decryption falls back to legacy."""
+    return MultiFernet([_kek_direct(), _kek_legacy()])
 
 
 def _get_active_dek_record(db: Session, org_id: str) -> OrgDataEncryptionKey | None:
