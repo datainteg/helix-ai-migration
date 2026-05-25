@@ -86,8 +86,21 @@ def record_usage(
     workflow_id: Optional[str] = None,
     agent_name: Optional[str] = None,
     step_id: Optional[str] = None,
+    defer_commit: bool = False,
 ) -> LLMUsageRecord:
-    """Persist one usage record. Cost is computed from the rate table."""
+    """Persist one usage record. Cost is computed from the rate table.
+
+    `defer_commit=True` skips the commit + refresh — caller owns the
+    surrounding transaction and is responsible for `db.commit()`. This
+    is the batch-friendly mode hot-path workers (BMAD executor, per-
+    node activities) should use to coalesce N rows into a single
+    commit and avoid the per-call connect/commit round-trip that
+    saturates the worker DB pool.
+
+    Default `defer_commit=False` keeps the original immediate-commit
+    semantics so existing callers (UI-driven LLM proxies, tests) need
+    no changes.
+    """
     cost = compute_cost(provider_type, model, input_tokens, output_tokens)
     row = LLMUsageRecord(
         organization_id=organization_id,
@@ -102,9 +115,52 @@ def record_usage(
         step_id=step_id,
     )
     db.add(row)
+    if defer_commit:
+        db.flush()
+        return row
     db.commit()
     db.refresh(row)
     return row
+
+
+def record_usage_batch(
+    db: Session,
+    rows: list[dict],
+) -> int:
+    """Insert N usage records in a SINGLE commit.
+
+    `rows` is a list of kwargs dicts shaped like `record_usage`'s
+    keyword args (organization_id, provider_type, model, input_tokens,
+    output_tokens, optional project_id/workflow_id/agent_name/step_id).
+
+    Costs are computed per-row. Returns the number of rows inserted.
+    Use this from the BMAD/workflow hot path where 13+ steps' worth of
+    usage rows want to land in one round-trip.
+    """
+    if not rows:
+        return 0
+    objs: list[LLMUsageRecord] = []
+    for r in rows:
+        provider_type = r["provider_type"]
+        model = r["model"]
+        in_tok = r["input_tokens"]
+        out_tok = r["output_tokens"]
+        cost = compute_cost(provider_type, model, in_tok, out_tok)
+        objs.append(LLMUsageRecord(
+            organization_id=r["organization_id"],
+            project_id=r.get("project_id"),
+            workflow_id=r.get("workflow_id"),
+            agent_name=r.get("agent_name"),
+            provider_type=provider_type,
+            model=model,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cost_usd=cost,
+            step_id=r.get("step_id"),
+        ))
+    db.add_all(objs)
+    db.commit()
+    return len(objs)
 
 
 def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:

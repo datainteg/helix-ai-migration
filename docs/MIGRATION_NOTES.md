@@ -99,14 +99,21 @@ matter, dump them first.
 
 ## Cost-service commit batching (cost_service)
 
-`record_usage` is now non-committing (`db.add` + `db.flush` only).
-The caller is responsible for committing the surrounding transaction.
-A `record_usage_immediate` helper is provided for legacy single-shot
-call sites that want the old commit semantics.
+Default `record_usage(...)` semantics are unchanged — it still
+commits immediately so existing UI-driven call sites and tests work
+without modification.
 
-This unlocks a bulk-LLM-job pattern where 13+ agent calls × N steps
-commit in one round-trip instead of 30+ individual commits.
+Two new options unlock batched commits on hot paths:
 
-If you have third-party code that imported `record_usage` and
-expected an immediate commit, swap to `record_usage_immediate` (same
-arguments).
+- `record_usage(..., defer_commit=True)` flushes the row but skips
+  the commit + refresh. The caller (e.g. a per-node workflow
+  activity) owns the surrounding transaction and is responsible for
+  `db.commit()` at the end of the batch.
+- `record_usage_batch(db, rows=[...])` accepts a list of usage-kwarg
+  dicts and inserts them all in a single commit via `add_all`.
+
+The BMAD executor and per-node workflow path should migrate to the
+batch helper to coalesce 13+ rows-per-workflow into one round-trip,
+unblocking the 3+2 worker DB pool. The migration is opt-in — leaving
+the existing call sites on `record_usage(...)` is safe; they just
+keep the per-row commit cost.
