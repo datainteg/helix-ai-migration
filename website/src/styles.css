@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    background: theme("colors.surface.muted");
+    color: theme("colors.ink.DEFAULT");
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: theme("colors.ink.4");
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .grid-faint-bg {
+    background-image:
+      linear-gradient(rgba(10,10,10,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(10,10,10,0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .container-tight {
+    @apply max-w-[1180px] mx-auto px-6;
+  }
+  .container-narrow {
+    @apply max-w-[820px] mx-auto px-6;
+  }
+  .focus-ring {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2;
+  }
+}
