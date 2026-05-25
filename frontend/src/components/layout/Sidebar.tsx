@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+
 import {
   LayoutDashboard,
   FolderKanban,
@@ -18,6 +20,7 @@ import {
   Search,
   ChevronDown,
   DollarSign,
+  X,
 } from "lucide-react";
 import { HelixWordmark } from "./HelixLogo";
 import { Avatar } from "@/components/ui/Avatar";
@@ -57,11 +60,13 @@ const ADMIN: NavItem[] = [
   { label: "Cost limits",        href: "/admin/cost-limits",    icon: DollarSign },
 ];
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[12.5px] transition-colors",
         active
@@ -80,7 +85,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
       <Icon className={cn("h-[15px] w-[15px]", active ? "text-ink" : "text-ink-4")} />
       <span className="flex-1 truncate">{item.label}</span>
       {item.live && (
-        <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-brand)] animate-pulse-dot" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-brand)] motion-safe:animate-pulse-dot" />
       )}
       {item.count !== undefined && (
         <span className="font-mono tabular-nums text-[10.5px] text-ink-4">{item.count}</span>
@@ -94,14 +99,14 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-function NavGroup({ label, items, isActive }: { label?: string; items: NavItem[]; isActive: (href: string) => boolean }) {
+function NavGroup({ label, items, isActive, onNavigate }: { label?: string; items: NavItem[]; isActive: (href: string) => boolean; onNavigate?: () => void }) {
   return (
     <div className="flex flex-col gap-px px-3.5">
       {label && (
         <div className="eyebrow text-[9.5px] px-2 pt-3 pb-1.5">{label}</div>
       )}
       {items.map((item) => (
-        <NavLink key={item.href} item={item} active={isActive(item.href)} />
+        <NavLink key={item.href} item={item} active={isActive(item.href)} onNavigate={onNavigate} />
       ))}
     </div>
   );
@@ -144,7 +149,7 @@ function SearchTrigger() {
 function UserFooter() {
   const { user } = useAuth();
   const name = user?.name || user?.email || "Signed in";
-  const role = user?.role || (user ? "Member" : "Sign in");
+  const role = user ? "Member" : "Sign in";
   return (
     <div className="flex items-center gap-2.5 px-1 py-2 mt-1 border-t border-hx">
       <Avatar name={name} size={26} />
@@ -157,20 +162,52 @@ function UserFooter() {
   );
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  /** When true, render as mobile drawer (overlay). Ignored on lg+ screens. */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname() || "";
   const isActive = (href: string) =>
     href === "/dashboard"
       ? pathname === "/dashboard" || pathname === "/"
       : pathname.startsWith(href);
 
-  return (
-    <aside className="hidden lg:flex w-[232px] flex-shrink-0 flex-col h-screen sticky top-0 bg-surface-hi border-r border-hx">
+  // Close drawer on Escape and lock body scroll while open.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && onMobileClose) onMobileClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [mobileOpen, onMobileClose]);
+
+  const navContent = (
+    <>
       {/* Brand */}
-      <div className="px-5 pt-4 pb-3.5 border-b border-hx">
-        <Link href="/dashboard" aria-label="Helix Console home">
+      <div className="px-5 pt-4 pb-3.5 border-b border-hx flex items-center justify-between">
+        <Link href="/dashboard" aria-label="Helix Console home" onClick={onMobileClose}>
           <HelixWordmark size={22} />
         </Link>
+        {/* Mobile-only close button inside drawer */}
+        {onMobileClose && (
+          <button
+            type="button"
+            onClick={onMobileClose}
+            aria-label="Close navigation"
+            className="lg:hidden grid place-items-center h-9 w-9 rounded-md text-ink-3 hover:bg-app-2"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Workspace + search */}
@@ -180,21 +217,52 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <div className="flex-1 overflow-y-auto pb-3">
-        <NavGroup items={PRIMARY} isActive={isActive} />
-        <NavGroup label="Resources" items={RESOURCES} isActive={isActive} />
-        <NavGroup label="System" items={ADMIN} isActive={isActive} />
-      </div>
+      <nav aria-label="Primary" className="flex-1 overflow-y-auto pb-3">
+        <NavGroup items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} />
+        <NavGroup label="Resources" items={RESOURCES} isActive={isActive} onNavigate={onMobileClose} />
+        <NavGroup label="System" items={ADMIN} isActive={isActive} onNavigate={onMobileClose} />
+      </nav>
 
       {/* Status + user */}
       <div className="px-3.5 pt-2 pb-3 border-t border-hx bg-surface-hi">
         <div className="flex items-center gap-2 px-1 py-1.5 text-[11px] text-ink-3">
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-ok)] animate-pulse-dot" />
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--con-ok)] motion-safe:animate-pulse-dot" />
           <span>All systems operational</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-4">↗</span>
+          <span aria-hidden className="ml-auto font-mono text-[10px] text-ink-4">↗</span>
         </div>
         <UserFooter />
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop sticky sidebar */}
+      <aside
+        aria-label="Primary navigation"
+        className="hidden lg:flex w-[232px] flex-shrink-0 flex-col h-screen sticky top-0 bg-surface-hi border-r border-hx"
+      >
+        {navContent}
+      </aside>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 flex" role="presentation">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            tabIndex={-1}
+            className="absolute inset-0 bg-black/40"
+            onClick={onMobileClose}
+          />
+          <aside
+            aria-label="Primary navigation"
+            className="relative w-[280px] max-w-[85vw] h-full flex flex-col bg-surface-hi border-r border-hx shadow-lg"
+          >
+            {navContent}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }
