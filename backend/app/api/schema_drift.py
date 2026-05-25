@@ -157,25 +157,29 @@ def compute_drift(
             })
 
     drift = bool(added or removed or column_changes)
+    # added_tables / removed_tables are now structured `{schema, table}`
+    # rows instead of dot-joined strings (REVIEW_API_CONTRACT
+    # schema_drift HIGH issue) — consumers no longer have to re-parse.
     return {
         "baseline_id": snaps[0].id,
-        "baseline_taken_at": str(snaps[0].taken_at),
+        "baseline_taken_at": snaps[0].taken_at.isoformat() if snaps[0].taken_at else None,
         "latest_id": snaps[-1].id,
-        "latest_taken_at": str(snaps[-1].taken_at),
-        "added_tables": [f"{a[0]}.{a[1]}" for a in added],
-        "removed_tables": [f"{r[0]}.{r[1]}" for r in removed],
+        "latest_taken_at": snaps[-1].taken_at.isoformat() if snaps[-1].taken_at else None,
+        "added_tables": [{"schema": a[0], "table": a[1]} for a in added],
+        "removed_tables": [{"schema": r[0], "table": r[1]} for r in removed],
         "column_changes": column_changes,
         "drift_detected": drift,
     }
 
 
 def _serialize(row: SourceSchemaSnapshot) -> dict:
+    # ISO-8601 timestamps (API-C3).
     return {
         "id": row.id,
         "project_id": row.project_id,
         "source_ref": row.source_ref,
         "table_count": row.table_count,
         "column_count": row.column_count,
-        "taken_at": str(row.taken_at) if row.taken_at else None,
-        "created_at": str(row.created_at) if row.created_at else None,
+        "taken_at": row.taken_at.isoformat() if row.taken_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }

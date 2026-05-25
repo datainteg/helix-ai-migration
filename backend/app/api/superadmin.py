@@ -47,6 +47,9 @@ def list_all_orgs(request: Request, admin: User = Depends(_require_super_admin),
     """List all organizations across the platform."""
     _audit_super(db, admin, "super_list_orgs", request=request)
     orgs = db.query(Organization).all()
+    # `.isoformat()` produces ISO-8601 ("2026-05-26T14:33:21+00:00"); the
+    # previous `str(datetime)` repr lacked the "T" separator and broke
+    # Safari's `Date` parser (API-C3).
     return [
         {
             "id": o.id,
@@ -54,31 +57,50 @@ def list_all_orgs(request: Request, admin: User = Depends(_require_super_admin),
             "slug": o.slug,
             "status": o.status,
             "member_count": db.query(OrganizationMember).filter(OrganizationMember.organization_id == o.id).count(),
-            "created_at": str(o.created_at),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
         }
         for o in orgs
     ]
 
 
-@router.patch("/organizations/{org_id}/status")
+class OrgStatusUpdate(BaseModel):
+    # Body-based mutation (REVIEW_API_CONTRACT §superadmin.py HIGH):
+    # query-string mutations leak into proxy / access logs.
+    status: str  # "active" | "suspended" — validated below.
+
+
+class OrgStatusResponse(BaseModel):
+    id: str
+    status: str
+
+
+@router.patch("/organizations/{org_id}/status", response_model=OrgStatusResponse)
 def set_org_status(
     request: Request,
     org_id: str,
-    status: str,
+    data: OrgStatusUpdate,
     admin: User = Depends(_require_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Suspend or reactivate an organization."""
-    if status not in ("active", "suspended"):
-        raise HTTPException(status_code=400, detail="status must be 'active' or 'suspended'")
+    """Suspend or reactivate an organization.
+
+    Status flows in the JSON body (not as a query param) so values don't
+    leak through proxy access logs.
+    """
+    if data.status not in ("active", "suspended"):
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "status must be 'active' or 'suspended'",
+                    "allowed": ["active", "suspended"], "received": data.status},
+        )
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-    org.status = status
+    org.status = data.status
     db.commit()
     _audit_super(db, admin, "super_set_org_status", entity_type="organization",
-                 entity_id=org_id, meta={"status": status}, request=request)
-    return {"id": org_id, "status": status}
+                 entity_id=org_id, meta={"status": data.status}, request=request)
+    return OrgStatusResponse(id=org_id, status=data.status)
 
 
 @router.get("/users")
@@ -87,7 +109,14 @@ def list_all_users(request: Request, admin: User = Depends(_require_super_admin)
     _audit_super(db, admin, "super_list_users", request=request)
     users = db.query(User).all()
     return [
-        {"id": u.id, "email": u.email, "name": u.name, "status": u.status, "is_super_admin": u.is_super_admin, "created_at": str(u.created_at)}
+        {
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "status": u.status,
+            "is_super_admin": u.is_super_admin,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
         for u in users
     ]
 

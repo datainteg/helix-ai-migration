@@ -49,7 +49,14 @@ class AcceptInviteRequest(BaseModel):
     password: str
 
 
-@router.post("/invitations", status_code=201)
+class InvitationCreated(BaseModel):
+    """201 response shape for POST /invitations."""
+
+    status: str
+    email: str
+
+
+@router.post("/invitations", status_code=201, response_model=InvitationCreated)
 @limiter.limit("20/minute")
 async def invite_user(
     request: Request,
@@ -69,7 +76,15 @@ async def invite_user(
     subject, html = render_invitation_email(user.name, org_name, invite_url)
     background_tasks.add_task(send_email, to=data.email, subject=subject, html_body=html)
 
-    return {"status": "invited", "email": data.email}
+    # Audit emission was missing — REVIEW_API_CONTRACT §Audit emission lists
+    # invitations under the "no audit row" set.
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="invitation_created",
+        entity_type="invitation", entity_id=data.email,
+        meta={"role": data.role}, request=request,
+    )
+    return InvitationCreated(status="invited", email=data.email)
 
 
 @router.post("/invitations/accept", response_model=TokenResponse)
@@ -78,21 +93,33 @@ def accept_invite(request: Request, data: AcceptInviteRequest, db: Session = Dep
     return accept_invitation(db, data.token, data.name, data.password)
 
 
-@router.get("/invitations")
+class InvitationSummary(BaseModel):
+    """Row returned by `GET /invitations`. All timestamps ISO-8601."""
+
+    id: str
+    email: str
+    status: str | None = None
+    expires_at: str | None = None
+    accepted_at: str | None = None
+
+
+@router.get("/invitations", response_model=list[InvitationSummary])
 def get_invitations(
     user_id: str = Depends(require_permission("admin:users:read")),
     db: Session = Depends(get_db),
 ):
     org_id = resolve_active_org_id(db, user_id)
     invites = list_invitations(db, org_id)
+    # ISO-8601 timestamps (API-C3) — `str(datetime)` lacked the "T"
+    # separator and broke Safari's Date parser.
     return [
-        {
-            "id": i.id,
-            "email": i.email,
-            "status": i.status,
-            "expires_at": str(i.expires_at),
-            "accepted_at": str(i.accepted_at) if i.accepted_at else None,
-        }
+        InvitationSummary(
+            id=i.id,
+            email=i.email,
+            status=i.status,
+            expires_at=i.expires_at.isoformat() if i.expires_at else None,
+            accepted_at=i.accepted_at.isoformat() if i.accepted_at else None,
+        )
         for i in invites
     ]
 

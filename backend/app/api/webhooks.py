@@ -29,6 +29,21 @@ class WebhookCreate(BaseModel):
     description: str | None = Field(default=None, max_length=512)
 
 
+class WebhookUpdate(BaseModel):
+    """Partial-update model for PATCH /webhooks/{id}.
+
+    Every field is optional so a consumer can patch just `events` without
+    re-sending the URL + secret. Avoids the prior bug where PATCHing
+    `description="..."` alone triggered the `url: min_length=8` validator
+    and 422'd a legitimate partial update.
+    """
+
+    url: str | None = Field(default=None, min_length=8, max_length=2048)
+    secret: str | None = Field(default=None, max_length=512)
+    events: str | None = Field(default=None, max_length=512)
+    description: str | None = Field(default=None, max_length=512)
+
+
 @router.get("/webhooks")
 def list_webhooks(user_id: str = Depends(require_permission("admin:llm:read")), db: Session = Depends(get_db)):
     org_id = _resolve_org_id(db, user_id)
@@ -72,7 +87,7 @@ def create_webhook(
 def update_webhook(
     request: Request,
     webhook_id: str,
-    data: WebhookCreate,
+    data: WebhookUpdate,
     user_id: str = Depends(require_permission("admin:llm:write")),
     db: Session = Depends(get_db),
 ):
@@ -142,7 +157,15 @@ def list_deliveries(
         .limit(50)
         .all()
     )
+    # ISO-8601 timestamps (API-C3); `str(datetime)` lacks the "T"
+    # separator and breaks Safari Date parsing.
     return [
-        {"id": d.id, "event": d.event, "success": d.success, "status_code": d.status_code, "created_at": str(d.created_at)}
+        {
+            "id": d.id,
+            "event": d.event,
+            "success": d.success,
+            "status_code": d.status_code,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+        }
         for d in deliveries
     ]

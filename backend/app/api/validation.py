@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Any
@@ -10,6 +10,7 @@ from app.models.validation import ValidationRule, ValidationRun, ValidationResul
 from app.services.project_service import ensure_project_access
 from app.services.recon_service import run_row_count_recon
 from app.api.audit import write_audit
+from app.schemas.pagination import PaginatedResponse, paginate
 
 router = APIRouter(tags=["validation"])
 
@@ -29,23 +30,97 @@ class ReconRunCreate(BaseModel):
     target: dict[str, Any]
 
 
-@router.post("/projects/{project_id}/validation-rules")
-def create_rule(project_id: str, data: RuleCreate, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+class ValidationRuleSummary(BaseModel):
+    """Lightweight rule row returned by `list_rules`.
+
+    Replaces the previous hand-built dict so OpenAPI lists the fields.
+    """
+
+    id: str
+    rule_type: str
+    target_ref: str | None = None
+    status: str | None = None
+
+
+class ValidationRuleCreated(BaseModel):
+    id: str
+    rule_type: str
+    status: str
+
+
+@router.post(
+    "/projects/{project_id}/validation-rules",
+    response_model=ValidationRuleCreated,
+    status_code=201,
+)
+def create_rule(project_id: str, data: RuleCreate, request: Request, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)
     rule = ValidationRule(project_id=project_id, rule_type=data.rule_type, target_ref=data.target_ref, definition=data.definition)
     db.add(rule)
     db.commit()
-    return {"id": rule.id, "rule_type": rule.rule_type, "status": "active"}
+    # Audit emission was missing — REVIEW_API_CONTRACT §Audit emission §2 flag.
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="validation_rule_created",
+        entity_type="validation_rule", entity_id=rule.id,
+        meta={"project_id": project_id, "rule_type": data.rule_type},
+        request=request,
+    )
+    return ValidationRuleCreated(id=rule.id, rule_type=rule.rule_type, status="active")
 
 
-@router.get("/projects/{project_id}/validation-rules")
-def list_rules(project_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+@router.get(
+    "/projects/{project_id}/validation-rules",
+    response_model=PaginatedResponse[ValidationRuleSummary],
+)
+def list_rules(
+    project_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """List validation rules for a project (paginated envelope).
+
+    Breaking change vs v0.x: response is now `{items,total,limit,offset}`.
+    See REVIEW_API_CONTRACT.md §API-C2.
+    """
     ensure_project_access(db, org_id, project_id)
     rules = db.query(ValidationRule).filter(ValidationRule.project_id == project_id).all()
-    return [{"id": r.id, "rule_type": r.rule_type, "target_ref": r.target_ref, "status": r.status} for r in rules]
+    rows = [
+        ValidationRuleSummary(
+            id=r.id, rule_type=r.rule_type, target_ref=r.target_ref, status=r.status,
+        )
+        for r in rules
+    ]
+    return paginate(rows, limit=limit, offset=offset)
 
 
-@router.post("/projects/{project_id}/validation-runs")
+class ValidationRunStarted(BaseModel):
+    id: str
+    status: str
+    rule_count: int
+
+
+class ValidationResultRow(BaseModel):
+    rule_id: str | None = None
+    status: str | None = None
+    observed: str | None = None
+    expected: str | None = None
+
+
+class ValidationRunDetail(BaseModel):
+    id: str
+    status: str
+    results: list[ValidationResultRow]
+
+
+@router.post(
+    "/projects/{project_id}/validation-runs",
+    response_model=ValidationRunStarted,
+    status_code=202,
+)
 async def start_validation(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -69,25 +144,31 @@ async def start_validation(
         from app.services.validation_service import execute_validation_run
         rule_ids = [r.id for r in rules]
         background_tasks.add_task(execute_validation_run, run.id, rule_ids, connector_configs)
-        return {"id": run.id, "status": "pending", "rule_count": len(rules)}
+        return ValidationRunStarted(id=run.id, status="pending", rule_count=len(rules))
 
     run.status = "completed"
     db.commit()
-    return {"id": run.id, "status": "completed", "rule_count": 0}
+    return ValidationRunStarted(id=run.id, status="completed", rule_count=0)
 
 
-@router.get("/projects/{project_id}/validation-runs/{run_id}")
+@router.get(
+    "/projects/{project_id}/validation-runs/{run_id}",
+    response_model=ValidationRunDetail,
+)
 def get_validation_run(project_id: str, run_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)
     run = db.query(ValidationRun).filter(ValidationRun.id == run_id, ValidationRun.project_id == project_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Validation run not found")
     results = db.query(ValidationResult).filter(ValidationResult.run_id == run_id).all()
-    return {
-        "id": run.id,
-        "status": run.status,
-        "results": [{"rule_id": r.rule_id, "status": r.status, "observed": r.observed_value, "expected": r.expected_value} for r in results],
-    }
+    return ValidationRunDetail(
+        id=run.id,
+        status=run.status,
+        results=[
+            ValidationResultRow(rule_id=r.rule_id, status=r.status, observed=r.observed_value, expected=r.expected_value)
+            for r in results
+        ],
+    )
 
 
 @router.post("/projects/{project_id}/recon-runs")
@@ -104,5 +185,10 @@ async def start_recon(request: Request, project_id: str, data: ReconRunCreate, o
         )
         write_audit(db, org_id=org_id, actor_id=user_id, action="recon_run_started", entity_type="recon_run", entity_id=result.get("recon_run_id", ""), request=request)
         return result
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Reconciliation failed: {exc}")
+    except Exception:
+        # Sanitize: never echo raw exception text to clients — reuses the
+        # same pattern as agent_workflows.signal_* (REVIEW_API_CONTRACT
+        # `signal-approve` 503 issue).
+        import logging
+        logging.getLogger(__name__).exception("Reconciliation run failed for project %s", project_id)
+        raise HTTPException(status_code=502, detail="Reconciliation failed (see server logs)")
