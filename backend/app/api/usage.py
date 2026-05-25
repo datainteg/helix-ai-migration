@@ -9,7 +9,7 @@ from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.auth.jwt import get_current_user_id
 from app.models.observability import AuditLog
 from app.models.cost import OrgCostLimit
-from app.services.cost_service import usage_summary, get_cost_limit
+from app.services.cost_service import usage_summary, daily_cost, get_cost_limit
 from app.api.audit import write_audit
 
 router = APIRouter(tags=["usage"])
@@ -33,6 +33,19 @@ def get_llm_usage(
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
     return usage_summary(db, org_id, days=days)
+
+
+@router.get("/usage/llm/daily")
+def get_daily_cost(
+    days: int = 30,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Per-day USD spend for sparkline rendering."""
+    org_id = resolve_active_org_id(db, user_id)
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    return daily_cost(db, org_id, days=days)
 
 
 @router.get("/usage/cost-limit")

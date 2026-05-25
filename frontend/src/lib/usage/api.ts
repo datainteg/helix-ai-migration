@@ -41,6 +41,12 @@ export function fetchUsageSummary(token: string, days = 30): Promise<UsageSummar
   return req<UsageSummary>(`/api/v1/usage/llm?days=${days}`, token);
 }
 
+export interface DailyCostPoint { date: string; cost_usd: number }
+
+export function fetchDailyCost(token: string, days = 30): Promise<DailyCostPoint[]> {
+  return req<DailyCostPoint[]>(`/api/v1/usage/llm/daily?days=${days}`, token);
+}
+
 export function fetchCostLimit(token: string): Promise<CostLimit> {
   return req<CostLimit>(`/api/v1/usage/cost-limit`, token);
 }

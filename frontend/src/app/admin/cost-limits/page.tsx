@@ -13,13 +13,14 @@ import { Save, RefreshCw, AlertTriangle } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { Card, Button, Chip, ErrorBanner, LoadingState, Sparkline, ProgressBar } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import { fetchCostLimit, fetchUsageSummary, updateCostLimit, type CostLimit, type UsageSummary } from "@/lib/usage/api";
+import { fetchCostLimit, fetchUsageSummary, fetchDailyCost, updateCostLimit, type CostLimit, type DailyCostPoint, type UsageSummary } from "@/lib/usage/api";
 
 export default function CostLimitsPage() {
   const { token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [limit, setLimit] = useState<CostLimit | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [dailyCost, setDailyCost] = useState<DailyCostPoint[] | null>(null);
   const [daily, setDaily] = useState("0");
   const [monthly, setMonthly] = useState("0");
   const [enforcement, setEnforcement] = useState<"hard" | "soft">("hard");
@@ -31,12 +32,14 @@ export default function CostLimitsPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const [l, u] = await Promise.all([
+      const [l, u, d] = await Promise.all([
         fetchCostLimit(token),
         fetchUsageSummary(token, 30),
+        fetchDailyCost(token, 30).catch(() => null),
       ]);
       setLimit(l);
       setUsage(u);
+      setDailyCost(d);
       setDaily(String(l.daily_usd_cap));
       setMonthly(String(l.monthly_usd_cap));
       setEnforcement(l.enforcement);
@@ -149,7 +152,7 @@ export default function CostLimitsPage() {
                   <span className="text-[12px] text-ink-3">30-day total</span>
                 </div>
                 <Sparkline
-                  data={buildDailySpark(usage)}
+                  data={dailyCost && dailyCost.length > 1 ? dailyCost.map((p) => p.cost_usd) : buildDailySpark(usage)}
                   width={240}
                   height={36}
                   color="var(--con-brand)"

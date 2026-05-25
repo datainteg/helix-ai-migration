@@ -479,6 +479,7 @@ def execute_agent_skill(
     org_id: str | None = None,
     artifact_filename: str | None = None,
     correlation_id: str | None = None,
+    prompt_override: str | None = None,
 ) -> AgentRunResult:
     """Run one BMAD agent+skill end-to-end and return the artifact + parsed metadata.
 
@@ -489,6 +490,11 @@ def execute_agent_skill(
     Temporal into the artifact frontmatter + Prometheus metric labels for
     end-to-end traceability. Pass the same value across all 13 nodes in one
     workflow run.
+
+    `prompt_override`, if set, is appended to the system prompt as an
+    "Operator override" block. Used by /workflows/{id}/replay to surface
+    operator-supplied per-agent prompt tweaks (e.g. "always emit partition
+    keys when targeting BigQuery") without modifying the BMAD skill files.
     """
     upstream_agents = upstream_agents or []
 
@@ -504,6 +510,7 @@ def execute_agent_skill(
             artifact_filename=artifact_filename,
             correlation_id=correlation_id,
             metric_ctx=metric_ctx,
+            prompt_override=prompt_override,
         )
     return result
 
@@ -520,6 +527,7 @@ def _execute_agent_skill_inner(
     artifact_filename: str | None,
     correlation_id: str | None,
     metric_ctx,
+    prompt_override: str | None = None,
 ) -> AgentRunResult:
     try:
         agent = load_bmad_agent(agent_code)
@@ -544,6 +552,12 @@ def _execute_agent_skill_inner(
     )
 
     system_prompt = _build_system_prompt(agent, skill, output_model, skill_body_chars=skill_max)
+    if prompt_override:
+        # Appended after the canonical persona + skill so the agent treats it
+        # as an operator amendment rather than a contradicting instruction.
+        system_prompt = (
+            f"{system_prompt}\n\n## Operator override (replay)\n{prompt_override.strip()}"
+        )
     user_prompt = _build_user_prompt(
         project_id=project_id,
         requirement_text=requirement_text,

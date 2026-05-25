@@ -48,7 +48,8 @@ const RESOURCES: NavItem[] = [
   { label: "Files",              href: "/files",        icon: FolderUp },
   { label: "Reports",            href: "/reports",      icon: FileText },
   { label: "Templates",          href: "/templates",    icon: LayoutTemplate },
-  { label: "Plugins",            href: "/plugins",      icon: Puzzle },
+  { label: "Knowledge",          href: "/knowledge",    icon: FileText },
+  { label: "Marketplace",        href: "/marketplace",  icon: Puzzle },
 ];
 
 const ADMIN: NavItem[] = [

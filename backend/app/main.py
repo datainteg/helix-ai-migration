@@ -81,6 +81,26 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
+
+@app.on_event("startup")
+async def _start_cdc_engine() -> None:
+    """Boot the CDC polling loop. No-op when HELIX_CDC_DISABLED is set."""
+    try:
+        from app.services.cdc_engine import start as start_cdc
+        start_cdc()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("CDC engine failed to start: %s", exc)
+
+
+@app.on_event("shutdown")
+async def _stop_cdc_engine() -> None:
+    try:
+        from app.services.cdc_engine import stop as stop_cdc
+        stop_cdc()
+    except Exception:  # noqa: BLE001
+        pass
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(RequestIdMiddleware)

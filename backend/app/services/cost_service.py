@@ -107,6 +107,38 @@ def record_usage(
     return row
 
 
+def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:
+    """Per-day USD spend over the trailing window. Zero-fills missing days.
+
+    Used by the dashboard sparkline + the cost-limits side panel; cheap
+    enough to compute on every request (Postgres GROUP BY date) given the
+    ix_llm_usage_records_org_created index.
+    """
+    from sqlalchemy import cast, Date
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (
+        db.query(
+            cast(LLMUsageRecord.created_at, Date).label("d"),
+            func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+        )
+        .filter(LLMUsageRecord.organization_id == organization_id)
+        .filter(LLMUsageRecord.created_at >= since)
+        .group_by("d")
+        .order_by("d")
+        .all()
+    )
+    by_date = {str(r[0]): float(r[1] or 0.0) for r in rows}
+    out: list[dict] = []
+    cursor = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
+    today = datetime.now(timezone.utc).date()
+    while cursor <= today:
+        key = cursor.isoformat()
+        out.append({"date": key, "cost_usd": round(by_date.get(key, 0.0), 4)})
+        cursor = cursor + timedelta(days=1)
+    return out
+
+
 def usage_summary(db: Session, organization_id: str, days: int = 30) -> dict:
     """Aggregate window: total cost + tokens + per-provider + per-agent breakdown."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
