@@ -22,7 +22,40 @@ proxy (Caddy, Traefik, etc.) in front of the `frontend` + `backend` containers.
 
 ---
 
-## Quick start (≈ 5 minutes)
+## One-click install (recommended)
+
+```bash
+git clone https://github.com/<your-fork>/helix-ai-migration.git
+cd helix-ai-migration
+./setup.sh           # Linux / macOS / WSL
+# or:
+.\setup.ps1          # Windows PowerShell
+```
+
+`setup.sh` / `setup.ps1`:
+
+1. Verifies Docker + Compose v2 are installed and the daemon is running.
+2. Copies `.env.example` → `.env` (if missing) and fills generated secrets.
+3. Builds the backend / worker / frontend images.
+4. Starts Postgres + Redis + Temporal, waits for Postgres readiness.
+5. Brings up backend (alembic runs on container start) + worker + frontend.
+6. Polls `/api/v1/readyz` (DB-gated) until the backend is serving traffic.
+7. Prints URLs + the first-admin wizard link.
+
+Useful flags:
+
+```bash
+./setup.sh --rebuild           # docker compose build --no-cache
+./setup.sh --rotate-secrets    # rotate JWT / ENCRYPTION / AUDIT_HMAC keys
+./setup.sh --down              # stop the stack, keep volumes
+./setup.sh --nuke              # stop AND delete volumes (Postgres, artifacts)
+```
+
+After it finishes, open `http://localhost:3000/setup/first-admin` and follow the wizard.
+
+---
+
+## Manual install (≈ 5 minutes)
 
 ```bash
 # 1. Clone the repo
