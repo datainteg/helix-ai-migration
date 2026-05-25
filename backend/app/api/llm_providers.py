@@ -25,6 +25,42 @@ from agents.runtime.models import MODELS as _AGENTS_MODELS, DEFAULT_MODELS as _D
 from agents.runtime.providers import get_provider as _get_provider, list_providers as _list_providers
 
 
+# Sensitive URL keys inside `extra_config` that should also be SSRF-gated.
+# Azure / Vertex / Bedrock store their endpoint here instead of base_url.
+_EXTRA_CONFIG_URL_KEYS = ("azure_endpoint", "endpoint", "endpoint_url", "base_url")
+
+
+def _validate_llm_base_url(base_url: str | None, extra_config: dict | None) -> None:
+    """SEC-001: reject LLM provider URLs that point at internal infra.
+
+    A privileged caller used to be able to set `base_url` to AWS IMDS / RFC1918
+    addresses and have the operator's bearer token forwarded there by the
+    /test (and per-call) HTTP paths. Run every operator-controlled URL through
+    `validate_external_url` at admit-time so the bad row never reaches the DB.
+
+    Skipped for empty values (vendor default base URL kicks in downstream).
+    """
+    from app.security.ssrf import validate_external_url, SSRFViolation
+    from fastapi import HTTPException
+
+    candidates = []
+    if base_url:
+        candidates.append(("base_url", base_url))
+    for key in _EXTRA_CONFIG_URL_KEYS:
+        val = (extra_config or {}).get(key)
+        if isinstance(val, str) and val.strip():
+            candidates.append((key, val))
+
+    for label, url in candidates:
+        try:
+            validate_external_url(url)
+        except SSRFViolation as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"LLM provider {label} rejected: {exc}",
+            )
+
+
 def _org(db, uid):
     """Resolve the caller's active org membership.
 
@@ -78,6 +114,7 @@ def api_list_providers(user_id: str = Depends(require_permission("admin:llm:read
 
 @router.post("/llm-providers", response_model=LLMProviderResponse, status_code=201)
 def api_create_provider(data: LLMProviderCreate, user_id: str = Depends(require_permission("admin:llm:write")), db: Session = Depends(get_db), request: Request = None):
+    _validate_llm_base_url(data.base_url, data.extra_config or {})
     org_id = _org(db, user_id)
     result = create_provider(db, org_id, data)
     write_audit(db, org_id, user_id, "llm_provider_created", "llm_provider", result.id, request=request)
@@ -91,6 +128,9 @@ def api_get_provider(provider_id: str, user_id: str = Depends(require_permission
 
 @router.patch("/llm-providers/{provider_id}", response_model=LLMProviderResponse)
 def api_update_provider(provider_id: str, data: LLMProviderUpdate, user_id: str = Depends(require_permission("admin:llm:write")), db: Session = Depends(get_db), request: Request = None):
+    payload = data.model_dump(exclude_unset=True)
+    if "base_url" in payload or "extra_config" in payload:
+        _validate_llm_base_url(payload.get("base_url"), payload.get("extra_config") or {})
     org_id = _org(db, user_id)
     result = update_provider(db, org_id, provider_id, data)
     write_audit(db, _org(db, user_id), user_id, "llm_provider_updated", "llm_provider", provider_id, request=request)
@@ -108,6 +148,23 @@ def api_rotate_key(provider_id: str, data: KeyRotateRequest, user_id: str = Depe
 @router.post("/llm-providers/{provider_id}/test", response_model=TestConnectionResponse)
 @limiter.limit("10/minute")
 async def api_test_provider(request: Request, provider_id: str, user_id: str = Depends(require_permission("admin:llm:read")), db: Session = Depends(get_db)):
+    # SEC-001: any caller-controlled base_url must run through the SSRF guard
+    # before the adapter dials out. Without this the /test endpoint becomes a
+    # ready-made authenticated SSRF primitive against IMDS + intranet hosts.
+    from app.security.ssrf import validate_external_url, SSRFViolation
+    from app.models.llm import LLMProvider
+    from fastapi import HTTPException
+
+    provider = (
+        db.query(LLMProvider)
+        .filter(LLMProvider.id == provider_id, LLMProvider.organization_id == _org(db, user_id))
+        .first()
+    )
+    if provider and provider.base_url:
+        try:
+            validate_external_url(provider.base_url)
+        except SSRFViolation as exc:
+            raise HTTPException(status_code=400, detail=f"Refusing to test provider: {exc}")
     return await test_connection(db, _org(db, user_id), provider_id)
 
 
