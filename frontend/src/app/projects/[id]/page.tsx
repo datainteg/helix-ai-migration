@@ -196,6 +196,11 @@ export default function ProjectDetailPage() {
           <Button variant="outline">
             <Pause className="h-3.5 w-3.5" /> Pause
           </Button>
+          <Link href={`/projects/${id}/sprints`}>
+            <Button variant="outline">
+              Sprints
+            </Button>
+          </Link>
           <Link href={`/projects/${id}/developer-workspace`}>
             <Button variant="outline">
               <Eye className="h-3.5 w-3.5" /> Open workspace
