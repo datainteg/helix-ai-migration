@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Plug, Activity, Zap, AlertCircle } from "lucide-react";
+
 import { DemoShell } from "./DemoShell";
 import { DEMO_CONNECTORS } from "@/data/demo-data";
 
@@ -14,6 +16,42 @@ function StatusDot({ status }: { status: string }) {
       ? "bg-amber-500"
       : "bg-rose-500";
   return <span className={`inline-block h-2 w-2 rounded-full ${color} ring-2 ring-surface`} />;
+}
+
+function HeroStat({
+  icon: Icon,
+  label,
+  value,
+  tint,
+}: {
+  icon: typeof Plug;
+  label: string;
+  value: string;
+  tint: "brand" | "cyan" | "emerald" | "amber";
+}) {
+  const bg = {
+    brand:   "bg-gradient-to-br from-brand-50 to-cyan-50 ring-brand-100",
+    cyan:    "bg-gradient-to-br from-cyan-50 to-emerald-50 ring-cyan-100",
+    emerald: "bg-gradient-to-br from-emerald-50 to-cyan-50 ring-emerald-100",
+    amber:   "bg-gradient-to-br from-amber-50 to-rose-50 ring-amber-100",
+  }[tint];
+  const fg = {
+    brand:   "bg-brand-600",
+    cyan:    "bg-cyan-500",
+    emerald: "bg-emerald-500",
+    amber:   "bg-amber-500",
+  }[tint];
+  return (
+    <div className={`${bg} ring-1 rounded-2xl p-5 flex items-start justify-between`}>
+      <div>
+        <div className="eyebrow text-[10px] text-ink-3">{label}</div>
+        <div className="text-[22px] font-semibold text-ink tracking-tight mt-1.5 leading-none">{value}</div>
+      </div>
+      <span className={`h-9 w-9 rounded-lg grid place-items-center text-white ${fg}`}>
+        <Icon className="h-4 w-4" />
+      </span>
+    </div>
+  );
 }
 
 function CategoryChip({ cat }: { cat: string }) {
@@ -39,6 +77,14 @@ export function DemoConnectors() {
 
   return (
     <DemoShell title="Connectors" description="Pluggable source and target adapters with encrypted credentials.">
+      {/* Hero strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <HeroStat icon={Plug}        label="Total connectors"  value={String(DEMO_CONNECTORS.length)} tint="brand" />
+        <HeroStat icon={Activity}    label="Active instances" value="29"                              tint="cyan" />
+        <HeroStat icon={Zap}         label="p95 latency"      value="22ms"                            tint="emerald" />
+        <HeroStat icon={AlertCircle} label="Failed (24h)"     value="0"                               tint="amber" />
+      </div>
+
       {/* Filter tabs */}
       <div className="mb-5 flex flex-wrap gap-1.5 bg-surface border border-zinc-200 rounded-xl shadow-soft p-1.5 w-fit">
         {CATEGORIES.map((c) => (
