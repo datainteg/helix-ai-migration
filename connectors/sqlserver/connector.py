@@ -9,10 +9,25 @@ from connectors.base.connector import (
     BaseConnector, ColumnInfo, ConnectorCapabilities, ConnectorTestResult,
     ConnectorType, RowCountResult, SchemaInfo, TableInfo,
 )
-from connectors.base.exceptions import DiscoveryError
+from connectors.base.exceptions import DiscoveryError, InvalidIdentifierError
 from connectors.base.identifiers import validate_identifier
 
 logger = logging.getLogger(__name__)
+
+
+# SEC-013 defence-in-depth — SQL Server brackets `[name]` are escapable
+# via `]]`, so a relaxed shared regex would directly enable injection.
+# Enforce strict alphanumeric + underscore + 64-char cap inline.
+import re as _re
+_STRICT_IDENT_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _safe_ident(value: str, label: str) -> str:
+    if not isinstance(value, str) or not _STRICT_IDENT_RE.match(value):
+        raise InvalidIdentifierError(
+            f"{label} {value!r} must match [A-Za-z_][A-Za-z0-9_]{{0,63}}", "sqlserver"
+        )
+    return value
 
 
 class SQLServerConnector(BaseConnector):
@@ -138,6 +153,8 @@ class SQLServerConnector(BaseConnector):
 
     def _sync_get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         from sqlalchemy import text
+        schema_name = _safe_ident(schema_name, "schema_name")
+        table_name = _safe_ident(table_name, "table_name")
         with self._get_engine().connect() as conn:
             result = conn.execute(text(f"SELECT COUNT(*) FROM [{schema_name}].[{table_name}]"))
             return RowCountResult(schema_name=schema_name, table_name=table_name, row_count=result.scalar())

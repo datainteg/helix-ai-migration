@@ -15,10 +15,26 @@ from connectors.base.connector import (
     SchemaInfo,
     TableInfo,
 )
-from connectors.base.exceptions import ConnectionFailedError, DiscoveryError
+from connectors.base.exceptions import ConnectionFailedError, DiscoveryError, InvalidIdentifierError
 from connectors.base.identifiers import validate_identifier
 
 logger = logging.getLogger(__name__)
+
+
+# SEC-013 defence-in-depth — backtick-quoted MySQL identifiers are
+# especially fragile because `` ` `` itself is not denied by the base
+# regex. Enforce alphanumeric + underscore + 64-char cap inline so
+# anyone calling _sync_get_row_count directly cannot inject via backtick.
+import re as _re
+_STRICT_IDENT_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _safe_ident(value: str, label: str) -> str:
+    if not isinstance(value, str) or not _STRICT_IDENT_RE.match(value):
+        raise InvalidIdentifierError(
+            f"{label} {value!r} must match [A-Za-z_][A-Za-z0-9_]{{0,63}}", "mysql"
+        )
+    return value
 
 
 class MySQLConnector(BaseConnector):
@@ -147,6 +163,8 @@ class MySQLConnector(BaseConnector):
 
     def _sync_get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         from sqlalchemy import text
+        schema_name = _safe_ident(schema_name, "schema_name")
+        table_name = _safe_ident(table_name, "table_name")
         with self._get_engine().connect() as conn:
             result = conn.execute(text(f"SELECT COUNT(*) FROM `{schema_name}`.`{table_name}`"))
             count = result.scalar()

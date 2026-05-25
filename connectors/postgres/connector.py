@@ -16,10 +16,25 @@ from connectors.base.connector import (
     SchemaInfo,
     TableInfo,
 )
-from connectors.base.exceptions import ConnectionFailedError, DiscoveryError
+from connectors.base.exceptions import ConnectionFailedError, DiscoveryError, InvalidIdentifierError
 from connectors.base.identifiers import validate_identifier
 
 logger = logging.getLogger(__name__)
+
+
+# SEC-013 defence-in-depth — even if the shared `validate_identifier`
+# regex is relaxed in a future refactor, the per-row-count fast-check
+# rejects anything that isn't alphanumeric + underscore (<= 64 chars).
+import re as _re
+_STRICT_IDENT_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _safe_ident(value: str, label: str) -> str:
+    if not isinstance(value, str) or not _STRICT_IDENT_RE.match(value):
+        raise InvalidIdentifierError(
+            f"{label} {value!r} must match [A-Za-z_][A-Za-z0-9_]{{0,63}}", "postgres"
+        )
+    return value
 
 
 class PostgreSQLConnector(BaseConnector):
@@ -149,6 +164,12 @@ class PostgreSQLConnector(BaseConnector):
 
     def _sync_get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         from sqlalchemy import text
+        # SEC-013: re-validate even though callers do — anyone calling
+        # `_sync_get_row_count` directly (tests, internal validation engine)
+        # must still go through the regex check before string-interpolating
+        # an identifier into the SQL text.
+        schema_name = _safe_ident(schema_name, "schema_name")
+        table_name = _safe_ident(table_name, "table_name")
         with self._get_engine().connect() as conn:
             result = conn.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
             count = result.scalar()
@@ -168,6 +189,9 @@ class PostgreSQLConnector(BaseConnector):
 
     def _sync_get_null_count(self, schema_name: str, table_name: str, column_name: str) -> int:
         from sqlalchemy import text
+        schema_name = _safe_ident(schema_name, "schema_name")
+        table_name = _safe_ident(table_name, "table_name")
+        column_name = _safe_ident(column_name, "column_name")
         with self._get_engine().connect() as conn:
             result = conn.execute(
                 text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}" WHERE "{column_name}" IS NULL')
