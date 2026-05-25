@@ -98,11 +98,12 @@ async def slack_command(request: Request):
     ):
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
-    # Slash command bodies are application/x-www-form-urlencoded.
-    form = dict([p.split("=", 1) if "=" in p else (p, "") for p in body.decode("utf-8").split("&")])
-    # Slack URL-encodes values; decode them properly.
-    from urllib.parse import unquote_plus
-    form = {k: unquote_plus(v) for k, v in form.items()}
+    # Slash command bodies are application/x-www-form-urlencoded. Use
+    # Starlette's built-in form parser (handles `+` → space, repeated keys,
+    # multipart boundaries) rather than splitting `&` by hand — the manual
+    # form parser dropped values with `=` or `&` inside notes.
+    raw_form = await request.form()
+    form = {k: str(v) for k, v in raw_form.items()}
 
     slack_user_id = form.get("user_id", "")
     text = form.get("text", "").strip()
@@ -138,8 +139,10 @@ async def slack_command(request: Request):
                 "text": f"`{workflow_id}` status: *{run.status}* (mode: {run.mode})",
             }
 
-        # Forward the signal via the Temporal client.
-        import asyncio
+        # Forward the signal via the Temporal client. The endpoint is
+        # `async def` so we MUST `await` the inner coroutine — the previous
+        # `asyncio.run()` call raised `RuntimeError: asyncio.run() cannot be
+        # called from a running event loop` and broke the entire Slack flow.
         from temporalio.client import Client
 
         async def _signal():
@@ -148,7 +151,7 @@ async def slack_command(request: Request):
             await handle.signal("approve" if action == "approve" else "reject", notes)
 
         try:
-            asyncio.run(_signal())
+            await _signal()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Slack signal forward failed for %s: %s", workflow_id, exc)
             return {"response_type": "ephemeral", "text": f"Could not signal workflow: {exc}"}
