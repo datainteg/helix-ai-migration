@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { fetchDashboardStats, type DashboardStats } from "@/lib/dashboard/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 import {
@@ -107,6 +108,7 @@ export default function ValidationPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [hasProjects, setHasProjects] = useState<boolean | null>(null);
+  const [orgStats, setOrgStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -115,8 +117,14 @@ export default function ValidationPage() {
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: unknown[]) => { if (!cancelled) setHasProjects(rows.length > 0); })
       .catch(() => { if (!cancelled) setHasProjects(false); });
+    fetchDashboardStats(token)
+      .then((s) => { if (!cancelled) setOrgStats(s); })
+      .catch(() => { if (!cancelled) setOrgStats(null); });
     return () => { cancelled = true; };
   }, [token]);
+
+  const realPassRate = orgStats?.validationPassRate;
+  const showRealHero = realPassRate !== null && realPassRate !== undefined;
 
   const total = VALIDATION_CHECKS.length;
   const passed = VALIDATION_CHECKS.filter((c) => c.status === "passed").length;
@@ -169,11 +177,17 @@ export default function ValidationPage() {
         {/* Top: pass rate hero + distribution */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
           <Card padding="lg">
-            <div className="eyebrow">OVERALL PASS RATE · LAST 24 H</div>
+            <div className="eyebrow">{showRealHero ? "OVERALL PASS RATE" : "OVERALL PASS RATE · SAMPLE"}</div>
             <div className="flex items-baseline gap-3 mt-2">
-              <span className="font-mono tabular-nums text-[56px] font-medium tracking-[-0.03em] leading-none">92.4</span>
+              <span className="font-mono tabular-nums text-[56px] font-medium tracking-[-0.03em] leading-none">
+                {showRealHero ? (realPassRate ?? 0).toFixed(1) : "92.4"}
+              </span>
               <span className="text-[28px] text-ink-3 font-normal">%</span>
-              <span className="ml-auto text-[12px] font-mono" style={{ color: "var(--con-ok)" }}>▲ 1.2% vs prev</span>
+              {showRealHero ? (
+                <span className="ml-auto text-[12px] font-mono text-ink-3">org-wide</span>
+              ) : (
+                <span className="ml-auto text-[12px] font-mono" style={{ color: "var(--con-ok)" }}>▲ 1.2% vs prev</span>
+              )}
             </div>
             <div className="mt-[18px] grid grid-cols-3 gap-[14px]">
               {summary.map((s) => (

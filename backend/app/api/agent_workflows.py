@@ -193,11 +193,28 @@ def approve_step(
 @router.get("/agent-workflows/{workflow_id}/stream")
 async def stream_workflow_progress(
     workflow_id: str,
-    org_id: str = Depends(get_current_organization_id),
-    user_id: str = Depends(get_current_user_id),
+    token: str,
     db: Session = Depends(get_db),
 ):
-    """SSE stream of workflow step events. Client connects once; server pushes updates."""
+    """SSE stream of workflow step events.
+
+    Auth via `?token=` query string because the browser EventSource API
+    cannot send custom headers. Frontend must mint a 60-second scope=sse
+    ticket via POST /auth/sse-ticket and pass it here.
+    """
+    from app.auth.jwt import decode_access_token
+    from app.auth.dependencies import resolve_active_org_id
+
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("missing sub")
+        if payload.get("scope") != "sse":
+            raise ValueError("token is not an sse ticket")
+        org_id = resolve_active_org_id(db, user_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid stream token")
 
     _assert_workflow_in_org(db, workflow_id, org_id)
 

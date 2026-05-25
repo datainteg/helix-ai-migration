@@ -9,8 +9,10 @@ import { useAuth } from "@/lib/auth-context";
 import {
   listProjectWorkflowRuns,
   getWorkflowDetail,
+  subscribeToWorkflow,
   type WorkflowRun,
   type WorkflowDetail,
+  type WorkflowStep,
 } from "@/lib/workflows/api";
 
 const DEMO_FLOW = [
@@ -69,6 +71,36 @@ export default function ProjectAgentsPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [token, id]);
+
+  // Live SSE — append-on-step. Only subscribes when the active run is not yet
+  // terminal so we don't reopen connections to completed workflows.
+  useEffect(() => {
+    if (!token || !active) return;
+    if (["completed", "approved", "rejected", "failed", "expired"].includes(active.status)) return;
+    let es: EventSource | null = null;
+    let cancelled = false;
+    subscribeToWorkflow(
+      token,
+      active.workflow_id,
+      (step: WorkflowStep) => {
+        setActive((prev) => {
+          if (!prev || prev.workflow_id !== active.workflow_id) return prev;
+          const without = prev.steps.filter((s) => s.step_order !== step.step_order);
+          return { ...prev, steps: [...without, step].sort((a, b) => a.step_order - b.step_order) };
+        });
+      },
+      (terminal) => {
+        setActive((prev) => prev ? { ...prev, status: terminal } : prev);
+      },
+    ).then((handle) => {
+      if (cancelled) { handle?.close(); return; }
+      es = handle;
+    });
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
+  }, [token, active?.workflow_id, active?.status]);
 
   const flow = active && active.steps.length > 0
     ? active.steps.map((s, idx) => {

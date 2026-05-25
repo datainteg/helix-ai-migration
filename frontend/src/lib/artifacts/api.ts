@@ -10,10 +10,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export interface Artifact {
   id: string;
   filename: string;
-  ext: string;
+  ext?: string;
+  file_type?: string;
+  project_id?: string;
   content_hash?: string;
   size_bytes?: number;
   storage_path?: string;
+  status?: string;
   version?: number;
   created_at?: string | null;
 }
@@ -26,6 +29,10 @@ async function get<T>(path: string, token: string): Promise<T> {
 
 export function listProjectArtifacts(token: string, projectId: string, limit = 100): Promise<Artifact[]> {
   return get<Artifact[]>(`/api/v1/projects/${projectId}/artifacts?limit=${limit}`, token);
+}
+
+export function listOrgArtifacts(token: string, limit = 100): Promise<Artifact[]> {
+  return get<Artifact[]>(`/api/v1/artifacts?limit=${limit}`, token);
 }
 
 export function listArtifactVersions(token: string, artifactId: string): Promise<Artifact[]> {

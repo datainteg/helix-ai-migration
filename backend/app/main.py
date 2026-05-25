@@ -25,6 +25,7 @@ from app.api.usage import router as usage_router
 from app.api.superadmin import router as superadmin_router
 from app.api.users import router as users_router
 from app.api.sprints import router as sprints_router
+from app.api.dashboard import router as dashboard_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -40,20 +41,29 @@ if settings.SENTRY_DSN:
         traces_sample_rate=0.2,
     )
 
-# OpenTelemetry setup
+# OpenTelemetry setup — optional dep. The opentelemetry-* packages aren't in
+# the base requirements; pylance warns about unresolved imports, but the block
+# only runs when OTEL_ENDPOINT is set AND a try/except around the package
+# imports keeps a missing dep from crashing boot.
 if settings.OTEL_ENDPOINT:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    try:
+        from opentelemetry import trace  # type: ignore[import-not-found]
+        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-not-found]
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore[import-not-found]
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter  # type: ignore[import-not-found]
+        from opentelemetry.sdk.resources import Resource  # type: ignore[import-not-found]
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor  # type: ignore[import-not-found]
 
-    resource = Resource.create({"service.name": settings.APP_NAME, "deployment.environment": settings.APP_ENV})
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.OTEL_ENDPOINT)))
-    trace.set_tracer_provider(provider)
-    SQLAlchemyInstrumentor().instrument()
+        resource = Resource.create({"service.name": settings.APP_NAME, "deployment.environment": settings.APP_ENV})
+        provider = TracerProvider(resource=resource)
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.OTEL_ENDPOINT)))
+        trace.set_tracer_provider(provider)
+        SQLAlchemyInstrumentor().instrument()
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "OTEL_ENDPOINT set but opentelemetry packages not installed; skipping tracing setup."
+        )
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -123,7 +133,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Prometheus metrics at /metrics
 try:
-    from prometheus_fastapi_instrumentator import Instrumentator
+    from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore[import-not-found]
     Instrumentator(
         should_group_status_codes=True,
         should_ignore_untemplated=True,
@@ -135,8 +145,11 @@ except ImportError:
 
 # OpenTelemetry FastAPI instrumentation (must be after app creation)
 if settings.OTEL_ENDPOINT:
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    FastAPIInstrumentor.instrument_app(app)
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore[import-not-found]
+        FastAPIInstrumentor.instrument_app(app)
+    except ImportError:
+        pass
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
@@ -156,6 +169,7 @@ app.include_router(usage_router, prefix="/api/v1")
 app.include_router(superadmin_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(sprints_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -4,12 +4,48 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
 from app.auth.dependencies import resolve_active_org_id
+from app.models.artifacts import CodeArtifact
 from app.services.artifact_version_service import create_artifact_metadata, list_artifacts, get_artifact, list_versions
 from app.services.project_service import ensure_project_access
 from app.storage.local import sanitize_filename, save_artifact_file, validate_upload
 from app.api.audit import write_audit
 
 router = APIRouter(tags=["artifacts"])
+
+
+@router.get("/artifacts")
+def api_list_org_artifacts(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Org-wide artifact list — every artifact across all projects.
+
+    Used by /developer-workspace (top-level IDE view) so operators can scan
+    artifacts without first picking a project. Per-project list lives at
+    /projects/{project_id}/artifacts.
+    """
+    org_id = resolve_active_org_id(db, user_id)
+    rows = (
+        db.query(CodeArtifact)
+        .filter(CodeArtifact.organization_id == org_id)
+        .order_by(CodeArtifact.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "project_id": a.project_id,
+            "filename": a.filename,
+            "file_type": a.file_type,
+            "status": a.status,
+            "created_at": str(a.created_at) if a.created_at else None,
+        }
+        for a in rows
+    ]
 
 
 @router.post("/projects/{project_id}/artifacts/upload")

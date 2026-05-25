@@ -135,25 +135,24 @@ export default function DashboardPage() {
         {stats?.hasAnyData ? null : (
           <DemoBanner message="Charts and tables below are sample. Once you create a project and run a workflow, the metric strip + workflow tiles populate from real data." />
         )}
-        {/* Metric strip — top-row metrics are real; pass/recon/success need
-            cross-project aggregation that the API does not expose yet. */}
+        {/* Metric strip — every value now comes from /api/v1/dashboard/stats. */}
         <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell big label="ACTIVE PROJECTS"
             value={stats ? String(stats.activeProjects) : "—"}
             hint={stats ? `${stats.archivedProjects} archived` : "loading…"}
           />
-          <MetricCell big label="WORKFLOWS RUNNING"
-            value={stats ? String(stats.workflowsRunning) : "—"}
-            hint={stats ? `${stats.totalWorkflows} total` : "loading…"}
+          <MetricCell big label="VALIDATION PASS"
+            value={stats ? fmtPct(stats.validationPassRate) : "—"}
+            hint={stats?.validationPassRate === null ? "no runs yet" : "across all results"}
+          />
+          <MetricCell big label="RECON SCORE"
+            value={stats ? fmtPct(stats.reconScore) : "—"}
+            hint={stats?.reconScore === null ? "no recon runs" : "clean / total"}
           />
           <MetricCell big label="PENDING APPROVAL"
             value={stats ? String(stats.workflowsPending) : "—"}
             hint={stats ? "awaiting human review" : "loading…"}
             accent={stats && stats.workflowsPending > 0 ? "var(--con-warn)" : undefined}
-          />
-          <MetricCell big label="COMPLETED"
-            value={stats ? String(stats.workflowsCompleted) : "—"}
-            hint={stats ? "approved + signed-off" : "loading…"}
           />
           <MetricCell big label="FAILED"
             value={stats ? String(stats.workflowsFailed) : "—"}

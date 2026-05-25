@@ -1,13 +1,10 @@
 /**
- * Dashboard aggregator — pulls real counts from existing endpoints.
+ * Dashboard aggregator client.
  *
- * No new backend endpoint required. The numbers come from:
- *   GET /projects                        → activeProjects, archivedProjects
- *   GET /agent-workflows                 → workflow rollups (pending/failed/completed)
- *
- * Validation pass-rate + recon score need cross-project aggregation that the
- * current API surface doesn't expose; those fields are returned as null so
- * the UI can show "—" rather than a fabricated number.
+ * Single round-trip to GET /api/v1/dashboard/stats. Backend computes counts
+ * + real validation pass-rate + recon score in one query path. The previous
+ * client-side fan-out is kept inline as a graceful fallback when the new
+ * endpoint is not deployed yet (older backends).
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -25,33 +22,45 @@ export interface DashboardStats {
   hasAnyData: boolean;
 }
 
-interface ProjectWire {
-  id: string;
-  status?: string;
+interface StatsWire {
+  projects: { active: number; archived: number; by_status: Record<string, number> };
+  workflows: { running: number; pending: number; completed: number; failed: number; total: number };
+  validation: { total_results: number; passed: number; pass_rate: number | null };
+  recon: { total_results: number; clean: number; score: number | null };
+  has_any_data: boolean;
 }
 
-interface WorkflowWire {
-  workflow_id: string;
-  status: string;
-}
+interface ProjectWire { id: string; status?: string }
+interface WorkflowWire { workflow_id: string; status: string }
 
 async function fetchJson<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }
 
-export async function fetchDashboardStats(token: string): Promise<DashboardStats> {
+function fromWire(wire: StatsWire): DashboardStats {
+  return {
+    activeProjects: wire.projects.active,
+    archivedProjects: wire.projects.archived,
+    workflowsRunning: wire.workflows.running,
+    workflowsPending: wire.workflows.pending,
+    workflowsCompleted: wire.workflows.completed,
+    workflowsFailed: wire.workflows.failed,
+    totalWorkflows: wire.workflows.total,
+    validationPassRate: wire.validation.pass_rate,
+    reconScore: wire.recon.score,
+    hasAnyData: wire.has_any_data,
+  };
+}
+
+async function fallbackStats(token: string): Promise<DashboardStats> {
   const [projects, workflows] = await Promise.all([
     fetchJson<ProjectWire[]>("/api/v1/projects?include_archived=true&limit=200", token),
     fetchJson<WorkflowWire[]>("/api/v1/agent-workflows?limit=200", token),
   ]);
-
   const active = projects.filter((p) => p.status !== "archived").length;
   const archived = projects.length - active;
-
   const counts = workflows.reduce(
     (acc, w) => {
       acc.total += 1;
@@ -64,7 +73,6 @@ export async function fetchDashboardStats(token: string): Promise<DashboardStats
     },
     { total: 0, running: 0, pending: 0, completed: 0, failed: 0 },
   );
-
   return {
     activeProjects: active,
     archivedProjects: archived,
@@ -77,4 +85,14 @@ export async function fetchDashboardStats(token: string): Promise<DashboardStats
     reconScore: null,
     hasAnyData: projects.length > 0 || workflows.length > 0,
   };
+}
+
+export async function fetchDashboardStats(token: string): Promise<DashboardStats> {
+  try {
+    const wire = await fetchJson<StatsWire>("/api/v1/dashboard/stats", token);
+    return fromWire(wire);
+  } catch {
+    // 404/legacy backend → fan out manually so older deployments still work.
+    return fallbackStats(token);
+  }
 }
