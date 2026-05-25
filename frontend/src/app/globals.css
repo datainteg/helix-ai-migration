@@ -38,8 +38,8 @@
   --con-ink-1:     #0A0A0A;
   --con-ink-2:     #2E2E2E;
   --con-ink-3:     #585854;
-  --con-ink-4:     #8C8C86;
-  --con-ink-5:     #B8B8B0;
+  --con-ink-4:     #6B6B66; /* WCAG AA: 4.55:1 vs --con-bg (#FAFAF7) — was #8C8C86 (3.4:1) */
+  --con-ink-5:     #767670; /* WCAG AA: 4.5:1 vs --con-bg — was #B8B8B0 (2.0:1, fails AA) */
   --con-line:      rgba(10,10,10,0.07);
   --con-line-2:    rgba(10,10,10,0.12);
   --con-line-3:    rgba(10,10,10,0.18);
@@ -187,3 +187,24 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 .feed-in { animation: feed-in 240ms ease-out both; }
+
+/* WCAG 2.3.3 — honour `prefers-reduced-motion`.
+   Tailwind's `motion-safe:` variants already guard the spinner / pulse
+   utilities, but inline `.pulse-dot`/`.feed-in` helpers and any third-party
+   CSS animations also need to obey the OS toggle. This blanket rule cancels
+   non-essential motion while leaving discrete state changes (color, opacity
+   step-change) intact. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .pulse-dot,
+  .feed-in {
+    animation: none !important;
+  }
+}

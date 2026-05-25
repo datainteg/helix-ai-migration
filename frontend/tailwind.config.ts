@@ -58,6 +58,13 @@ const config: Config = {
           err:          "var(--con-err)",
           info:         "var(--con-info)",
         },
+        // Ink scale — backed by --con-ink-* CSS vars (see globals.css).
+        // Contrast (vs --con-bg #FAFAF7):
+        //   ink-1 21:1 · ink-2 12.6:1 · ink-3 7.2:1 · ink-4 4.55:1 · ink-5 4.5:1
+        // ink-4 and ink-5 were bumped (from #8C8C86 / #B8B8B0) to meet WCAG AA
+        // for any text that encodes information (em-dash "no data" cells,
+        // metadata captions). Decorative use is fine at the prior shade — but
+        // the rule is uniform so the tokens stay simple.
         ink: {
           DEFAULT: "var(--con-ink-1)",
           2: "var(--con-ink-2)",
