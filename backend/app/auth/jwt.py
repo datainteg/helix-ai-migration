@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -19,6 +21,50 @@ _SSE_TICKETS_PREFIX = "sse_tickets:"
 # SEC-030: helpful constants for iat/iss/aud.
 _TOKEN_ISSUER = settings.APP_NAME
 _TOKEN_AUDIENCE = settings.APP_NAME
+
+# ── In-process negative cache for _is_revoked (C-2 from REVIEW_PERFORMANCE.md) ──
+# Most JWTs are NOT revoked, so a tiny per-process TTL cache cuts Redis
+# EXISTS round-trips to ~ 1/sec per unique token regardless of request
+# rate. Negative-only — TRUE results are NEVER cached, so a revoked
+# token starts being rejected on the next request after the cache entry
+# expires (worst-case latency = `_REVOKE_NEGCACHE_TTL_S`).
+#
+# Security trade-off (acceptable): a user logged out via revoke_token()
+# may still authenticate for up to 1 second per process. This matches
+# typical Redis replication lag and is bounded by the cache TTL. The
+# token's `exp` is still honoured exactly. To disable the cache, set
+# JWT_REVOKE_NEGCACHE_TTL=0 in env.
+_REVOKE_NEGCACHE_TTL_S = float(getattr(settings, "JWT_REVOKE_NEGCACHE_TTL", 1.0))
+_REVOKE_NEGCACHE_MAX = 10_000
+_revoke_negcache: dict[str, float] = {}
+
+
+def _negcache_get(key: str) -> bool:
+    """Return True iff `key` was recently confirmed not-revoked. Prunes expired."""
+    seen_at = _revoke_negcache.get(key)
+    if seen_at is None:
+        return False
+    if time.monotonic() - seen_at > _REVOKE_NEGCACHE_TTL_S:
+        _revoke_negcache.pop(key, None)
+        return False
+    return True
+
+
+def _negcache_put(key: str) -> None:
+    """Record a not-revoked result. Caps the dict at `_REVOKE_NEGCACHE_MAX`."""
+    if _REVOKE_NEGCACHE_TTL_S <= 0:
+        return
+    if len(_revoke_negcache) >= _REVOKE_NEGCACHE_MAX:
+        # Cheap eviction: drop one arbitrary entry rather than tracking
+        # LRU on the hot path. Missing the cache only means one extra
+        # Redis EXISTS — never a correctness issue.
+        _revoke_negcache.pop(next(iter(_revoke_negcache)), None)
+    _revoke_negcache[key] = time.monotonic()
+
+
+def _negcache_invalidate(key: str) -> None:
+    """Drop a single entry from the cache (used when a token gets revoked)."""
+    _revoke_negcache.pop(key, None)
 
 
 def _token_key(token: str) -> str:
@@ -124,27 +170,78 @@ def revoke_token(token: str, expires_in_seconds: int = settings.JWT_ACCESS_TOKEN
             r.setex(_token_key(token), expires_in_seconds, "1")
         except Exception:
             pass
+    # Drop any stale not-revoked entry so the next check sees the
+    # revocation immediately rather than waiting for the TTL.
+    _negcache_invalidate(_token_key(token))
     _revoke_sse_family(token, expires_in_seconds)
 
 
 def _is_revoked(token: str) -> bool:
+    """Sync revocation check. Safe to call from sync `def` handlers
+    (FastAPI runs them in a thread-pool worker, so the Redis round-trip
+    does NOT block the event loop). Async handlers should prefer
+    `_is_revoked_async` so the Redis I/O is non-blocking.
+
+    C-2 mitigation: in-process negative cache short-circuits the Redis
+    EXISTS for tokens seen as not-revoked within the last
+    `_REVOKE_NEGCACHE_TTL_S` seconds. A TRUE result is never cached —
+    a revoked token will be rejected on the next request after the
+    cache entry expires (worst-case ≤ 1 s default).
+    """
+    key = _token_key(token)
+    if _negcache_get(key):
+        return False
+    from app.core.redis_client import get_redis
+    r = get_redis()
+    if not r:
+        # Cannot positively confirm; do not cache the absence of an
+        # answer. Defaulting to "not revoked" matches the prior
+        # behaviour when Redis is offline.
+        return False
+    try:
+        # Revocation lookups use sha256 in BOTH the parent and child
+        # paths, so we just check the prefix+hash key directly.
+        revoked = bool(r.exists(key))
+    except Exception:
+        return False
+    if not revoked:
+        _negcache_put(key)
+    return revoked
+
+
+async def _is_revoked_async(token: str) -> bool:
+    """Non-blocking revocation check for async handlers.
+
+    The negative cache shortcut is checked synchronously (no I/O); a
+    cache miss offloads the Redis EXISTS to a worker thread via
+    `asyncio.to_thread` so the event loop never blocks on Redis I/O.
+
+    Used by the SSE handlers (sprints.py / agent_workflows.py) which
+    decode the SSE ticket inside an `async def` and would otherwise
+    burn the entire Redis RTT on the event loop.
+    """
+    key = _token_key(token)
+    if _negcache_get(key):
+        return False
     from app.core.redis_client import get_redis
     r = get_redis()
     if not r:
         return False
     try:
-        # Revocation lookups use sha256 in BOTH the parent and child
-        # paths, so we just check the prefix+hash key directly.
-        return bool(r.exists(_token_key(token)))
+        revoked = await asyncio.to_thread(lambda: bool(r.exists(key)))
     except Exception:
         return False
+    if not revoked:
+        _negcache_put(key)
+    return revoked
 
 
-def decode_access_token(token: str) -> dict:
+def _decode_jwt(token: str) -> dict:
+    """Pure JWT decode + signature/iat/iss/aud verification. No I/O."""
     try:
         # SEC-030: pin algorithm, audience, issuer. `options` lets us
         # opt-in to `iat`/`nbf`/`aud`/`iss` validation explicitly.
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
             algorithms=["HS256"],
@@ -159,7 +256,25 @@ def decode_access_token(token: str) -> dict:
         )
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def decode_access_token(token: str) -> dict:
+    payload = _decode_jwt(token)
     if _is_revoked(token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+    return payload
+
+
+async def decode_access_token_async(token: str) -> dict:
+    """Async variant that runs the Redis revocation check via
+    `asyncio.to_thread` so the FastAPI event loop is never blocked on
+    Redis I/O. Preferred for async-def handlers (SSE streams, etc.).
+
+    Semantics are identical to `decode_access_token`; only the I/O
+    path differs.
+    """
+    payload = _decode_jwt(token)
+    if await _is_revoked_async(token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
     return payload
 
