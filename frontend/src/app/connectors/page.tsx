@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import {
   Search,
   Plus,
@@ -17,7 +17,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { AppIcon } from "@/components/icons";
-import { Button, Card, Tabs, LoadingState, EmptyState } from "@/components/ui";
+import { Button, Card, Tabs, LoadingState, EmptyState, Modal, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -233,9 +233,11 @@ function ConnectorCard({ c, onClick }: { c: ConnectorRow; onClick: () => void })
     c.status === "ok" ? "var(--con-ok)" : c.status === "warn" ? "var(--con-warn)" : "var(--con-err)";
   const isCustom = c.authored === "you";
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      className="bg-surface border border-hx flex flex-col cursor-pointer relative hover:border-hx-2 transition-colors"
+      aria-label={`Configure ${c.name} connector`}
+      className="text-left bg-surface border border-hx flex flex-col cursor-pointer relative hover:border-hx-2 transition-colors focus-ring w-full"
       style={{
         borderRadius: 10,
         padding: "14px 16px",
@@ -320,11 +322,15 @@ function ConnectorCard({ c, onClick }: { c: ConnectorRow; onClick: () => void })
           </div>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
 function Field({ field }: { field: FormField }) {
+  // useId guarantees a unique htmlFor/id pair even when the same Field
+  // is rendered in two places. focus-ring class restores the missing focus
+  // outline that the inline `outline: none` style was removing.
+  const inputId = useId();
   const baseStyle: React.CSSProperties = {
     width: "100%",
     height: field.type === "textarea" ? "auto" : 36,
@@ -338,12 +344,12 @@ function Field({ field }: { field: FormField }) {
         ? "Geist Mono, ui-monospace, monospace"
         : "Geist, sans-serif",
     color: "var(--con-ink-1)",
-    outline: "none",
   };
 
   return (
     <div style={{ gridColumn: field.col === 2 ? "span 2" : undefined }}>
       <label
+        htmlFor={inputId}
         className="block text-ink-2"
         style={{
           fontSize: 11.5,
@@ -355,6 +361,8 @@ function Field({ field }: { field: FormField }) {
       </label>
       {field.type === "textarea" ? (
         <textarea
+          id={inputId}
+          className="focus-ring"
           style={baseStyle}
           placeholder={field.placeholder}
           defaultValue={field.defaultValue}
@@ -362,6 +370,8 @@ function Field({ field }: { field: FormField }) {
         />
       ) : field.type === "select" ? (
         <select
+          id={inputId}
+          className="focus-ring"
           style={baseStyle}
           defaultValue={field.defaultValue}
         >
@@ -372,21 +382,26 @@ function Field({ field }: { field: FormField }) {
           ))}
         </select>
       ) : field.type === "file" ? (
-        <div
-          className="flex items-center justify-center cursor-pointer text-ink-3"
+        <label
+          htmlFor={inputId}
+          className="flex items-center justify-center cursor-pointer text-ink-3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
           style={{
             ...baseStyle,
             height: 56,
             border: "1.5px dashed var(--con-line-3)",
             gap: 8,
+            outlineColor: "var(--con-brand)",
           }}
         >
-          <Upload size={14} />
+          <Upload size={14} aria-hidden />
           <span>Drop file here or click to browse</span>
-        </div>
+          <input id={inputId} type="file" className="sr-only" />
+        </label>
       ) : (
         <input
+          id={inputId}
           type={field.type}
+          className="focus-ring"
           style={baseStyle}
           placeholder={field.placeholder}
           defaultValue={field.defaultValue}
@@ -399,11 +414,13 @@ function Field({ field }: { field: FormField }) {
 type TestState = "idle" | "testing" | "ok" | "fail";
 
 interface ConnectModalProps {
-  modal: ModalState;
+  open: boolean;
+  modal: ModalState | null;
   onClose: () => void;
 }
 
-function ConnectModal({ modal, onClose }: ConnectModalProps) {
+function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
+  if (!modal) return null;
   const fromConnector = modal.mode === "edit" ? modal.connector ?? null : null;
   const initialProvider: Provider | null = fromConnector
     ? PROVIDER_CATALOG.find((p) =>
@@ -486,53 +503,21 @@ function ConnectModal({ modal, onClose }: ConnectModalProps) {
     },
   ];
 
-  return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 grid place-items-center"
-      style={{
-        zIndex: 100,
-        background: "rgba(10,10,10,0.30)",
-        backdropFilter: "blur(4px)",
-        padding: 24,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-surface border border-hx flex flex-col overflow-hidden shadow-lg"
-        style={{
-          borderRadius: 14,
-          width: "min(720px, 100%)",
-          maxHeight: "calc(100vh - 48px)",
-        }}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between border-b border-hx"
-          style={{ padding: "18px 24px 14px" }}
-        >
-          <div>
-            <div className="eyebrow">
-              {fromConnector ? "EDIT CONNECTION" : "NEW CONNECTION"}
-            </div>
-            <div
-              style={{ fontSize: 17, fontWeight: 600, marginTop: 4 }}
-            >
-              {provider
-                ? `Configure ${provider.name}`
-                : "Connect a new source or target"}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="bg-transparent border-0 text-ink-3"
-            style={{ padding: 6, borderRadius: 6, cursor: "pointer" }}
-          >
-            <X size={16} />
-          </button>
-        </div>
+  // Render through the Modal primitive so we inherit dialog semantics,
+  // focus trap, Escape close, scroll lock and focus restore. The Modal
+  // header/title is provided by the title prop; we keep the custom stepper
+  // + step content as the modal body.
+  const modalTitle = provider
+    ? `Configure ${provider.name}`
+    : "Connect a new source or target";
+  const modalDescription = fromConnector ? "Edit connection" : "New connection";
 
+  return (
+    <Modal open={open} onClose={onClose} title={modalTitle} description={modalDescription} width="lg">
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{ maxHeight: "calc(100vh - 200px)" }}
+      >
         {/* Stepper */}
         <div
           className="flex bg-surface-hi border-b border-hx"
@@ -995,7 +980,7 @@ function ConnectModal({ modal, onClose }: ConnectModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1006,16 +991,17 @@ export default function ConnectorsPage() {
   const [modal, setModal] = useState<ModalState | null>(null);
   const [connectors, setConnectors] = useState<ConnectorRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [loadError, setLoadError] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string>("");
+  const searchInputId = useId();
 
   useEffect(() => {
     let cancelled = false;
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     setLoading(true);
-    setLoadError(false);
+    setLoadError("");
     fetch(`${API_BASE}/api/v1/connectors/registry`, { headers })
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) throw new Error(`Couldn't reach the connector registry (HTTP ${r.status})`);
         return r.json() as Promise<RegistryEntry[]>;
       })
       .then((entries) => {
@@ -1024,10 +1010,10 @@ export default function ConnectorsPage() {
         setConnectors(rows);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         if (cancelled) return;
         setConnectors([]);
-        setLoadError(true);
+        setLoadError(e instanceof Error ? e.message : "Couldn't reach the connector registry");
         setLoading(false);
       });
     return () => { cancelled = true; };
@@ -1069,6 +1055,8 @@ export default function ConnectorsPage() {
       }
     >
       <div className="flex flex-col" style={{ gap: 16 }}>
+        {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
+
         {/* Filter */}
         <div
           className="flex items-center bg-surface border border-hx"
@@ -1079,7 +1067,8 @@ export default function ConnectorsPage() {
           }}
         >
           <label
-            className="relative flex items-center"
+            htmlFor={searchInputId}
+            className="relative flex items-center focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
             style={{
               flex: 1,
               maxWidth: 320,
@@ -1088,14 +1077,18 @@ export default function ConnectorsPage() {
               borderRadius: 7,
               paddingLeft: 30,
               paddingRight: 10,
+              outlineColor: "var(--con-brand)",
             }}
           >
+            <span className="sr-only">Search connectors</span>
             <Search
               size={13}
+              aria-hidden
               className="absolute text-ink-4"
               style={{ left: 10 }}
             />
             <input
+              id={searchInputId}
               placeholder="Search connectors…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -1127,7 +1120,7 @@ export default function ConnectorsPage() {
             title={loadError ? "Couldn't load connectors" : "No connectors available"}
             description={
               loadError
-                ? "The connector registry is unreachable. Check the API and try again."
+                ? loadError
                 : "No connector types are registered yet. Add a custom connector via the SDK."
             }
             action={
@@ -1154,10 +1147,10 @@ export default function ConnectorsPage() {
             />
           ))}
 
-          {/* Build-your-own callout */}
+          {/* Build-your-own callout. NOT a button-of-buttons (invalid HTML);
+              the inner Button owns the click action. */}
           <div
-            onClick={() => setModal({ mode: "new" })}
-            className="flex flex-col justify-between bg-transparent cursor-pointer"
+            className="flex flex-col justify-between bg-transparent"
             style={{
               border: "1px dashed var(--con-line-3)",
               borderRadius: 10,
@@ -1208,15 +1201,20 @@ export default function ConnectorsPage() {
                 Python. Plugs into Validation and Recon automatically.
               </p>
             </div>
-            <Button variant="outline" size="sm">
-              <Code size={12} /> Read SDK docs →
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="primary" size="sm" onClick={() => setModal({ mode: "new" })}>
+                <Plus size={12} aria-hidden /> Start
+              </Button>
+              <Button variant="outline" size="sm">
+                <Code size={12} aria-hidden /> Read SDK docs →
+              </Button>
+            </div>
           </div>
         </div>
           </>
         )}
       </div>
-      {modal && <ConnectModal modal={modal} onClose={() => setModal(null)} />}
+      <ConnectModal open={modal !== null} modal={modal} onClose={() => setModal(null)} />
     </AppShell>
   );
 }
