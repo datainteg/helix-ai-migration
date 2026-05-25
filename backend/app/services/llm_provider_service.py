@@ -121,6 +121,7 @@ async def test_connection(db: Session, org_id: str, provider_id: str) -> TestCon
             name=provider.name,
             base_url=provider.base_url,
             timeout=provider.timeout,
+            extra_config=provider.extra_config or {},
         )
     )
     return await adapter.test_connection(api_key)
