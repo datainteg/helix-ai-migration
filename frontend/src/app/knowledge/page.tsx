@@ -8,11 +8,19 @@
  * search; vector embeddings are a future swap.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { BookOpen, Trash2, Plus, Search } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card, ErrorBanner, EmptyState, LoadingState } from "@/components/ui";
+import {
+  Button,
+  Card,
+  ConfirmModal,
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  Modal,
+} from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -42,6 +50,9 @@ export default function KnowledgePage() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Doc | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const searchInputId = useId();
 
   const refresh = async () => {
     if (!token) return;
@@ -73,17 +84,20 @@ export default function KnowledgePage() {
     }
   };
 
-  const remove = async (id: string) => {
-    if (!token) return;
-    if (!confirm("Delete this doc?")) return;
+  const confirmDelete = async () => {
+    if (!token || !pendingDelete) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/knowledge/docs/${id}`, {
+      const res = await fetch(`${API_BASE}/api/v1/knowledge/docs/${pendingDelete.id}`, {
         method: "DELETE", headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Delete failed (${res.status})`);
+      setPendingDelete(null);
       await refresh();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -93,14 +107,16 @@ export default function KnowledgePage() {
       title="Knowledge base"
       description="Docs BMAD agents cite during planning. Keyword search MVP."
       crumbs={["Knowledge"]}
-      actions={<Button onClick={() => setShowUpload(true)}><Plus className="h-3.5 w-3.5" /> Upload doc</Button>}
+      actions={<Button onClick={() => setShowUpload(true)}><Plus className="h-3.5 w-3.5" aria-hidden /> Upload doc</Button>}
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
 
       <Card padding="sm" className="mb-4">
         <div className="flex items-center gap-2">
-          <Search className="h-3.5 w-3.5 text-ink-4" />
+          <label htmlFor={searchInputId} className="sr-only">Search uploaded docs</label>
+          <Search className="h-3.5 w-3.5 text-ink-4" aria-hidden />
           <input
+            id={searchInputId}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void search(); }}
@@ -112,13 +128,13 @@ export default function KnowledgePage() {
       </Card>
 
       {hits !== null && (
-        <div className="mb-6">
-          <div className="eyebrow text-[10px] mb-1.5">SEARCH RESULTS · {hits.length}</div>
+        <div className="mb-6" role="region" aria-label="Search results">
+          <div className="eyebrow text-[10px] mb-1.5" aria-live="polite">SEARCH RESULTS · {hits.length}</div>
           <div className="space-y-2">
             {hits.map((h) => (
               <Card key={h.id} bodyClassName="p-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <BookOpen className="h-3.5 w-3.5 text-[var(--con-brand)]" />
+                  <BookOpen className="h-3.5 w-3.5 text-[var(--con-brand)]" aria-hidden />
                   <span className="text-[13px] font-medium">{h.title}</span>
                 </div>
                 <p className="text-[12px] text-ink-3 line-clamp-3">{h.excerpt}</p>
@@ -138,11 +154,11 @@ export default function KnowledgePage() {
           <table className="w-full text-[13px]">
             <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
               <tr>
-                <th className="px-3 py-2 text-left">Title</th>
-                <th className="px-3 py-2 text-left">Tags</th>
-                <th className="px-3 py-2 text-right">Size (B)</th>
-                <th className="px-3 py-2 text-left">Created</th>
-                <th className="px-3 py-2 text-right"></th>
+                <th scope="col" className="px-3 py-2 text-left">Title</th>
+                <th scope="col" className="px-3 py-2 text-left">Tags</th>
+                <th scope="col" className="px-3 py-2 text-right">Size (B)</th>
+                <th scope="col" className="px-3 py-2 text-left">Created</th>
+                <th scope="col" className="px-3 py-2 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -153,8 +169,12 @@ export default function KnowledgePage() {
                   <td className="px-3 py-2 text-right font-mono">{d.content_length.toLocaleString()}</td>
                   <td className="px-3 py-2 text-ink-3 font-mono text-[11.5px]">{d.created_at?.slice(0, 10) ?? "—"}</td>
                   <td className="px-3 py-2 text-right">
-                    <button onClick={() => void remove(d.id)} className="text-ink-3 hover:text-[var(--con-err)]" aria-label="Delete">
-                      <Trash2 className="h-3.5 w-3.5" />
+                    <button
+                      onClick={() => setPendingDelete(d)}
+                      className="text-ink-3 hover:text-[var(--con-err)] p-1 rounded focus-ring"
+                      aria-label={`Delete doc ${d.title}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     </button>
                   </td>
                 </tr>
@@ -164,17 +184,27 @@ export default function KnowledgePage() {
         </Card>
       )}
 
-      {showUpload && (
-        <UploadDocModal
-          onClose={() => setShowUpload(false)}
-          onCreated={async () => { setShowUpload(false); await refresh(); }}
-        />
-      )}
+      <UploadDocModal
+        open={showUpload}
+        onClose={() => setShowUpload(false)}
+        onCreated={async () => { setShowUpload(false); await refresh(); }}
+      />
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+        title="Delete knowledge doc?"
+        description={pendingDelete ? `“${pendingDelete.title}” will be removed permanently. BMAD agents will no longer cite it during planning.` : undefined}
+        confirmLabel="Delete"
+        destructive
+        busy={deleting}
+      />
     </AppShell>
   );
 }
 
-function UploadDocModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
+function UploadDocModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => Promise<void> }) {
   const { token } = useAuth();
   const [title, setTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -182,6 +212,23 @@ function UploadDocModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const baseId = useId();
+  const titleId = `${baseId}-title`;
+  const sourceUrlId = `${baseId}-source`;
+  const tagsId = `${baseId}-tags`;
+  const contentId = `${baseId}-content`;
+
+  // Reset state when reopening so a closed-then-reopened modal is fresh.
+  useEffect(() => {
+    if (open) {
+      setTitle("");
+      setSourceUrl("");
+      setTags("");
+      setContent("");
+      setSaving(false);
+      setErr("");
+    }
+  }, [open]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,35 +262,52 @@ function UploadDocModal({ onClose, onCreated }: { onClose: () => void; onCreated
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-      role="dialog" aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <form onSubmit={submit} className="w-full max-w-lg bg-surface border border-hx rounded-[10px] p-4 flex flex-col gap-3">
-        <h2 className="text-[14px] font-medium">Upload knowledge doc</h2>
+    <Modal open={open} onClose={onClose} title="Upload knowledge doc" width="md">
+      <form onSubmit={submit} className="flex flex-col gap-3">
         {err && <ErrorBanner message={err} />}
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">TITLE</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">SOURCE URL (optional)</span>
-          <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">TAGS (comma-separated)</span>
-          <input value={tags} onChange={(e) => setTags(e.target.value)} className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">CONTENT (≤ 200 KB)</span>
-          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={10} className="p-2 text-[12px] font-mono rounded-[6px] border border-hx focus-ring resize-y" />
-        </label>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={titleId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">
+            TITLE <span aria-hidden className="text-err">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <input
+            id={titleId}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            aria-required
+            autoFocus
+            className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={sourceUrlId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">SOURCE URL (optional)</label>
+          <input id={sourceUrlId} value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={tagsId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">TAGS (comma-separated)</label>
+          <input id={tagsId} value={tags} onChange={(e) => setTags(e.target.value)} className="h-8 px-2 text-[13px] rounded-[6px] border border-hx focus-ring" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={contentId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">
+            CONTENT (≤ 200 KB) <span aria-hidden className="text-err">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <textarea
+            id={contentId}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={10}
+            required
+            aria-required
+            className="p-2 text-[12px] font-mono rounded-[6px] border border-hx focus-ring resize-y"
+          />
+        </div>
         <div className="flex gap-2 justify-end">
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving}>{saving ? "Uploading…" : "Upload"}</Button>
+          <Button type="submit" variant="primary" loading={saving}>{saving ? "Uploading…" : "Upload"}</Button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

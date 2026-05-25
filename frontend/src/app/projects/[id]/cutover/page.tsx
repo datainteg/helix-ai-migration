@@ -9,12 +9,12 @@
  * even click an illegal transition.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useParams } from "next/navigation";
 import { Plus, RefreshCw } from "lucide-react";
 
 import { ProjectShell } from "@/components/layout/ProjectShell";
-import { Button, Card, Chip, EmptyState, LoadingState, ErrorBanner } from "@/components/ui";
+import { Button, Card, Chip, EmptyState, LoadingState, ErrorBanner, Modal } from "@/components/ui";
 import { SchemaDriftCard } from "@/components/SchemaDriftCard";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -97,13 +97,12 @@ export default function ProjectCutoverPage() {
           ))}
         </div>
       )}
-      {showCreate && (
-        <CreateCutoverModal
-          projectId={String(id)}
-          onClose={() => setShowCreate(false)}
-          onCreated={async () => { setShowCreate(false); await refresh(); }}
-        />
-      )}
+      <CreateCutoverModal
+        open={showCreate}
+        projectId={String(id)}
+        onClose={() => setShowCreate(false)}
+        onCreated={async () => { setShowCreate(false); await refresh(); }}
+      />
     </ProjectShell>
   );
 }
@@ -220,25 +219,39 @@ function RecordDiffInline({ cutoverId, onSaved, setError }: { cutoverId: string;
 }
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (s: string) => void }) {
+  const id = useId();
   return (
-    <label className="flex flex-col">
-      <span className="text-[9.5px] uppercase tracking-wider font-mono text-ink-4">{label}</span>
+    <div className="flex flex-col">
+      <label htmlFor={id} className="text-[9.5px] uppercase tracking-wider font-mono text-ink-4">{label}</label>
       <input
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-24 h-8 px-2 text-[12.5px] rounded-[6px] border border-hx bg-surface text-ink focus-ring"
       />
-    </label>
+    </div>
   );
 }
 
-function CreateCutoverModal({ projectId, onClose, onCreated }: { projectId: string; onClose: () => void; onCreated: () => Promise<void> }) {
+function CreateCutoverModal({ open, projectId, onClose, onCreated }: { open: boolean; projectId: string; onClose: () => void; onCreated: () => Promise<void> }) {
   const { token } = useAuth();
   const [src, setSrc] = useState("");
   const [tgt, setTgt] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const baseId = useId();
+  const srcId = `${baseId}-src`;
+  const tgtId = `${baseId}-tgt`;
+  const notesId = `${baseId}-notes`;
+
+  // Reset state when reopened.
+  useEffect(() => {
+    if (open) {
+      setSrc(""); setTgt(""); setNotes("");
+      setSaving(false); setErr("");
+    }
+  }, [open]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,32 +276,32 @@ function CreateCutoverModal({ projectId, onClose, onCreated }: { projectId: stri
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <form onSubmit={submit} className="w-full max-w-md bg-surface border border-hx rounded-[10px] p-4 flex flex-col gap-3">
-        <h2 className="text-[14px] font-medium">New cutover</h2>
+    <Modal open={open} onClose={onClose} title="New cutover" width="md">
+      <form onSubmit={submit} className="flex flex-col gap-3">
         {err && <ErrorBanner message={err} />}
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">SOURCE REF</span>
-          <input value={src} onChange={(e) => setSrc(e.target.value)} autoFocus placeholder="oracle://ar/ar_payment" className="h-8 px-2 text-[13px] rounded-[6px] border border-hx bg-surface focus-ring" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">TARGET REF</span>
-          <input value={tgt} onChange={(e) => setTgt(e.target.value)} placeholder="snowflake://AR.PAYMENT" className="h-8 px-2 text-[13px] rounded-[6px] border border-hx bg-surface focus-ring" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">NOTES</span>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="p-2 text-[12.5px] rounded-[6px] border border-hx bg-surface focus-ring resize-none" />
-        </label>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={srcId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">
+            SOURCE REF <span aria-hidden className="text-err">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <input id={srcId} value={src} onChange={(e) => setSrc(e.target.value)} required aria-required autoFocus placeholder="oracle://ar/ar_payment" className="h-8 px-2 text-[13px] rounded-[6px] border border-hx bg-surface focus-ring" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={tgtId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">
+            TARGET REF <span aria-hidden className="text-err">*</span>
+            <span className="sr-only">(required)</span>
+          </label>
+          <input id={tgtId} value={tgt} onChange={(e) => setTgt(e.target.value)} required aria-required placeholder="snowflake://AR.PAYMENT" className="h-8 px-2 text-[13px] rounded-[6px] border border-hx bg-surface focus-ring" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={notesId} className="text-[10px] uppercase tracking-wider font-mono text-ink-4">NOTES</label>
+          <textarea id={notesId} value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="p-2 text-[12.5px] rounded-[6px] border border-hx bg-surface focus-ring resize-none" />
+        </div>
         <div className="flex gap-2 justify-end mt-2">
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving}>{saving ? "Creating…" : "Create"}</Button>
+          <Button type="submit" variant="primary" loading={saving}>{saving ? "Creating…" : "Create"}</Button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

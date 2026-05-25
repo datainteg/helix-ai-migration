@@ -1,4 +1,4 @@
-import React from "react";
+import React, { forwardRef } from "react";
 import { cn } from "@/lib/utils";
 
 type Variant = "primary" | "brand" | "secondary" | "outline" | "ghost" | "danger" | "dark";
@@ -15,6 +15,9 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
  * - "primary" is now near-black (operational primary), not gradient brand
  * - "brand" is the indigo variant — use for AI / Ask Helix moments
  * - sizes are smaller across the board (md = 32px, not 40px)
+ *
+ * Wrapped in forwardRef so consumers (e.g. ConfirmModal) can move focus
+ * to the cancel button on open.
  */
 const variantClasses: Record<Variant, string> = {
   primary:
@@ -40,17 +43,13 @@ const sizeClasses: Record<Size, string> = {
   icon: "h-8 w-8 rounded-[8px]",
 };
 
-export function Button({
-  variant = "outline",
-  size = "md",
-  loading = false,
-  disabled,
-  children,
-  className,
-  ...props
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "outline", size = "md", loading = false, disabled, children, className, ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
@@ -70,4 +69,4 @@ export function Button({
       {children}
     </button>
   );
-}
+});

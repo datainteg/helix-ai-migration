@@ -18,3 +18,4 @@ export { Tabs } from "./Tabs";
 export { Kbd } from "./Kbd";
 export { DemoBanner } from "./DemoBanner";
 export { Modal } from "./Modal";
+export { ConfirmModal } from "./ConfirmModal";
