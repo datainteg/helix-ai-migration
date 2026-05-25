@@ -7,6 +7,9 @@ class LLMProviderType(str, Enum):
     GOOGLE = "google"
     DEEPSEEK = "deepseek"
     OPENROUTER = "openrouter"
+    BEDROCK = "bedrock"        # AWS Bedrock — Claude, Llama, Mistral, Titan, ...
+    VERTEX = "vertex"          # Google Vertex AI — Gemini + Model Garden
+    AZURE = "azure"            # Azure OpenAI Service
     CUSTOM = "custom"
     LOCAL = "local"
 

@@ -68,21 +68,25 @@ const STEP_DESCRIPTIONS = [
 ];
 
 const LLM_PROVIDERS = [
-  { key: "anthropic",  name: "Anthropic",      logo: "A", color: "#D97757", models: ["claude-3.7-sonnet", "claude-3.5-haiku", "claude-3.5-sonnet"], recommended: true },
-  { key: "openai",     name: "OpenAI",         logo: "O", color: "#10A37F", models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o1"] },
-  { key: "google",     name: "Google",         logo: "G", color: "#4285F4", models: ["gemini-2.0-pro", "gemini-2.0-flash"] },
-  { key: "deepseek",   name: "DeepSeek",       logo: "D", color: "#2A6FDB", models: ["deepseek-v3", "deepseek-coder"] },
-  { key: "openrouter", name: "OpenRouter",     logo: "R", color: "#0A0A0A", models: ["openrouter/auto", "openrouter/best-coding"] },
-  { key: "ollama",     name: "Local (Ollama)", logo: "L", color: "#71717A", models: ["llama-3.1-70b", "qwen-2.5-coder"], note: "Self-hosted" },
+  { key: "anthropic",  name: "Anthropic",          logo: "A", color: "#D97757", models: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"], recommended: true },
+  { key: "openai",     name: "OpenAI",             logo: "O", color: "#10A37F", models: ["gpt-5.5", "gpt-5-mini", "gpt-5.5-thinking", "gpt-realtime-2"] },
+  { key: "google",     name: "Google (Gemini API)", logo: "G", color: "#4285F4", models: ["gemini-3-pro", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-omni"] },
+  { key: "deepseek",   name: "DeepSeek",           logo: "D", color: "#5786FE", models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  { key: "openrouter", name: "OpenRouter",         logo: "R", color: "#0A0A0A", models: ["openai/gpt-5.5", "anthropic/claude-opus-4.7", "google/gemini-3-pro", "deepseek/deepseek-v4-pro"] },
+  { key: "bedrock",    name: "AWS Bedrock",        logo: "B", color: "#FF9900", models: ["anthropic.claude-opus-4-7", "anthropic.claude-sonnet-4-6", "openai.gpt-5.5", "meta.llama4-maverick", "mistral.mistral-large", "amazon.titan-text-premier-v1", "cohere.command-r-plus-v1", "deepseek.deepseek-v4"], note: "AWS auth via region + access keys (or IAM role)" },
+  { key: "vertex",     name: "Google Vertex AI",   logo: "V", color: "#4285F4", models: ["gemini-3-pro", "gemini-3-flash", "gemini-omni", "imagen-4", "veo-3"], note: "Requires GCP project + ADC" },
+  { key: "azure",      name: "Azure OpenAI",       logo: "A", color: "#0078D4", models: ["gpt-5.5", "gpt-5-mini", "o1", "phi-4"], note: "Requires endpoint + deployment name" },
+  { key: "local",      name: "Local (Ollama / LM Studio)", logo: "L", color: "#71717A", models: ["llama4", "qwen3", "gemma3", "mistral-large"], note: "Self-hosted" },
+  { key: "custom",     name: "Custom OpenAI-compatible", logo: "C", color: "#52525B", models: [], note: "vLLM, Together, Fireworks, Groq, Cerebras, ..." },
 ];
 
 const BMAD_AGENTS = [
-  { key: "bmad-agent-analyst",     name: "Mary",    role: "Business Analyst",    defaultModel: "claude-3.5-haiku",  recommendedProvider: "anthropic" },
-  { key: "bmad-agent-pm",          name: "John",    role: "Product Manager",     defaultModel: "claude-3.7-sonnet", recommendedProvider: "anthropic" },
-  { key: "bmad-agent-ux-designer", name: "Sally",   role: "UX Designer",         defaultModel: "gpt-4o",            recommendedProvider: "openai" },
-  { key: "bmad-agent-architect",   name: "Winston", role: "Solutions Architect", defaultModel: "claude-3.7-sonnet", recommendedProvider: "anthropic" },
-  { key: "bmad-agent-dev",         name: "Amelia",  role: "Senior Engineer",     defaultModel: "deepseek-v3",       recommendedProvider: "deepseek" },
-  { key: "bmad-agent-tech-writer", name: "Paige",   role: "Tech Writer",         defaultModel: "gpt-4o-mini",       recommendedProvider: "openai" },
+  { key: "bmad-agent-analyst",     name: "Mary",    role: "Business Analyst",    defaultModel: "claude-haiku-4-5",  recommendedProvider: "anthropic" },
+  { key: "bmad-agent-pm",          name: "John",    role: "Product Manager",     defaultModel: "claude-sonnet-4-6", recommendedProvider: "anthropic" },
+  { key: "bmad-agent-ux-designer", name: "Sally",   role: "UX Designer",         defaultModel: "gpt-5.5",           recommendedProvider: "openai" },
+  { key: "bmad-agent-architect",   name: "Winston", role: "Solutions Architect", defaultModel: "claude-opus-4-7",   recommendedProvider: "anthropic" },
+  { key: "bmad-agent-dev",         name: "Amelia",  role: "Senior Engineer",     defaultModel: "deepseek-v4-pro",   recommendedProvider: "deepseek" },
+  { key: "bmad-agent-tech-writer", name: "Paige",   role: "Tech Writer",         defaultModel: "gpt-5-mini",        recommendedProvider: "openai" },
 ];
 
 const CONNECTOR_OPTIONS: { value: string; label: string }[] = [

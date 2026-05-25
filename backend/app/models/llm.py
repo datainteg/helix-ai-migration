@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Integer, ForeignKey, Boolean
+from sqlalchemy import Column, String, Float, Integer, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -16,6 +16,8 @@ class LLMProvider(BaseModel):
     max_tokens = Column(Integer, default=4096)
     timeout = Column(Integer, default=60)
     status = Column(String(50), default="active", nullable=False)
+    # Provider-specific config: aws_region, gcp_project, azure_endpoint, etc.
+    extra_config = Column(JSON, nullable=True)
 
     secrets = relationship("LLMProviderSecret", back_populates="provider", cascade="all, delete-orphan")
     agent_mappings = relationship("LLMAgentMapping", back_populates="provider", cascade="all, delete-orphan")

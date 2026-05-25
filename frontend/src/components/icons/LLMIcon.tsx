@@ -18,8 +18,8 @@ interface SimpleIcon {
 
 type Provider =
   | "anthropic" | "google" | "gemini" | "deepseek" | "openrouter" | "ollama"
-  | "meta" | "mistralai" | "mistral"
-  | "openai" | "local";
+  | "meta" | "mistralai" | "mistral" | "vertex"
+  | "openai" | "local" | "bedrock" | "azure" | "custom";
 
 const SI_MAP: Partial<Record<Provider, SimpleIcon>> = {
   anthropic:  (si as Record<string, SimpleIcon>).siAnthropic,
@@ -31,11 +31,15 @@ const SI_MAP: Partial<Record<Provider, SimpleIcon>> = {
   meta:       (si as Record<string, SimpleIcon>).siMeta,
   mistralai:  (si as Record<string, SimpleIcon>).siMistralai,
   mistral:    (si as Record<string, SimpleIcon>).siMistralai,
+  vertex:     (si as Record<string, SimpleIcon>).siGooglecloud,
 };
 
 const FALLBACKS: Record<string, { letter: string; bg: string; fg?: string }> = {
   openai:  { letter: "O", bg: "#10A37F" },
   local:   { letter: "L", bg: "#71717A" },
+  bedrock: { letter: "B", bg: "#FF9900" },           // AWS orange
+  azure:   { letter: "A", bg: "#0078D4" },           // Azure blue
+  custom:  { letter: "C", bg: "#52525B" },
   unknown: { letter: "?", bg: "#888" },
 };
 
@@ -45,8 +49,12 @@ const ALIASES: Record<string, Provider> = {
   "openai-api":     "openai",
   gpt:              "openai",
   "google-gemini":  "gemini",
-  "vertex-ai":      "gemini",
+  "vertex-ai":      "vertex",
   ollama:           "ollama",
+  "aws-bedrock":    "bedrock",
+  aws:              "bedrock",
+  "azure-openai":   "azure",
+  microsoft:        "azure",
 };
 
 function resolve(name: string): Provider | string {

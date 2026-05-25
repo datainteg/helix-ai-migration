@@ -19,15 +19,10 @@ from app.rate_limiting import limiter
 
 router = APIRouter(tags=["llm-providers"])
 
-_PROVIDER_MODELS = {
-    "openai": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o3-mini"],
-    "anthropic": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"],
-    "google": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-pro"],
-    "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
-    "openrouter": [],
-    "local": ["llama3.2", "qwen2.5-coder", "mistral", "phi4"],
-    "custom": [],
-}
+# Catalogue + model registry come from the agents package so there's one
+# source of truth shared with the LLM adapters in agents/runtime/providers/.
+from agents.runtime.models import MODELS as _AGENTS_MODELS, DEFAULT_MODELS as _DEFAULTS
+from agents.runtime.providers import get_provider as _get_provider, list_providers as _list_providers
 
 
 def _org(db, uid):
@@ -35,34 +30,40 @@ def _org(db, uid):
     return get_current_user(db, uid).memberships[0].organization_id
 
 
-_PROVIDER_BASE_URLS = {
-    "openai": "https://api.openai.com/v1",
-    "anthropic": "https://api.anthropic.com",
-    "google": "https://generativelanguage.googleapis.com",
-    "deepseek": "https://api.deepseek.com/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "local": "http://localhost:11434/v1",
-    "custom": "",
-}
+def _models_by_id(ptype: str) -> list[str]:
+    return [m.get("id", "") for m in _AGENTS_MODELS.get(ptype, []) if m.get("id")]
+
+
+def _default_base_url(ptype: str) -> str:
+    p = _get_provider(ptype)
+    return (p.default_base_url or "") if p else ""
+
+
+# Stable enumeration order for the wizard UI.
+_PROVIDER_ORDER = [
+    "anthropic", "openai", "google", "deepseek", "openrouter",
+    "bedrock", "vertex", "azure", "local", "custom",
+]
 
 
 @router.get("/llm-providers/catalogue")
 def api_provider_catalogue(user_id: str = Depends(get_current_user_id)):
-    """Return supported providers with their models and default base URLs."""
+    """Return supported providers with their model list + default base URL."""
     return [
         {
             "provider_type": ptype,
-            "models": _PROVIDER_MODELS.get(ptype, []),
-            "default_base_url": _PROVIDER_BASE_URLS.get(ptype, ""),
+            "models": _models_by_id(ptype),
+            "default_base_url": _default_base_url(ptype),
+            "default_model": _DEFAULTS.get(ptype, ""),
         }
-        for ptype in ["openai", "anthropic", "google", "deepseek", "openrouter", "local", "custom"]
+        for ptype in _PROVIDER_ORDER if ptype in _list_providers()
     ]
 
 
 @router.get("/llm-providers/models")
 def api_provider_models(user_id: str = Depends(get_current_user_id)):
-    """Return supported model list per provider type."""
-    return _PROVIDER_MODELS
+    """Return full model registry: { provider_type: [{id, name, context_window, ...}] }."""
+    return _AGENTS_MODELS
 
 
 @router.get("/llm-providers", response_model=list[LLMProviderResponse])

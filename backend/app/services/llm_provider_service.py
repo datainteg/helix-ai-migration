@@ -26,6 +26,7 @@ def create_provider(db: Session, org_id: str, data: LLMProviderCreate) -> LLMPro
         temperature=data.temperature,
         max_tokens=data.max_tokens,
         timeout=data.timeout,
+        extra_config=data.extra_config,
     )
     db.add(provider)
     db.flush()
@@ -226,4 +227,5 @@ def _to_response(provider: LLMProvider) -> LLMProviderResponse:
         timeout=provider.timeout,
         status=provider.status,
         api_key_masked=masked,
+        extra_config=provider.extra_config,
     )

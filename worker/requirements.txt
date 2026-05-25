@@ -8,3 +8,10 @@ psycopg2-binary>=2.9.9
 cryptography>=42.0.0
 PyYAML>=6.0
 prometheus-client>=0.20.0
+
+# LLM provider SDKs — lazy-imported by agents/runtime/providers/*.
+# Listed here so the worker image ships with cloud-vendor support
+# out of the box. Adapters degrade gracefully if any are missing.
+openai>=1.40.0
+boto3>=1.34.0
+google-cloud-aiplatform>=1.60.0
