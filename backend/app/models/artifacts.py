@@ -14,6 +14,10 @@ class CodeArtifact(BaseModel):
     storage_path = Column(String(500), nullable=False)
     content_hash = Column(String(64), nullable=False)
     status = Column(String(50), default="uploaded")
+    # Paired rollback script for migrations. NULL when no reversible script
+    # exists (e.g., tech-writer docs). When set, GET /artifacts/{id}/rollback
+    # returns the metadata of the reverse artifact.
+    rollback_artifact_id = Column(String(36), ForeignKey("code_artifacts.id"), nullable=True)
 
     versions = relationship("CodeArtifactVersion", back_populates="artifact", cascade="all, delete-orphan")
     dependencies = relationship("ArtifactDependency", foreign_keys="ArtifactDependency.artifact_id", back_populates="artifact", cascade="all, delete-orphan")

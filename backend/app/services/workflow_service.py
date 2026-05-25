@@ -50,6 +50,22 @@ async def start_bmad_planning_workflow(
     Returns a dict shaped like `HelixBMADResult.to_dict()` plus `result` for the
     local-fallback case (which carries the full LangGraph state).
     """
+    # Cost guardrail — refuse start when the org has breached its USD cap in
+    # hard-enforcement mode. Soft mode logs but allows.
+    if organization_id and db is not None:
+        try:
+            from app.services.cost_service import check_within_cap
+            allowed, reason = check_within_cap(db, organization_id)
+            if not allowed:
+                raise RuntimeError(f"Cost cap exceeded for org {organization_id}: {reason}")
+            if reason:
+                logger.warning("Cost cap soft-breach for org=%s: %s", organization_id, reason)
+        except RuntimeError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Failing the cap lookup must not block legit workflows; log + continue.
+            logger.warning("Cost cap check failed; allowing workflow: %s", exc)
+
     helix = HelixBMAD(
         project_id=project_id,
         requirement_id=requirement_id,

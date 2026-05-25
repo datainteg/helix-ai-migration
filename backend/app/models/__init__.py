@@ -12,3 +12,5 @@ from app.models.sprint import (  # noqa: F401
     MigrationRelease, MappingNode, MappingEdge, AgentExecutionRecord,
     SprintTaskHistory,
 )
+from app.models.cutover import MigrationCutover  # noqa: F401
+from app.models.cost import LLMUsageRecord, OrgCostLimit  # noqa: F401

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query, Request, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -87,3 +88,73 @@ def api_get_artifact(artifact_id: str, user_id: str = Depends(get_current_user_i
 @router.get("/artifacts/{artifact_id}/versions")
 def api_list_versions(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return list_versions(db, resolve_active_org_id(db, user_id), artifact_id)
+
+
+class RollbackLink(BaseModel):
+    rollback_artifact_id: str
+
+
+@router.post("/artifacts/{artifact_id}/rollback")
+def api_link_rollback(
+    artifact_id: str,
+    data: "RollbackLink",
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Attach a rollback artifact to a forward-migration artifact.
+
+    Both artifacts must belong to the caller's org. Returns the updated
+    parent artifact. Idempotent — re-linking overwrites the previous pointer.
+    """
+    from fastapi import HTTPException
+    org_id = resolve_active_org_id(db, user_id)
+    forward = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id, CodeArtifact.organization_id == org_id
+    ).first()
+    if not forward:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    reverse = db.query(CodeArtifact).filter(
+        CodeArtifact.id == data.rollback_artifact_id, CodeArtifact.organization_id == org_id
+    ).first()
+    if not reverse:
+        raise HTTPException(status_code=404, detail="Rollback artifact not found")
+    if reverse.id == forward.id:
+        raise HTTPException(status_code=400, detail="Artifact cannot roll back itself")
+    forward.rollback_artifact_id = reverse.id
+    db.commit()
+    db.refresh(forward)
+    return {
+        "id": forward.id,
+        "filename": forward.filename,
+        "rollback_artifact_id": forward.rollback_artifact_id,
+    }
+
+
+@router.get("/artifacts/{artifact_id}/rollback")
+def api_get_rollback(
+    artifact_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return the paired rollback artifact metadata, or 404 if none linked."""
+    from fastapi import HTTPException
+    org_id = resolve_active_org_id(db, user_id)
+    forward = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id, CodeArtifact.organization_id == org_id
+    ).first()
+    if not forward:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if not forward.rollback_artifact_id:
+        raise HTTPException(status_code=404, detail="No rollback linked")
+    reverse = db.query(CodeArtifact).filter(CodeArtifact.id == forward.rollback_artifact_id).first()
+    if not reverse:
+        raise HTTPException(status_code=404, detail="Linked rollback artifact missing")
+    return {
+        "id": reverse.id,
+        "filename": reverse.filename,
+        "file_type": reverse.file_type,
+        "storage_path": reverse.storage_path,
+        "content_hash": reverse.content_hash,
+        "status": reverse.status,
+        "created_at": str(reverse.created_at) if reverse.created_at else None,
+    }

@@ -26,6 +26,9 @@ from app.api.superadmin import router as superadmin_router
 from app.api.users import router as users_router
 from app.api.sprints import router as sprints_router
 from app.api.dashboard import router as dashboard_router
+from app.api.cutovers import router as cutovers_router
+from app.api.migration_templates import router as templates_router
+from app.api.integrations import router as integrations_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -170,6 +173,9 @@ app.include_router(superadmin_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(sprints_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(cutovers_router, prefix="/api/v1")
+app.include_router(templates_router, prefix="/api/v1")
+app.include_router(integrations_router, prefix="/api/v1")
 
 
 @app.get("/")
