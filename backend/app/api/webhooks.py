@@ -3,8 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, HttpUrl
 
 from app.db.session import get_db
-from app.auth.dependencies import require_permission
-from app.services.auth_service import get_current_user
+from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.services.secret_service import encrypt_value
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
 from app.api.audit import write_audit
@@ -13,11 +12,9 @@ router = APIRouter(tags=["webhooks"])
 
 
 def _resolve_org_id(db: Session, user_id: str) -> str:
-    from fastapi import HTTPException
-    user = get_current_user(db, user_id)
-    if not user.memberships:
-        raise HTTPException(status_code=403, detail="User has no organization membership")
-    return str(user.memberships[0].organization_id)
+    # Delegates to the canonical active-membership resolver so suspended
+    # members are correctly rejected (was a stale-membership leak before).
+    return resolve_active_org_id(db, user_id)
 
 
 class WebhookCreate(BaseModel):

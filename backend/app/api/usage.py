@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.auth.dependencies import require_permission
-from app.services.auth_service import get_current_user
+from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.models.observability import AuditLog
 
 router = APIRouter(tags=["usage"])
@@ -20,8 +19,7 @@ def get_usage_stats(
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import func
 
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = resolve_active_org_id(db, user_id)
     now = datetime.now(timezone.utc)
 
     def count_since(delta: timedelta) -> int:

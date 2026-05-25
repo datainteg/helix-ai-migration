@@ -64,9 +64,8 @@ def write_audit(
 
 
 def _get_org_logs(db: Session, user_id: str, limit: int = 500) -> tuple[str, list[AuditLog]]:
-    from app.services.auth_service import get_current_user
-    user = get_current_user(db, user_id)
-    org_id = user.memberships[0].organization_id
+    from app.auth.dependencies import resolve_active_org_id
+    org_id = resolve_active_org_id(db, user_id)
     logs = (
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)
@@ -186,9 +185,8 @@ def verify_audit_chain(
     db: Session = Depends(get_db),
 ):
     """Walk the audit chain in chronological order and verify HMAC integrity."""
-    from app.services.auth_service import get_current_user
-    user = get_current_user(db, user_id)
-    org_id = user.memberships[0].organization_id
+    from app.auth.dependencies import resolve_active_org_id
+    org_id = resolve_active_org_id(db, user_id)
     logs = (
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)

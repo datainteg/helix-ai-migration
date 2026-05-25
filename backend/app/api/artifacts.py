@@ -3,10 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import resolve_active_org_id
 from app.services.artifact_version_service import create_artifact_metadata, list_artifacts, get_artifact, list_versions
 from app.services.project_service import ensure_project_access
 from app.storage.local import sanitize_filename, save_artifact_file, validate_upload
-from app.services.auth_service import get_current_user
 from app.api.audit import write_audit
 
 router = APIRouter(tags=["artifacts"])
@@ -14,8 +14,7 @@ router = APIRouter(tags=["artifacts"])
 
 @router.post("/projects/{project_id}/artifacts/upload")
 async def upload_artifact(request: Request, project_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    user = get_current_user(db, user_id)
-    org_id = user.memberships[0].organization_id
+    org_id = resolve_active_org_id(db, user_id)
     ensure_project_access(db, org_id, project_id)
 
     original_filename = file.filename or "unknown"
@@ -38,11 +37,7 @@ def api_list_artifacts(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    user = get_current_user(db, user_id)
-    if not user.memberships:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="User has no organization membership")
-    org_id = user.memberships[0].organization_id
+    org_id = resolve_active_org_id(db, user_id)
     ensure_project_access(db, org_id, project_id)
     rows = list_artifacts(db, org_id, project_id)
     return rows[offset : offset + limit]
@@ -50,11 +45,9 @@ def api_list_artifacts(
 
 @router.get("/artifacts/{artifact_id}")
 def api_get_artifact(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    user = get_current_user(db, user_id)
-    return get_artifact(db, user.memberships[0].organization_id, artifact_id)
+    return get_artifact(db, resolve_active_org_id(db, user_id), artifact_id)
 
 
 @router.get("/artifacts/{artifact_id}/versions")
 def api_list_versions(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    user = get_current_user(db, user_id)
-    return list_versions(db, user.memberships[0].organization_id, artifact_id)
+    return list_versions(db, resolve_active_org_id(db, user_id), artifact_id)

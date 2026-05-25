@@ -37,6 +37,23 @@ def get_current_organization_id(
     return _active_membership(db, user_id).organization_id
 
 
+def resolve_active_org_id(db: Session, user_id: str) -> str:
+    """Helper for services + endpoints that already have user_id in hand.
+
+    Equivalent to the `get_current_organization_id` dependency but callable
+    from any context. Raises 403 if the user has no *active* membership
+    (suspended / removed memberships are ignored — preventing a stale row
+    from leaking access to a tenant the user was kicked from).
+    """
+    return str(_active_membership(db, user_id).organization_id)
+
+
+def resolve_active_membership(db: Session, user_id: str) -> OrganizationMember:
+    """Same as `resolve_active_org_id` but returns the full membership row
+    (useful when the caller needs `.organization.name` or `.role_id`)."""
+    return _active_membership(db, user_id)
+
+
 def _role_for_membership(db: Session, membership: OrganizationMember) -> Role:
     role = (
         db.query(Role)

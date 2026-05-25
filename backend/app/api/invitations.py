@@ -4,7 +4,11 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import require_permission
+from app.auth.dependencies import (
+    require_permission,
+    resolve_active_membership,
+    resolve_active_org_id,
+)
 from app.services.auth_service import get_current_user
 from app.services.invitation_service import (
     create_invitation, accept_invitation, list_invitations, revoke_invitation,
@@ -54,13 +58,14 @@ async def invite_user(
     user_id: str = Depends(require_permission("admin:users:write")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    membership = resolve_active_membership(db, user_id)
+    org_id = str(membership.organization_id)
+    user = get_current_user(db, user_id)  # for inviter's display name
     raw_token = create_invitation(db, org_id, user_id, data.email, data.role)
 
     invite_url = f"{settings.FRONTEND_URL}/accept-invite?token={raw_token}"
     from app.services.email_service import send_email, render_invitation_email
-    org_name = user.memberships[0].organization.name if user.memberships[0].organization else "Helix"
+    org_name = membership.organization.name if membership.organization else "Helix"
     subject, html = render_invitation_email(user.name, org_name, invite_url)
     background_tasks.add_task(send_email, to=data.email, subject=subject, html_body=html)
 
@@ -78,8 +83,7 @@ def get_invitations(
     user_id: str = Depends(require_permission("admin:users:read")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    org_id = str(user.memberships[0].organization_id)
+    org_id = resolve_active_org_id(db, user_id)
     invites = list_invitations(db, org_id)
     return [
         {
@@ -100,11 +104,7 @@ def delete_invitation(
     user_id: str = Depends(require_permission("admin:users:write")),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user(db, user_id)
-    if not user.memberships:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="User has no organization membership")
-    org_id = str(user.memberships[0].organization_id)
+    org_id = resolve_active_org_id(db, user_id)
     revoke_invitation(db, org_id, invitation_id)
     write_audit(db, org_id=org_id, actor_id=user_id, action="invitation_revoked",
                 entity_type="invitation", entity_id=invitation_id, request=request)

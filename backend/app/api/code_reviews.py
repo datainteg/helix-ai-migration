@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from agents import HelixBMAD
 from app.api.audit import write_audit
 from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import resolve_active_org_id
 from app.db.session import get_db
 from app.models.artifacts import ArtifactReview, CodeArtifact, CodeArtifactVersion
 from app.services.auth_service import get_current_user
@@ -65,11 +66,9 @@ def _get_latest_version(db: Session, org_id: str, artifact_id: str) -> CodeArtif
 
 
 def _resolve_org_id(db: Session, user_id: str) -> str:
-    """Return the user's primary organization ID, guarding against missing membership."""
-    user = get_current_user(db, user_id)
-    if not user.memberships:
-        raise HTTPException(status_code=403, detail="User has no organization membership")
-    return user.memberships[0].organization_id
+    """Return the caller's active organization ID. Delegates to the shared
+    resolver so suspended memberships are rejected consistently."""
+    return resolve_active_org_id(db, user_id)
 
 
 def _run_bmad_review(

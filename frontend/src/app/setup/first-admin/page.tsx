@@ -357,14 +357,19 @@ export default function FirstAdminSetupPage() {
         }),
       });
       if (!res.ok) {
+        // Persist whatever succeeded BEFORE this failure so retry skips them.
+        // (Previously setPersisted only ran after the full loop — a mid-loop
+        // throw lost every just-created id.)
+        setPersisted((s) => ({ ...s, providerIds: ids }));
         const body = await res.json().catch(() => ({}));
         throw new Error(`Failed to save provider "${p.name}": ${body.detail || res.statusText}`);
       }
       const created = (await res.json()) as { id: string };
       ids[p.key] = created.id;
       updatedProviders.push({ ...p, providerId: created.id });
+      // Save incrementally so a later failure doesn't strand earlier wins.
+      setPersisted((s) => ({ ...s, providerIds: { ...ids } }));
     }
-    setPersisted((s) => ({ ...s, providerIds: ids }));
     update("providers", updatedProviders);
   };
 
