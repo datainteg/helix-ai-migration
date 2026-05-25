@@ -97,9 +97,9 @@ def api_executions(
 
 @router.get("/projects/{project_id}/sprints/executions/stream")
 async def api_executions_stream(
+    request: Request,
     project_id: str,
     token: str,
-    db: Session = Depends(get_db),
 ):
     """SSE stream of agent executions. Auth via `?token=` query param
     because the browser EventSource API can't send custom headers — JWT
@@ -107,55 +107,91 @@ async def api_executions_stream(
 
     Pushes a snapshot frame every 2s with the latest 50 executions.
     Connection auto-closes after 5 minutes; EventSource auto-reconnects
-    on the client by default."""
+    on the client by default.
+
+    PERF-2 (REVIEW_PERFORMANCE.md / H-8): the handler does NOT take
+    a `Depends(get_db)` session — that would pin one DB connection
+    to the request for the full 5-minute window. Instead we open a
+    short-lived `SessionLocal()` for auth + access check, close it,
+    then open a fresh session for every poll tick inside the
+    generator and close it before sleeping. Each tick also calls
+    `await request.is_disconnected()` so a closed browser tab tears
+    the loop down immediately rather than running to the 5-min cap.
+    """
     from app.auth.jwt import decode_access_token
     from app.auth.dependencies import resolve_active_org_id
+    from app.db.session import SessionLocal
 
+    # ── Auth + access check on a short-lived session ────────────────
+    auth_db = SessionLocal()
     try:
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("missing sub")
-        # Reject full-power tokens used in URLs. Frontend must trade them
-        # via POST /auth/sse-ticket which returns a scope=sse short-TTL ticket.
-        if payload.get("scope") != "sse":
-            raise ValueError("token is not an sse ticket")
-        org_id = resolve_active_org_id(db, user_id)
-    except Exception:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Invalid stream token")
+        try:
+            payload = decode_access_token(token)
+            user_id = payload.get("sub")
+            if not user_id:
+                raise ValueError("missing sub")
+            # Reject full-power tokens used in URLs. Frontend must trade
+            # them via POST /auth/sse-ticket which returns a scope=sse
+            # short-TTL ticket.
+            if payload.get("scope") != "sse":
+                raise ValueError("token is not an sse ticket")
+            org_id = resolve_active_org_id(auth_db, user_id)
+        except Exception:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="Invalid stream token")
 
-    ensure_project_access(db, org_id, project_id)
+        ensure_project_access(auth_db, org_id, project_id)
+    finally:
+        auth_db.close()
 
     async def event_generator():
         seen_ids: set[str] = set()
         # ~150 iterations * 2s = 5 minutes max
-        for _ in range(150):
-            rows = list_executions(db, org_id, project_id, limit=50)
-            new_rows = [r for r in rows if r.id not in seen_ids]
-            for r in new_rows:
-                seen_ids.add(r.id)
-            payload = {
-                "type": "snapshot",
-                "rows": [
-                    {
-                        "id": r.id,
-                        "agent_code": r.agent_code,
-                        "task_id": r.task_id,
-                        "status": r.status,
-                        "started_at": str(r.started_at) if r.started_at else None,
-                        "duration_ms": r.duration_ms,
-                        "retries": r.retries,
-                        "mode": r.mode,
-                        "log": r.log,
+        try:
+            for _ in range(150):
+                # Tear down immediately when the client goes away.
+                if await request.is_disconnected():
+                    return
+
+                # Open a fresh DB session per tick so we never hold a
+                # pooled connection across `asyncio.sleep`. Always
+                # close in finally — even on yield-cancellation when
+                # the client disconnects mid-stream.
+                tick_db = SessionLocal()
+                try:
+                    rows = list_executions(tick_db, org_id, project_id, limit=50)
+                    new_rows = [r for r in rows if r.id not in seen_ids]
+                    for r in new_rows:
+                        seen_ids.add(r.id)
+                    payload = {
+                        "type": "snapshot",
+                        "rows": [
+                            {
+                                "id": r.id,
+                                "agent_code": r.agent_code,
+                                "task_id": r.task_id,
+                                "status": r.status,
+                                "started_at": str(r.started_at) if r.started_at else None,
+                                "duration_ms": r.duration_ms,
+                                "retries": r.retries,
+                                "mode": r.mode,
+                                "log": r.log,
+                            }
+                            for r in rows
+                        ],
+                        "new_count": len(new_rows),
                     }
-                    for r in rows
-                ],
-                "new_count": len(new_rows),
-            }
-            yield f"data: {json.dumps(payload)}\n\n"
-            await asyncio.sleep(2)
-        yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+                finally:
+                    tick_db.close()
+
+                yield f"data: {json.dumps(payload)}\n\n"
+                await asyncio.sleep(2)
+            yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+        except asyncio.CancelledError:
+            # Client closed the connection mid-yield. Re-raise so
+            # Starlette can clean up the response without logging an
+            # unhandled exception.
+            raise
 
     return StreamingResponse(
         event_generator(),
