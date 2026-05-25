@@ -303,16 +303,16 @@ def paige_docs_activity(input_data: dict[str, Any]) -> dict[str, Any]:
 def persist_workflow_step_activity(step_data: dict[str, Any]) -> None:
     """Persist an agent step + artifact path to the workflow_steps table.
 
-    Synchronous activity — opens a sync SQLAlchemy session and always closes it.
+    Uses worker-local SessionLocal (worker/db/session.py) — no backend
+    package coupling beyond the shared model class.
     """
-    from app.db.session import SessionLocal
-    from app.services.workflow_service import save_workflow_step
+    from worker.db.session import SessionLocal
+    from app.models.workflow import WorkflowStep
 
     db = SessionLocal()
     try:
         parsed = step_data.get("parsed") or {}
-        save_workflow_step(
-            db,
+        step = WorkflowStep(
             workflow_run_id=step_data["workflow_run_id"],
             agent_name=step_data["agent_name"],
             step_order=step_data["step_order"],
@@ -323,5 +323,7 @@ def persist_workflow_step_activity(step_data: dict[str, Any]) -> None:
             model_name=step_data.get("model_name"),
             error_message="; ".join(step_data.get("errors", [])) or None,
         )
+        db.add(step)
+        db.commit()
     finally:
         db.close()

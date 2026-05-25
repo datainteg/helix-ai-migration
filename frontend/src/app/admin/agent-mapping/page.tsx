@@ -36,10 +36,20 @@ interface AgentMapping {
   max_tokens: number;
 }
 
+interface ModelEntry {
+  id: string;
+  name?: string;
+  context_window?: number;
+  reasoning?: boolean;
+}
+
+type ModelRegistry = Record<string, ModelEntry[]>;
+
 export default function AgentMappingPage() {
   const { token } = useAuth();
   const [mode, setMode] = useState<"simple" | "advanced">("advanced");
   const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [modelRegistry, setModelRegistry] = useState<ModelRegistry>({});
   const [mappings, setMappings] = useState<Record<string, AgentMapping>>({});
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -72,6 +82,12 @@ export default function AgentMappingPage() {
   useEffect(() => {
     loadProviders();
     loadMappings();
+    // Rich registry: { provider_type: [{id, name, context_window, ...}] }
+    fetch(`${API_BASE}/api/v1/llm-providers/models`, { headers: authHeader })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: ModelRegistry) => setModelRegistry(data))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadProviders, loadMappings]);
 
   const updateMapping = (agentType: string, patch: Partial<AgentMapping>) => {
@@ -204,14 +220,40 @@ export default function AgentMappingPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <input
-                      type="text"
-                      value={map?.model || ""}
-                      onChange={(e) => updateMapping(a.id, { model: e.target.value })}
-                      placeholder="model id"
-                      disabled={disabled}
-                      className="w-40 rounded-[8px] border border-hx bg-surface px-2 py-1 text-[12px] font-mono focus-ring disabled:opacity-50"
-                    />
+                    {(() => {
+                      const ptype = selectedProvider?.provider_type ?? "";
+                      const catalogue = modelRegistry[ptype] ?? [];
+                      // Show a smart dropdown when the registry has entries
+                      // for this provider type; fall back to free-text input
+                      // for custom or unknown providers.
+                      if (catalogue.length > 0) {
+                        return (
+                          <select
+                            value={map?.model || ""}
+                            onChange={(e) => updateMapping(a.id, { model: e.target.value })}
+                            disabled={disabled}
+                            className="w-52 rounded-[8px] border border-hx bg-surface px-2 py-1 text-[12px] font-mono focus-ring disabled:opacity-50"
+                          >
+                            <option value="">— Select model —</option>
+                            {catalogue.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name ? `${m.name} (${m.id})` : m.id}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      }
+                      return (
+                        <input
+                          type="text"
+                          value={map?.model || ""}
+                          onChange={(e) => updateMapping(a.id, { model: e.target.value })}
+                          placeholder="model id"
+                          disabled={disabled}
+                          className="w-40 rounded-[8px] border border-hx bg-surface px-2 py-1 text-[12px] font-mono focus-ring disabled:opacity-50"
+                        />
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <input

@@ -264,6 +264,40 @@ class HelixBMAD:
             artifact_filename=f"{intent}-{filename}",
             correlation_id=self.correlation_id,
         )
+
+        # ── Local AST/regex fallback for code review ─────────────────
+        # When the LLM path fails AND we're doing a review, run the
+        # deterministic static analyser so the operator gets *something*
+        # actionable instead of an empty findings list. The status
+        # `completed_fallback` lets the API distinguish this from a
+        # successful LLM review.
+        if not result.success and intent == "review":
+            from agents.runtime.static_analysis import analyze_python_source
+
+            try:
+                fallback_dict = analyze_python_source(source_code, filename)
+            except Exception as exc:  # pragma: no cover — defensive only
+                logger.exception("static_analysis fallback crashed: %s", exc)
+                fallback_dict = {
+                    "summary": f"Static analysis fallback crashed: {exc}",
+                    "findings": [],
+                    "blocking_issues": [],
+                    "sign_off": "needs_revision",
+                    "artifacts": [],
+                    "risk_level": "LOW",
+                    "structured_findings": [],
+                }
+            return HelixBMADResult(
+                workflow_id=f"adhoc-{intent}-{self.project_id}-{filename}",
+                run_id=f"adhoc-{intent}-{self.project_id}",
+                status="completed_fallback",
+                mode="local",
+                outputs={intent: fallback_dict},
+                artifact_paths={"bmad-agent-dev": []},
+                artifact_dir=str(self.artifact_dir),
+                errors=result.errors,
+            )
+
         return HelixBMADResult(
             workflow_id=f"adhoc-{intent}-{self.project_id}-{filename}",
             run_id=f"adhoc-{intent}-{self.project_id}",
