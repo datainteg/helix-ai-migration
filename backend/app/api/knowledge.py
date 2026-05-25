@@ -123,32 +123,11 @@ def search_docs(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Top-N matching docs for a query. Returns the title + 400-char window
-    around the first hit so agents can cite without bloating prompts."""
-    needle = f"%{q}%"
-    rows = (
-        db.query(KnowledgeDoc)
-        .filter(KnowledgeDoc.organization_id == org_id)
-        .filter(or_(
-            KnowledgeDoc.title.ilike(needle),
-            KnowledgeDoc.content.ilike(needle),
-            KnowledgeDoc.tags.ilike(needle),
-        ))
-        .order_by(KnowledgeDoc.content_length.asc())  # short docs first — usually higher signal
-        .limit(limit)
-        .all()
-    )
-    out = []
-    for r in rows:
-        excerpt = _excerpt(r.content, q, window=400)
-        out.append({
-            "id": r.id,
-            "title": r.title,
-            "source_url": r.source_url,
-            "tags": r.tags,
-            "excerpt": excerpt,
-        })
-    return out
+    """Top-N matching docs for a query. Backend defaults to keyword (ILIKE);
+    swap to vector via HELIX_KNOWLEDGE_BACKEND=vector once embeddings land.
+    Returns title + 400-char window around the first hit."""
+    from app.services.knowledge_search import search as _search
+    return _search(db, org_id, q, limit=limit)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────

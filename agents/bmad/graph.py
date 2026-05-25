@@ -141,6 +141,7 @@ def run_bmad_graph(
     organization_id: str | None = None,
     requirement_text: str | None = None,
     approval_decision: str | None = None,
+    prompt_overrides: dict[str, str] | None = None,
 ) -> dict:
     """Execute the BMAD planning + implementation graph end-to-end."""
     timestamp = _now()
@@ -161,6 +162,7 @@ def run_bmad_graph(
         "approval_required": False,
         "approval_decision": approval_decision,
         "approval_notes": "",
+        "prompt_overrides": prompt_overrides or {},
         "created_at": timestamp,
         "updated_at": timestamp,
     }

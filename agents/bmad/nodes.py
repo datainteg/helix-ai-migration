@@ -98,6 +98,7 @@ def _run(
     upstream_agents: list[str] | None = None,
     artifact_filename: str | None = None,
 ) -> BMADWorkflowState:
+    overrides = state.get("prompt_overrides") or {}
     result = execute_agent_skill(
         agent_code=agent_code,
         skill_name=skill_name,
@@ -107,6 +108,7 @@ def _run(
         upstream_agents=upstream_agents or [],
         org_id=state.get("organization_id"),
         artifact_filename=artifact_filename,
+        prompt_override=overrides.get(agent_code),
     )
     if not result.success or result.parsed is None:
         return _apply_error(state, output_key, result.errors or ["execution failed"])

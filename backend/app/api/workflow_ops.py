@@ -65,20 +65,19 @@ def replay_workflow(
     # require threading them through the executor — for now we record them
     # in audit metadata + the requirement_text, and let the operator paste
     # them as additional context.
-    augmented = data.requirement_text or ""
-    if data.agent_prompt_overrides:
-        bullets = "\n".join(f"- {k}: {v}" for k, v in data.agent_prompt_overrides.items())
-        augmented = f"{augmented}\n\nAgent prompt overrides (replay):\n{bullets}"
-
     from app.services.workflow_service import start_bmad_planning_workflow
     import asyncio
 
+    # Overrides flow as a dict keyed by agent_code. The executor reads them
+    # via state["prompt_overrides"][agent_code] and appends to the system
+    # prompt as "Operator override (replay)" — no requirement_text mangling.
     new_run = asyncio.run(start_bmad_planning_workflow(
         project_id=parent.project_id,
         requirement_id=parent.requirement_id or "",
         organization_id=org_id,
-        requirement_text=augmented,
+        requirement_text=data.requirement_text or "",
         db=db,
+        prompt_overrides=data.agent_prompt_overrides or None,
     ))
 
     write_audit(db, org_id=org_id, actor_id=user_id, action="workflow_replay",

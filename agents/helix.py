@@ -97,6 +97,7 @@ class HelixBMAD:
         temporal_address: str | None = None,
         task_queue: str | None = None,
         correlation_id: str | None = None,
+        prompt_overrides: dict[str, str] | None = None,
     ) -> None:
         if not project_id:
             raise ValueError("project_id is required")
@@ -107,6 +108,11 @@ class HelixBMAD:
         self.requirement_id = requirement_id
         self.requirement_text = requirement_text or ""
         self.organization_id = organization_id
+        # Per-agent prompt overrides — used by /workflows/{id}/replay so an
+        # operator can append "always emit partition keys on BigQuery" type
+        # amendments without forking the BMAD skill files. Keys match the
+        # bmad-agent-XXX agent_code; lookup helper handles unknown keys.
+        self.prompt_overrides: dict[str, str] = prompt_overrides or {}
         self.approval_decision = approval_decision
         self.approval_notes = approval_notes
         self.workflow_run_id = workflow_run_id or str(uuid4())
@@ -147,6 +153,7 @@ class HelixBMAD:
             organization_id=self.organization_id,
             requirement_text=self.requirement_text,
             approval_decision=self.approval_decision,
+            prompt_overrides=self.prompt_overrides,
         )
         return HelixBMADResult(
             workflow_id=self.workflow_id,

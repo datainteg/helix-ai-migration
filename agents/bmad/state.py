@@ -46,6 +46,12 @@ class BMADWorkflowState(TypedDict, total=False):
     approval_decision: ApprovalDecision | None
     approval_notes: str
 
+    # Operator overrides keyed by agent_code (e.g. "bmad-agent-architect" ->
+    # "Always emit partition keys when targeting BigQuery"). Carried through
+    # the graph; _run() looks up the matching override and threads it into
+    # execute_agent_skill(prompt_override=...). Empty/missing → no override.
+    prompt_overrides: dict[str, str]
+
     # Timestamps
     created_at: str
     updated_at: str

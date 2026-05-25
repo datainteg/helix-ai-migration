@@ -40,6 +40,7 @@ async def start_bmad_planning_workflow(
     requirement_text: str | None = None,
     db: Session | None = None,
     correlation_id: str | None = None,
+    prompt_overrides: dict[str, str] | None = None,
 ) -> dict:
     """Start the BMAD planning workflow via Temporal, with a dev-only local fallback.
 
@@ -72,6 +73,7 @@ async def start_bmad_planning_workflow(
         organization_id=organization_id,
         requirement_text=requirement_text or "",
         correlation_id=correlation_id,
+        prompt_overrides=prompt_overrides,
     )
 
     # Try Temporal first.
