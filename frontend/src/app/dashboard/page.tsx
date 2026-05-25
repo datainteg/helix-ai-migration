@@ -25,6 +25,7 @@ import {
   Avatar,
   Tabs,
   Chip,
+  DemoBanner,
 } from "@/components/ui";
 import { AppIcon, AgentIcon, LLMIcon } from "@/components/icons";
 
@@ -115,6 +116,7 @@ export default function DashboardPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        <DemoBanner message="The dashboard renders sample metrics. Real numbers populate once projects, workflows, and validation runs exist." />
         {/* Metric strip */}
         <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell big label="ACTIVE PROJECTS"  value="24"    hint="+3 this week" delta={14} />

@@ -8,7 +8,11 @@
     "dev": "vite --config vite.config.ts",
     "build": "tsc -b && vite build --config vite.config.ts",
     "build:hostinger": "npm run build && node scripts/copy-hostinger-files.mjs",
+    "build:og": "node scripts/rasterise-og.mjs",
     "preview": "vite preview --port 5174"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.0"
   },
   "dependencies": {
     "lucide-react": "^0.400.0",

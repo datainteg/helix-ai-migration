@@ -16,3 +16,5 @@ export { LoadingState } from "./LoadingState";
 export { ErrorBanner } from "./ErrorBanner";
 export { Tabs } from "./Tabs";
 export { Kbd } from "./Kbd";
+export { DemoBanner } from "./DemoBanner";
+export { Modal } from "./Modal";

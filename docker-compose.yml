@@ -83,11 +83,19 @@ services:
           memory: 1G
 
   temporal-ui:
+    # Opt-in only. Defaults to NOT exposing a public port. Operators who need
+    # the dashboard run: `docker compose --profile debug up -d`. This avoids
+    # accidental production exposure of the workflow internals.
     image: temporalio/ui:2.31.2
     container_name: helix-temporal-ui
     restart: unless-stopped
+    profiles: ["debug"]
     ports:
-      - "${TEMPORAL_UI_HOST_PORT:-8233}:8080"
+      # Bind to 127.0.0.1 by default so a public-internet host cannot reach
+      # the UI even when this profile is enabled. Override with
+      # TEMPORAL_UI_BIND=0.0.0.0 only if the host is behind a reverse proxy
+      # that enforces auth.
+      - "${TEMPORAL_UI_BIND:-127.0.0.1}:${TEMPORAL_UI_HOST_PORT:-8233}:8080"
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       # Temporal UI v2.31+ supports HTTP basic auth via these env vars.

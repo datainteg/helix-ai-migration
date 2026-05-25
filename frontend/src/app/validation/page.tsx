@@ -26,6 +26,7 @@ import {
   Chip,
   StatusBadge,
   Tabs,
+  DemoBanner,
 } from "@/components/ui";
 
 // ─── Demo data — TODO: hydrate from API ────────────────────────────
@@ -143,6 +144,7 @@ export default function ValidationPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        <DemoBanner message="Validation rules and runs shown here are sample data. Once you POST /projects/{id}/validation-runs the table will populate live." />
         {/* Top: pass rate hero + distribution */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
           <Card padding="lg">

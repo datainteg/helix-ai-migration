@@ -8,7 +8,7 @@
  * render.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Moon, Sliders, Sun, X, Laptop, RotateCcw } from "lucide-react";
 
 import { Density, ThemeMode, useTweaks } from "@/lib/theme-store";
@@ -32,17 +32,52 @@ interface TweaksPanelProps {
 export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
   const t = useTweaks();
   const [mounted, setMounted] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
 
   useEffect(() => setMounted(true), []);
 
-  // Close on Escape.
+  // Focus trap + Escape + body scroll lock while open.
   useEffect(() => {
     if (!open) return;
+    previouslyFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const node = panelRef.current;
+    if (node) {
+      const focusable = node.querySelector<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+      (focusable ?? node).focus();
+    }
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusables = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"),
+      ).filter((el) => el.offsetParent !== null);
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      previouslyFocused.current?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!mounted || !open) return null;
@@ -54,12 +89,18 @@ export function TweaksPanel({ open, onClose }: TweaksPanelProps) {
         className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
         onClick={onClose}
       />
-      <aside className="relative w-[320px] max-w-full h-full bg-surface border-l border-hx shadow-lg overflow-y-auto">
+      <aside
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tweaks-title"
+        tabIndex={-1}
+        className="relative w-[320px] max-w-full h-full bg-surface border-l border-hx shadow-lg overflow-y-auto outline-none">
         {/* Header */}
         <header className="sticky top-0 z-10 bg-surface border-b border-hx px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sliders className="h-4 w-4 text-ink-3" />
-            <h2 className="text-[13.5px] font-semibold text-ink">Tweaks</h2>
+            <h2 id="tweaks-title" className="text-[13.5px] font-semibold text-ink">Tweaks</h2>
           </div>
           <div className="flex items-center gap-1">
             <button

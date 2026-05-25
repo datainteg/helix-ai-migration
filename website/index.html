@@ -20,11 +20,18 @@
     <meta property="og:site_name" content="Helix" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:url" content="https://helix.datainteg.io" />
-    <meta property="og:image" content="https://helix.datainteg.io/og-image.svg" />
+    <!-- og-image.png is the wide-support PNG (1200x630). Generate it once
+         from the SVG with `npm install --save-optional sharp && npm run build:og`
+         from website/. The SVG remains as a fallback in image:secure_url for
+         platforms that prefer vector. -->
+    <meta property="og:image" content="https://helix.datainteg.io/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Helix — Open-source AI migration platform" />
+    <meta property="og:image:secure_url" content="https://helix.datainteg.io/og-image.svg" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://helix.datainteg.io/og-image.svg" />
+    <meta name="twitter:image" content="https://helix.datainteg.io/og-image.png" />
     <meta name="twitter:title" content="Helix" />
     <meta name="twitter:description" content="Open-source, self-hosted AI-powered migration and validation platform for enterprise migration workflows." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -39,7 +46,7 @@
         "applicationSubCategory": "Data Migration and Validation",
         "operatingSystem": "Web",
         "url": "https://helix.datainteg.io",
-        "image": "https://helix.datainteg.io/og-image.svg",
+        "image": "https://helix.datainteg.io/og-image.png",
         "description": "Open-source, self-hosted AI-powered migration and validation platform for enterprise workflows.",
         "license": "https://github.com/datainteg/helix-ai-migration/blob/main/LICENSE",
         "sourceOrganization": {

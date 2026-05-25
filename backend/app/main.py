@@ -77,6 +77,25 @@ async def enforce_body_size(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Inject defensive HTTP response headers.
+
+    These are cheap, broadly applicable, and reject classes of attacks even
+    when application code has bugs: MIME-sniffing (XCTO), clickjacking
+    (XFO), and Referer leaks. CSP is not enforced here because endpoints
+    serve API JSON, not HTML — the frontend ships its own CSP.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    if settings.APP_ENV == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

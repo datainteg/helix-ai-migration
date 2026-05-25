@@ -27,6 +27,7 @@ import {
   Card,
   StatusBadge,
   Tabs,
+  DemoBanner,
 } from "@/components/ui";
 
 // ─── Demo data — TODO: hydrate from API ────────────────────────────
@@ -159,11 +160,14 @@ export default function AgentsPage() {
         </>
       }
     >
-      {layout === "phases" ? (
-        <PhasesView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
-      ) : (
-        <LinearView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
-      )}
+      <div className="flex flex-col gap-4">
+        <DemoBanner message="The agents canvas renders example runs. Hook this up to /workflows/{id} once your first BMAD run lands." />
+        {layout === "phases" ? (
+          <PhasesView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+        ) : (
+          <LinearView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+        )}
+      </div>
     </AppShell>
   );
 }

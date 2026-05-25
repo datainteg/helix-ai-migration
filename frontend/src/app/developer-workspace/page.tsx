@@ -16,7 +16,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { AgentIcon } from "@/components/icons";
-import { Button, Chip, Kbd, Tabs } from "@/components/ui";
+import { Button, Chip, Kbd, Tabs, DemoBanner } from "@/components/ui";
 
 // TODO: hydrate from API
 interface ArtifactFile {
@@ -702,6 +702,9 @@ function AiReviewPane() {
 export default function WorkspacePage() {
   return (
     <AppShell fullBleed>
+      <div style={{ padding: "12px 32px 0" }}>
+        <DemoBanner message="The IDE shows demo artifacts (migrate.py, ddl.sql, plan_v1.md). Upload or generate real artifacts to populate this workspace." />
+      </div>
       {/* Custom page header (replaces PageHero for IDE layout) */}
       <div
         className="flex items-center justify-between border-b border-hx"

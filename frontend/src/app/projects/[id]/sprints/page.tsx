@@ -8,12 +8,13 @@
  * sprint as a card, and the urgent footer (approvals + risks).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Plus, X } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { Button, Card, EmptyState, LoadingState, MetricCell } from "@/components/ui";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 import {
   SprintCard,
   SprintProgressCard,
@@ -328,6 +329,8 @@ function NewSprintModal({
   onCreated: () => void;
   onSubmit: (input: NewSprintInput) => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, true, onClose);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [status, setStatus] = useState<"planning" | "active">("planning");
@@ -336,13 +339,7 @@ function NewSprintModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape close + focus trap owned by useFocusTrap above.
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,7 +372,14 @@ function NewSprintModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-sprint-title"
+        tabIndex={-1}
+        className="w-full max-w-md outline-none"
+      >
         <Card
           eyebrow={
             <div className="flex items-center justify-between gap-2">
@@ -390,7 +394,7 @@ function NewSprintModal({
               </button>
             </div>
           }
-          title="Create a sprint"
+          title={<span id="new-sprint-title">Create a sprint</span>}
         >
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>

@@ -7,7 +7,8 @@
  * task detail panel on the right.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusTrap } from "@/lib/use-focus-trap";
 import { useParams } from "next/navigation";
 import {
   Sparkles,
@@ -461,6 +462,8 @@ function NewTaskModal({
   onCreated: () => void;
   onSubmit: (input: NewTaskInput) => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, true, onClose);
   const [title, setTitle] = useState("");
   const [type, setType] = useState<SprintTask["type"]>("migration");
   const [priority, setPriority] = useState<SprintTask["priority"]>("P2");
@@ -471,13 +474,7 @@ function NewTaskModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape close is owned by useFocusTrap above — no per-modal listener.
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -512,11 +509,18 @@ function NewTaskModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-task-title"
+        tabIndex={-1}
+        className="w-full max-w-md outline-none"
+      >
         <Card
           eyebrow={
             <div className="flex items-center justify-between gap-2">
-              <span>NEW TASK</span>
+              <span id="new-task-title">NEW TASK</span>
               <button
                 type="button"
                 onClick={onClose}

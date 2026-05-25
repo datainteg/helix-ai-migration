@@ -3,12 +3,13 @@
 import { useParams } from "next/navigation";
 import { Upload, FileCode, History } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
-import { Card, Button, Chip, EmptyState } from "@/components/ui";
+import { Card, Button, Chip, EmptyState, DemoBanner } from "@/components/ui";
 
 export default function ProjectDevWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   return (
     <ProjectShell projectId={String(id)} projectName="Untitled project" projectStatus="draft" subtitle="Three-pane IDE: artifact explorer · code/diff · AI review">
+      <div className="mb-4"><DemoBanner message="Artifact explorer + diff view shows example files. Upload an artifact or run a workflow to populate this workspace." /></div>
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-12 lg:col-span-3" title="Artifacts" padding="sm">
           <ul className="space-y-1 text-[12.5px]">

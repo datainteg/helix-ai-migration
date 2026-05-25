@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { Play, Save } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
-import { Card, Button, StatusBadge, Avatar, Chip } from "@/components/ui";
+import { Card, Button, StatusBadge, Avatar, Chip, DemoBanner } from "@/components/ui";
 
 const FLOW = [
   { id: "intake", label: "Requirement Intake", phase: "Input", color: "indigo" as const, status: "completed" },
@@ -30,6 +30,7 @@ export default function ProjectAgentsPage() {
         <Button><Play className="h-4 w-4" /> Run Workflow</Button>
       </>}
     >
+      <div className="mb-4"><DemoBanner message="The 9-node flow shown here is a static preview. Trigger a BMAD workflow run to populate this canvas with real per-agent state." /></div>
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-12 lg:col-span-8" title="Workflow Canvas">
           <div className="space-y-3">
