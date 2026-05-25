@@ -557,7 +557,8 @@ export default function FirstAdminSetupPage() {
                     type="button"
                     onClick={() => canJump && setStep(i)}
                     disabled={!canJump}
-                    className="w-full flex items-start gap-2.5 py-2 bg-transparent text-left disabled:cursor-default"
+                    aria-current={isActive ? "step" : undefined}
+                    className="w-full flex items-start gap-2.5 py-2 bg-transparent text-left disabled:cursor-default focus-ring"
                   >
                     <div
                       className="w-[22px] h-[22px] rounded-full shrink-0 grid place-items-center font-mono font-semibold text-[10.5px] relative z-10"
