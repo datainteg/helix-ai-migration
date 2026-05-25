@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { ArrowRight, Calendar, GitBranch, KanbanSquare, Map } from "lucide-react";
 
 import { Hero } from "@/components/landing/Hero";
@@ -13,7 +12,7 @@ import { DockerInstall } from "@/components/landing/DockerInstall";
 import { Roadmap } from "@/components/landing/Roadmap";
 import { CTA } from "@/components/landing/CTA";
 import { SectionHeader } from "@/components/layout/SectionHeader";
-import { PROBLEM_BLOCK, SOLUTION_BLOCK } from "@/data/site-content";
+import { PROBLEM_BLOCK, SOLUTION_BLOCK, STATIC_DEMO_URL } from "@/data/site-content";
 
 const SPRINT_TEASER = [
   { icon: KanbanSquare, title: "Sprint board", desc: "Migration-specific kanban with risk + validation badges per card." },
@@ -67,15 +66,17 @@ export function HomePage() {
           <SectionHeader
             eyebrow="Sprint surface"
             title="Migration-aware sprint management, not a generic kanban."
-            description="See the demo for the full execution map, dependency graph, and release calendar."
+            description="See the live console for the full execution map, dependency graph, and release calendar."
           />
-          <Link
-            to="/demo/sprint-mapping"
+          <a
+            href={STATIC_DEMO_URL}
+            target="_blank"
+            rel="noreferrer"
             className="inline-flex items-center gap-2 px-3 h-9 rounded-md text-ink-3 text-[13px] font-medium hover:text-ink hover:bg-zinc-100/70 focus-ring"
           >
-            View full sprint demo
+            Open live console
             <ArrowRight className="h-4 w-4" />
-          </Link>
+          </a>
         </div>
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {SPRINT_TEASER.map((s) => (

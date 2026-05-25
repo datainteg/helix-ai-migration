@@ -1,7 +1,6 @@
-import { Link } from "react-router-dom";
 import { Github, ArrowRight } from "lucide-react";
 
-import { SITE } from "@/data/site-content";
+import { SITE, STATIC_DEMO_URL } from "@/data/site-content";
 
 export function CTA() {
   return (
@@ -21,13 +20,15 @@ export function CTA() {
           Self-hosted. Open source. Six BMAD agents and a 13-step pipeline already wired.
         </p>
         <div className="relative mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link
-            to="/demo"
+          <a
+            href={STATIC_DEMO_URL}
+            target="_blank"
+            rel="noreferrer"
             className="inline-flex items-center gap-2 px-5 h-11 rounded-md bg-white text-ink text-[13.5px] font-semibold hover:bg-zinc-100 focus-ring"
           >
             View demo
             <ArrowRight className="h-4 w-4" />
-          </Link>
+          </a>
           <a
             href={SITE.github}
             target="_blank"
