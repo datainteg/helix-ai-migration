@@ -657,6 +657,20 @@ def _execute_agent_skill_inner(
     )
 
     metric_ctx.set_outcome(success=True, mode=mode, prompt_tokens=prompt_tokens_estimate)
+
+    # Cost recording — best-effort estimate from prompt + response length.
+    # Vendor `usage` blocks would be more accurate; pluggable via provider
+    # adapters later. Skipped for `mock` mode (no real LLM call happened).
+    if mode != "mock" and org_id:
+        _record_agent_cost(
+            org_id=org_id,
+            project_id=project_id,
+            agent_code=agent_code,
+            mode=mode,
+            input_tokens=prompt_tokens_estimate,
+            output_tokens=max(1, _estimate_tokens(raw_text)),
+        )
+
     return AgentRunResult(
         success=True,
         artifact=artifact,
@@ -665,3 +679,65 @@ def _execute_agent_skill_inner(
         mode=mode,
         errors=[],
     )
+
+
+def _record_agent_cost(
+    *,
+    org_id: str,
+    project_id: str,
+    agent_code: str,
+    mode: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    """Persist one LLMUsageRecord row for this agent call.
+
+    Best-effort: resolves the org's active provider + this agent's model
+    mapping, then calls cost_service.record_usage. Opens its own DB session
+    (worker-local preferred) so it works from both backend and worker
+    Temporal activities. Silent on failure — cost recording must never
+    block the workflow.
+    """
+    SessionLocal = None
+    try:
+        from worker.db.session import SessionLocal as _W  # type: ignore
+        SessionLocal = _W
+    except Exception:
+        try:
+            from app.db.session import SessionLocal as _A  # type: ignore
+            SessionLocal = _A
+        except Exception:
+            return
+    try:
+        from app.models.llm import LLMProvider, LLMAgentMapping
+        from app.services.llm_router_service import resolve_routing
+        from app.services.cost_service import record_usage
+    except Exception:
+        return
+
+    db = SessionLocal()
+    try:
+        provider = (
+            db.query(LLMProvider)
+            .filter(LLMProvider.organization_id == org_id, LLMProvider.status == "active")
+            .first()
+        )
+        if not provider:
+            return
+        mappings = db.query(LLMAgentMapping).filter(LLMAgentMapping.organization_id == org_id).all()
+        pid, model, _t, _m = resolve_routing(agent_code, provider.id, provider.default_model, mappings)
+        target = db.query(LLMProvider).filter(LLMProvider.id == pid).first() or provider
+        record_usage(
+            db,
+            organization_id=org_id,
+            provider_type=target.provider_type,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            project_id=project_id,
+            agent_name=agent_code,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cost recording failed for agent=%s: %s", agent_code, exc)
+    finally:
+        db.close()

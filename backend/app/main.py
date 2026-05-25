@@ -29,6 +29,8 @@ from app.api.dashboard import router as dashboard_router
 from app.api.cutovers import router as cutovers_router
 from app.api.migration_templates import router as templates_router
 from app.api.integrations import router as integrations_router
+from app.api.compliance import router as compliance_router
+from app.api.schema_drift import router as schema_drift_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -176,6 +178,8 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(cutovers_router, prefix="/api/v1")
 app.include_router(templates_router, prefix="/api/v1")
 app.include_router(integrations_router, prefix="/api/v1")
+app.include_router(compliance_router, prefix="/api/v1")
+app.include_router(schema_drift_router, prefix="/api/v1")
 
 
 @app.get("/")

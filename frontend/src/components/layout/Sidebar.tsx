@@ -17,6 +17,7 @@ import {
   Settings,
   Search,
   ChevronDown,
+  DollarSign,
 } from "lucide-react";
 import { HelixWordmark } from "./HelixLogo";
 import { Avatar } from "@/components/ui/Avatar";
@@ -51,7 +52,8 @@ const RESOURCES: NavItem[] = [
 ];
 
 const ADMIN: NavItem[] = [
-  { label: "Administration",     href: "/admin",        icon: Settings },
+  { label: "Administration",     href: "/admin",                icon: Settings },
+  { label: "Cost limits",        href: "/admin/cost-limits",    icon: DollarSign },
 ];
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
