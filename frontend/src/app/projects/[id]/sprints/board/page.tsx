@@ -7,7 +7,7 @@
  * task detail panel on the right.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   Sparkles,
@@ -36,12 +36,16 @@ import {
 } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
 import {
+  createTask,
   fetchSprints,
   fetchActiveSprint,
   fetchTasks,
+  patchTaskStatus,
   seedSprints,
+  type NewTaskInput,
   type Sprint,
   type SprintTask,
+  type TaskStatus,
 } from "@/lib/sprints";
 
 const RISK_TONE = { low: "ok", med: "warn", high: "err", critical: "err" } as const;
@@ -59,6 +63,36 @@ export default function SprintBoardPage() {
   const [selectedTask, setSelectedTask] = useState<SprintTask | null>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  const refetchTasks = useCallback(() => {
+    if (!token || !selectedSprintId) return;
+    fetchTasks(token, selectedSprintId)
+      .then(setTasks)
+      .catch(() => setTasks([]));
+  }, [token, selectedSprintId]);
+
+  const handleMove = useCallback(
+    (taskId: string, newStatus: TaskStatus) => {
+      if (!token) return;
+      let snapshot: SprintTask[] = [];
+      setTasks((curr) => {
+        snapshot = curr;
+        return curr.map((t) =>
+          t.id === taskId ? { ...t, status: newStatus } : t,
+        );
+      });
+      patchTaskStatus(token, taskId, newStatus).catch((err) => {
+        setTasks(snapshot);
+        setMoveError(
+          err instanceof Error ? err.message : "Failed to move task",
+        );
+        setTimeout(() => setMoveError(null), 4000);
+      });
+    },
+    [token],
+  );
 
   useEffect(() => {
     if (!token || !projectId) {
@@ -148,7 +182,11 @@ export default function SprintBoardPage() {
       crumbs={["Projects", projectId, "Sprints", "Board"]}
       actions={
         <>
-          <Button variant="outline">
+          <Button
+            variant="outline"
+            onClick={() => setShowNewTask(true)}
+            disabled={!selectedSprintId}
+          >
             <Plus className="h-4 w-4" /> New task
           </Button>
           <Button variant="primary">
@@ -167,12 +205,22 @@ export default function SprintBoardPage() {
         />
       </div>
 
+      {moveError && (
+        <div className="mb-3 rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[12px] text-err">
+          {moveError}
+        </div>
+      )}
+
       {/* ── Board + detail panel ────────────────────────────────── */}
       <div className="grid grid-cols-12 gap-4">
         <div className={selectedTask ? "col-span-12 xl:col-span-9" : "col-span-12"}>
           <Card padding="sm" bodyClassName="p-0">
             <div className="p-3">
-              <SprintKanbanBoard tasks={tasks} onTaskClick={handleTaskClick} />
+              <SprintKanbanBoard
+                tasks={tasks}
+                onTaskClick={handleTaskClick}
+                onMove={handleMove}
+              />
             </div>
           </Card>
         </div>
@@ -198,6 +246,19 @@ export default function SprintBoardPage() {
             />
           </Card>
         </div>
+      )}
+
+      {showNewTask && selectedSprintId && (
+        <NewTaskModal
+          onClose={() => setShowNewTask(false)}
+          onCreated={() => {
+            setShowNewTask(false);
+            refetchTasks();
+          }}
+          onSubmit={(form) =>
+            createTask(token, selectedSprintId, form).then(() => undefined)
+          }
+        />
       )}
     </AppShell>
   );
@@ -374,6 +435,204 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
     <div className="bg-app-2 rounded-[8px] px-2.5 py-2">
       <div className="eyebrow text-[9.5px]">{label}</div>
       <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+// ── New Task Modal ───────────────────────────────────────────────
+
+const TASK_TYPES: SprintTask["type"][] = [
+  "migration", "validation", "recon", "code_review",
+  "notebook", "schema_mapping", "data_profiling", "qa",
+];
+
+const PRIORITIES: SprintTask["priority"][] = ["P0", "P1", "P2", "P3"];
+
+const AI_AGENTS = ["", "Mary", "John", "Sally", "Winston", "Amelia", "Paige"];
+
+const RISK_LEVELS: SprintTask["riskLevel"][] = ["low", "med", "high", "critical"];
+
+function NewTaskModal({
+  onClose,
+  onCreated,
+  onSubmit,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+  onSubmit: (input: NewTaskInput) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [type, setType] = useState<SprintTask["type"]>("migration");
+  const [priority, setPriority] = useState<SprintTask["priority"]>("P2");
+  const [storyPoints, setStoryPoints] = useState<number>(3);
+  const [ownerName, setOwnerName] = useState("");
+  const [aiAgent, setAiAgent] = useState<string>("");
+  const [riskLevel, setRiskLevel] = useState<SprintTask["riskLevel"]>("low");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError("Title is required");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      const payload: NewTaskInput = {
+        title: title.trim(),
+        type,
+        priority,
+        story_points: Number.isFinite(storyPoints) ? storyPoints : 3,
+        risk_level: riskLevel,
+        ...(ownerName.trim() ? { owner_name: ownerName.trim() } : {}),
+        ...(aiAgent ? { ai_agent: aiAgent } : {}),
+      };
+      await onSubmit(payload);
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create task");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md">
+        <Card
+          eyebrow={
+            <div className="flex items-center justify-between gap-2">
+              <span>NEW TASK</span>
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-ink-4 hover:text-ink-2 transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          }
+          title="Create a task"
+        >
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">TITLE</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                autoFocus
+                required
+                className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                placeholder="Convert customer DDL to Snowflake"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">TYPE</label>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value as SprintTask["type"])}
+                  className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                >
+                  {TASK_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">PRIORITY</label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as SprintTask["priority"])}
+                  className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                >
+                  {PRIORITIES.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">STORY POINTS</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={storyPoints}
+                  onChange={(e) => setStoryPoints(Number(e.target.value))}
+                  className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                />
+              </div>
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">RISK</label>
+                <select
+                  value={riskLevel}
+                  onChange={(e) => setRiskLevel(e.target.value as SprintTask["riskLevel"])}
+                  className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                >
+                  {RISK_LEVELS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">OWNER (optional)</label>
+              <input
+                type="text"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                placeholder="e.g. Alex Chen"
+              />
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">AI AGENT</label>
+              <select
+                value={aiAgent}
+                onChange={(e) => setAiAgent(e.target.value)}
+                className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+              >
+                {AI_AGENTS.map((a) => (
+                  <option key={a || "none"} value={a}>
+                    {a || "— none —"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {error && (
+              <div className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
+                {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" loading={saving}>
+                Create task
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </div>
     </div>
   );
 }

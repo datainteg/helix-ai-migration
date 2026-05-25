@@ -370,3 +370,88 @@ export async function decideApproval(token: string | null, approvalId: string, d
 export async function seedSprints(token: string | null, projectId: string): Promise<{ sprints_created: number }> {
   return req(`/projects/${projectId}/sprints/seed`, token, { method: "POST" });
 }
+
+// ── Create paths ─────────────────────────────────────────────────────
+
+export interface NewSprintInput {
+  name: string;
+  goal?: string;
+  status?: Sprint["status"];
+  health?: Sprint["health"];
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function createSprint(
+  token: string | null,
+  projectId: string,
+  input: NewSprintInput,
+): Promise<Sprint> {
+  const row = await req<WireSprint>(`/projects/${projectId}/sprints`, token, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return sprintFromWire(row);
+}
+
+export interface NewTaskInput {
+  title: string;
+  type: SprintTask["type"];
+  status?: SprintTask["status"];
+  priority?: SprintTask["priority"];
+  owner_name?: string;
+  owner_kind?: "human" | "agent";
+  ai_agent?: string;
+  risk_level?: SprintTask["riskLevel"];
+  story_points?: number;
+  estimated_hours?: number;
+}
+
+export async function createTask(
+  token: string | null,
+  sprintId: string,
+  input: NewTaskInput,
+): Promise<SprintTask> {
+  const row = await req<WireTask>(`/sprints/${sprintId}/tasks`, token, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return taskFromWire(row);
+}
+
+// ── SSE execution stream ────────────────────────────────────────────
+
+/**
+ * Subscribe to /projects/{id}/sprints/executions/stream as an EventSource.
+ * Returns the EventSource handle — caller is responsible for `.close()`.
+ * `onSnapshot` fires for every "snapshot" frame (every 2s, contains the
+ * latest 50 executions). `onError` fires on network/parse failure.
+ *
+ * Auth: EventSource can't send custom headers, so the JWT is passed as a
+ * `?token=` query string. Backend already enforces org scope after JWT
+ * decode, so this is no weaker than the header path.
+ */
+export function subscribeToExecutions(
+  token: string | null,
+  projectId: string,
+  onSnapshot: (rows: AgentExecution[]) => void,
+  onError?: (e: Event) => void,
+): EventSource | null {
+  if (!token) return null;
+  const url = `${API_BASE}/api/v1/projects/${projectId}/sprints/executions/stream?token=${encodeURIComponent(token)}`;
+  const es = new EventSource(url);
+  es.addEventListener("message", (ev) => {
+    try {
+      const payload = JSON.parse(ev.data) as
+        | { type: "snapshot"; rows: WireExecution[]; new_count: number }
+        | { type: "timeout" };
+      if (payload.type === "snapshot") {
+        onSnapshot(payload.rows.map(executionFromWire));
+      }
+    } catch {
+      /* ignore malformed frames — server keeps streaming */
+    }
+  });
+  if (onError) es.addEventListener("error", onError);
+  return es;
+}

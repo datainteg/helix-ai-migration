@@ -167,3 +167,22 @@ class AgentExecutionRecord(BaseModel):
     retries         = Column(Integer, default=0, nullable=False)
     mode            = Column(String(10), default="llm", nullable=False)
     log             = Column(Text, nullable=True)
+
+
+class SprintTaskHistory(BaseModel):
+    """Append-only audit of task status transitions.
+
+    One row written every time `update_task_status` runs. Lets burndown
+    reconstruct from real timestamps instead of straight-line interp.
+    Indexed on (sprint_id, created_at) so the burndown query is a
+    single seek.
+    """
+    __tablename__ = "sprint_task_history"
+
+    organization_id = Column(String(36), nullable=False, index=True)
+    sprint_id       = Column(String(36), ForeignKey("sprints.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id         = Column(String(36), ForeignKey("sprint_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_status     = Column(String(40), nullable=True)
+    to_status       = Column(String(40), nullable=False)
+    story_points    = Column(Integer, default=0, nullable=False)
+    changed_by      = Column(String(36), nullable=True)

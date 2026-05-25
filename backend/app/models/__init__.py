@@ -10,4 +10,5 @@ from app.models.workflow import WorkflowRun, WorkflowStep  # noqa: F401
 from app.models.sprint import (  # noqa: F401
     Sprint, SprintTask, SprintRisk, SprintApproval,
     MigrationRelease, MappingNode, MappingEdge, AgentExecutionRecord,
+    SprintTaskHistory,
 )

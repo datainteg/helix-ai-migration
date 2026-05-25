@@ -8,9 +8,9 @@
  * sprint as a card, and the urgent footer (approvals + risks).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { Download, Plus } from "lucide-react";
+import { Download, Plus, X } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { Button, Card, EmptyState, LoadingState, MetricCell } from "@/components/ui";
@@ -25,6 +25,7 @@ import {
 } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
 import {
+  createSprint,
   fetchSprints,
   fetchActiveSprint,
   fetchVelocity,
@@ -33,6 +34,7 @@ import {
   fetchBurndown,
   seedSprints,
   type BurndownPoint,
+  type NewSprintInput,
   type Sprint,
   type SprintApproval,
   type SprintRisk,
@@ -52,6 +54,22 @@ export default function SprintDashboardPage() {
   const [burndown, setBurndown] = useState<BurndownPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [showNewSprint, setShowNewSprint] = useState(false);
+
+  const refetchSprints = useCallback(() => {
+    if (!token || !projectId) return;
+    Promise.all([
+      fetchSprints(token, projectId),
+      fetchActiveSprint(token, projectId),
+      fetchVelocity(token, projectId),
+    ])
+      .then(([list, act, vel]) => {
+        setSprints(list);
+        setActive(act);
+        setVelocity(vel);
+      })
+      .catch(() => {});
+  }, [token, projectId]);
 
   useEffect(() => {
     if (!token || !projectId) {
@@ -126,18 +144,40 @@ export default function SprintDashboardPage() {
         eyebrow={`SPRINTS · ${projectId}`}
         title="Sprint dashboard"
         crumbs={["Projects", projectId, "Sprints", "Dashboard"]}
+        actions={
+          <Button variant="outline" onClick={() => setShowNewSprint(true)}>
+            <Plus className="h-4 w-4" /> New sprint
+          </Button>
+        }
       >
         <Card>
           <EmptyState
             title="No sprints yet"
-            description="Run the seed to populate demo sprints, or create one from the API."
+            description="Run the seed to populate demo sprints, or create one manually."
             action={
-              <Button variant="primary" loading={seeding} onClick={handleSeed}>
-                Run seed
-              </Button>
+              <div className="flex gap-2 justify-center">
+                <Button variant="outline" onClick={() => setShowNewSprint(true)}>
+                  <Plus className="h-4 w-4" /> New sprint
+                </Button>
+                <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                  Run seed
+                </Button>
+              </div>
             }
           />
         </Card>
+        {showNewSprint && (
+          <NewSprintModal
+            onClose={() => setShowNewSprint(false)}
+            onCreated={() => {
+              setShowNewSprint(false);
+              refetchSprints();
+            }}
+            onSubmit={(form) =>
+              createSprint(token, projectId, form).then(() => undefined)
+            }
+          />
+        )}
       </AppShell>
     );
   }
@@ -156,12 +196,28 @@ export default function SprintDashboardPage() {
           <Button variant="outline">
             <Download className="h-4 w-4" /> Export
           </Button>
+          <Button variant="outline" onClick={() => setShowNewSprint(true)}>
+            <Plus className="h-4 w-4" /> New sprint
+          </Button>
           <Button variant="primary">
             <Plus className="h-4 w-4" /> Start sprint
           </Button>
         </>
       }
     >
+      {showNewSprint && (
+        <NewSprintModal
+          onClose={() => setShowNewSprint(false)}
+          onCreated={() => {
+            setShowNewSprint(false);
+            refetchSprints();
+          }}
+          onSubmit={(form) =>
+            createSprint(token, projectId, form).then(() => undefined)
+          }
+        />
+      )}
+
       {/* ── Top metric strip ────────────────────────────────────── */}
       <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-hx mb-6">
         <MetricCell
@@ -258,5 +314,154 @@ export default function SprintDashboardPage() {
         </Card>
       </div>
     </AppShell>
+  );
+}
+
+// ── New Sprint Modal ─────────────────────────────────────────────────
+
+function NewSprintModal({
+  onClose,
+  onCreated,
+  onSubmit,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+  onSubmit: (input: NewSprintInput) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
+  const [status, setStatus] = useState<"planning" | "active">("planning");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      const payload: NewSprintInput = {
+        name: name.trim(),
+        status,
+        ...(goal.trim() ? { goal: goal.trim() } : {}),
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {}),
+      };
+      await onSubmit(payload);
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create sprint");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-md">
+        <Card
+          eyebrow={
+            <div className="flex items-center justify-between gap-2">
+              <span>NEW SPRINT</span>
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-ink-4 hover:text-ink-2 transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          }
+          title="Create a sprint"
+        >
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">NAME</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+                required
+                className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                placeholder="Sprint 4 — Validation"
+              />
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">GOAL</label>
+              <textarea
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                rows={3}
+                className="w-full px-2.5 py-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring resize-none"
+                placeholder="Optional sprint goal"
+              />
+            </div>
+            <div>
+              <label className="eyebrow text-[10px] mb-1 block">STATUS</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as "planning" | "active")}
+                className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+              >
+                <option value="planning">planning</option>
+                <option value="active">active</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">START</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                />
+              </div>
+              <div>
+                <label className="eyebrow text-[10px] mb-1 block">END</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
+                />
+              </div>
+            </div>
+            {error && (
+              <div className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
+                {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" loading={saving}>
+                Create sprint
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </div>
+    </div>
   );
 }

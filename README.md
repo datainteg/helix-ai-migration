@@ -10,7 +10,7 @@ Salesforce → Snowflake, Oracle → Databricks, SQL Server → Snowflake, and m
 > pipeline produce real markdown artifacts you can review, approve, and ship.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-
+ 
 ---
 
 ## What it does

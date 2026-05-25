@@ -17,9 +17,9 @@ import { AgentIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
 import {
   fetchActiveSprint,
-  fetchExecutions,
   fetchTasks,
   seedSprints,
+  subscribeToExecutions,
   type AgentExecution,
   type Sprint,
   type SprintTask,
@@ -67,23 +67,46 @@ export default function SprintExecutionPage() {
   const [tasks, setTasks] = useState<SprintTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [streamLive, setStreamLive] = useState(false);
 
+  // Active sprint lookup is a one-shot fetch (independent of the SSE stream).
   useEffect(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    Promise.all([
-      fetchExecutions(token, projectId),
-      fetchActiveSprint(token, projectId),
-    ])
-      .then(([ex, act]) => {
-        setExecutions(ex);
-        setActive(act);
-      })
+    fetchActiveSprint(token, projectId)
+      .then((act) => setActive(act))
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  // SSE execution stream — replaces the prior single-fetch.
+  useEffect(() => {
+    if (!token || !projectId) {
+      setStreamLive(false);
+      return;
+    }
+    const es = subscribeToExecutions(
+      token,
+      projectId,
+      (rows) => {
+        setExecutions(rows);
+        setStreamLive(true);
+      },
+      () => {
+        setStreamLive(false);
+      },
+    );
+    if (!es) {
+      setStreamLive(false);
+      return;
+    }
+    return () => {
+      es.close();
+      setStreamLive(false);
+    };
   }, [token, projectId]);
 
   useEffect(() => {
@@ -164,6 +187,23 @@ export default function SprintExecutionPage() {
       crumbs={["Projects", projectId, "Sprints", "Execution"]}
       actions={
         <>
+          {streamLive ? (
+            <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[7px] bg-[var(--con-ok-soft)] text-ok text-[11.5px] font-medium">
+              <span
+                className="h-1.5 w-1.5 rounded-full animate-pulse-dot"
+                style={{ background: "var(--con-ok)" }}
+              />
+              Live
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[7px] bg-[var(--con-warn-soft)] text-warn text-[11.5px] font-medium">
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--con-warn)" }}
+              />
+              Disconnected
+            </span>
+          )}
           <Button variant="outline">
             <Pause className="h-4 w-4" /> Pause queue
           </Button>

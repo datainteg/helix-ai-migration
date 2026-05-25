@@ -7,7 +7,10 @@ decisions + the seed trigger. Org scope is enforced by
 inside every service call.
 """
 
+import asyncio
+import json
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -20,10 +23,11 @@ from app.services.sprint_service import (
     list_risks_for_sprint, list_approvals_for_sprint, decide_approval,
     list_releases, get_mapping_graph, list_executions,
     compute_velocity, compute_burndown,
+    create_sprint, create_task,
 )
 from app.services.sprint_seed import seed_sprints_for_project
 from app.schemas.sprint import (
-    SprintResponse, SprintTaskResponse, SprintTaskUpdate,
+    SprintCreate, SprintResponse, SprintTaskCreate, SprintTaskResponse, SprintTaskUpdate,
     SprintRiskResponse, SprintApprovalResponse, ApprovalDecision,
     MigrationReleaseResponse, MappingGraphOut, MappingNodeOut, MappingEdgeOut,
     AgentExecutionOut, VelocityPointOut, BurndownPointOut, SeedResult,
@@ -91,6 +95,75 @@ def api_executions(
     return list_executions(db, org_id, project_id, limit=limit)
 
 
+@router.get("/projects/{project_id}/sprints/executions/stream")
+async def api_executions_stream(
+    project_id: str,
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """SSE stream of agent executions. Auth via `?token=` query param
+    because the browser EventSource API can't send custom headers — JWT
+    is decoded inline below, then the same org-scope check applies.
+
+    Pushes a snapshot frame every 2s with the latest 50 executions.
+    Connection auto-closes after 5 minutes; EventSource auto-reconnects
+    on the client by default."""
+    from app.auth.jwt import decode_access_token
+    from app.auth.dependencies import resolve_active_org_id
+
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("missing sub")
+        org_id = resolve_active_org_id(db, user_id)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid stream token")
+
+    ensure_project_access(db, org_id, project_id)
+
+    async def event_generator():
+        seen_ids: set[str] = set()
+        # ~150 iterations * 2s = 5 minutes max
+        for _ in range(150):
+            rows = list_executions(db, org_id, project_id, limit=50)
+            new_rows = [r for r in rows if r.id not in seen_ids]
+            for r in new_rows:
+                seen_ids.add(r.id)
+            payload = {
+                "type": "snapshot",
+                "rows": [
+                    {
+                        "id": r.id,
+                        "agent_code": r.agent_code,
+                        "task_id": r.task_id,
+                        "status": r.status,
+                        "started_at": str(r.started_at) if r.started_at else None,
+                        "duration_ms": r.duration_ms,
+                        "retries": r.retries,
+                        "mode": r.mode,
+                        "log": r.log,
+                    }
+                    for r in rows
+                ],
+                "new_count": len(new_rows),
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+            await asyncio.sleep(2)
+        yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.get("/projects/{project_id}/sprints/releases", response_model=list[MigrationReleaseResponse])
 def api_releases(
     project_id: str,
@@ -149,6 +222,49 @@ def api_burndown(
 
 
 # ── Mutations ──────────────────────────────────────────────────────
+
+@router.post("/projects/{project_id}/sprints", response_model=SprintResponse, status_code=201)
+def api_create_sprint(
+    project_id: str,
+    data: SprintCreate,
+    request: Request,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Create a new sprint under a project. Index auto-assigned if omitted."""
+    ensure_project_access(db, org_id, project_id)
+    sp = create_sprint(db, org_id, project_id, data)
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="sprint_created",
+        entity_type="sprint", entity_id=sp.id,
+        meta={"name": sp.name, "project_id": project_id},
+        request=request,
+    )
+    return sp
+
+
+@router.post("/sprints/{sprint_id}/tasks", response_model=SprintTaskResponse, status_code=201)
+def api_create_task(
+    sprint_id: str,
+    data: SprintTaskCreate,
+    request: Request,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Create a task inside a sprint."""
+    task = create_task(db, org_id, sprint_id, data)
+    write_audit(
+        db, org_id=org_id, actor_id=user_id,
+        action="sprint_task_created",
+        entity_type="sprint_task", entity_id=task.id,
+        meta={"title": task.title, "sprint_id": sprint_id},
+        request=request,
+    )
+    return task
+
 
 @router.patch("/sprint-tasks/{task_id}", response_model=SprintTaskResponse)
 def api_patch_task(
