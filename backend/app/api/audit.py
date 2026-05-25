@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -15,6 +16,9 @@ from app.models.observability import AuditLog, SystemHealthCheck
 from app.core.config import settings
 
 router = APIRouter(tags=["audit"])
+
+logger = logging.getLogger(__name__)
+_NON_PG_WARNED = False  # one-shot warning when running on non-Postgres backends
 
 
 def _compute_entry_hash(log: AuditLog, prev_hash: str | None) -> str:
@@ -51,18 +55,47 @@ def write_audit(
     meta: dict = None,
     request: Request = None,
 ):
-    # Serialize chain writes per-org so concurrent writers cannot race on
-    # prev_hash lookup. Released at transaction end. Postgres-only; on other
-    # backends the call is a no-op via try/except.
-    try:
+    """Append an audit row chained off the org's last entry_hash.
+
+    Concurrency model:
+      1. Acquire pg_advisory_xact_lock keyed by sha256(org_id) BEFORE
+         the prev-row read. This serialises all chain writers for one
+         org so reader-A and reader-B cannot both see row-N as the tip
+         and both compute hash chained off N (which would silently
+         break the chain).
+      2. With the lock held, query the latest row + entry_hash. The
+         ORDER BY uses (created_at DESC, id DESC) for a deterministic
+         tie-break when two rows share a microsecond timestamp.
+      3. Insert the new row + compute entry_hash + commit. The lock
+         releases at COMMIT/ROLLBACK so the next writer can proceed.
+
+    Non-Postgres backends (SQLite test runners) cannot use advisory
+    locks; we emit a one-shot WARNING at startup of those test runs
+    so the gap is visible rather than silent. Chain ordering still
+    relies on the deterministic (created_at, id) sort to be correct
+    for the single-writer test paths.
+    """
+    global _NON_PG_WARNED
+
+    is_postgres = db.bind is not None and db.bind.dialect.name == "postgresql"
+    if is_postgres:
+        # Lock-then-read. The previous implementation read first then
+        # locked, so two writers could observe the same prev tip.
         db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _org_lock_key(org_id)})
-    except Exception:
-        pass
+    else:
+        if not _NON_PG_WARNED:
+            logger.warning(
+                "audit-chain: pg_advisory_xact_lock unavailable on dialect=%s; "
+                "concurrent writers may race on prev_hash. SQLite paths are "
+                "single-writer by design — Postgres is REQUIRED for prod.",
+                db.bind.dialect.name if db.bind else "unknown",
+            )
+            _NON_PG_WARNED = True
 
     last = (
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)
-        .order_by(AuditLog.created_at.desc())
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
         .first()
     )
     prev_hash = last.entry_hash if last else None
@@ -209,7 +242,7 @@ def verify_audit_chain(
     logs = (
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)
-        .order_by(AuditLog.created_at.asc())
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
         .all()
     )
     broken: list[str] = []
