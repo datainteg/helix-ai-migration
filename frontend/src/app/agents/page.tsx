@@ -8,7 +8,7 @@
  * endpoints land.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   File as FileIcon,
@@ -29,6 +29,8 @@ import {
   Tabs,
   DemoBanner,
 } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
+import { listOrgWorkflowRuns, type WorkflowRun as ApiWorkflowRun } from "@/lib/workflows/api";
 
 // ─── Demo data — TODO: hydrate from API ────────────────────────────
 
@@ -134,16 +136,49 @@ function groupOf(phase: string): PhaseKey {
 // ─── Page ───────────────────────────────────────────────────────────
 
 export default function AgentsPage() {
-  const firstRun = WORKFLOW_RUNS[0]!;
+  const { token } = useAuth();
+  const [realRuns, setRealRuns] = useState<ApiWorkflowRun[] | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    listOrgWorkflowRuns(token, 100)
+      .then((rows) => { if (!cancelled) setRealRuns(rows); })
+      .catch(() => { if (!cancelled) setRealRuns([]); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // Pipeline/timeline visualisations stay backed by BMAD_PIPELINE demo data
+  // until per-run step detail is wired (next workstream). Top-level run list,
+  // counts, and selection use real backend data when present.
+  const displayRuns: WorkflowRun[] = (realRuns && realRuns.length > 0)
+    ? realRuns.map((r) => ({
+        id: r.workflow_id,
+        project: r.project_id,
+        status: r.status,
+        started: r.created_at ? new Date(r.created_at).toLocaleTimeString() : "—",
+        mode: r.mode,
+        steps: "—",
+        duration: "—",
+      }))
+    : WORKFLOW_RUNS;
+
+  const firstRun = displayRuns[0]!;
   const [selectedRun, setSelectedRun] = useState<string>(firstRun.id);
   const [layout, setLayout] = useState<string>("linear");
-  const run = WORKFLOW_RUNS.find((r) => r.id === selectedRun) ?? firstRun;
+  const run = displayRuns.find((r) => r.id === selectedRun) ?? firstRun;
+
+  const runningCount = displayRuns.filter((r) => r.status === "running" || r.status === "started").length;
+  const awaitingCount = displayRuns.filter((r) => r.status === "awaiting" || r.status === "awaiting_approval" || r.status === "pending").length;
+  const failedCount = displayRuns.filter((r) => r.status === "failed" || r.status === "rejected" || r.status === "expired").length;
+  const metricLine = `${displayRuns.length} runs · ${awaitingCount} awaiting · ${failedCount} failed`;
+  const usingRealData = (realRuns?.length ?? 0) > 0;
 
   return (
     <AppShell
       eyebrow="BMAD MULTI-AGENT ORCHESTRATION"
       title="Agent workflows"
-      metric="6 runs · 1 awaiting · 1 failed"
+      metric={metricLine}
       description="Live view of the 13-node BMAD migration pipeline. Mary → John → Sally → Winston → Amelia → Paige."
       actions={
         <>
@@ -161,11 +196,13 @@ export default function AgentsPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <DemoBanner message="The agents canvas renders example runs. Hook this up to /workflows/{id} once your first BMAD run lands." />
+        {!usingRealData && (
+          <DemoBanner message="Run list shown here is sample. Once your first BMAD workflow lands the table populates from /agent-workflows." />
+        )}
         {layout === "phases" ? (
-          <PhasesView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+          <PhasesView run={run} runs={displayRuns} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
         ) : (
-          <LinearView run={run} runs={WORKFLOW_RUNS} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+          <LinearView run={run} runs={displayRuns} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
         )}
       </div>
     </AppShell>

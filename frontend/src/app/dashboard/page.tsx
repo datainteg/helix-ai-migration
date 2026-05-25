@@ -9,8 +9,11 @@
  */
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Plus } from "lucide-react";
+
+import { useAuth } from "@/lib/auth-context";
+import { fetchDashboardStats, type DashboardStats } from "@/lib/dashboard/api";
 
 import { AppShell } from "@/components/layout";
 import {
@@ -94,6 +97,19 @@ const fmt = {
 
 export default function DashboardPage() {
   const [trendRange, setTrendRange] = useState("30");
+  const { token } = useAuth();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    fetchDashboardStats(token)
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch(() => { if (!cancelled) setStats(null); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const fmtPct = (v: number | null) => (v === null ? "—" : `${v.toFixed(1)}%`);
 
   return (
     <AppShell
@@ -116,14 +132,34 @@ export default function DashboardPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <DemoBanner message="The dashboard renders sample metrics. Real numbers populate once projects, workflows, and validation runs exist." />
-        {/* Metric strip */}
+        {stats?.hasAnyData ? null : (
+          <DemoBanner message="Charts and tables below are sample. Once you create a project and run a workflow, the metric strip + workflow tiles populate from real data." />
+        )}
+        {/* Metric strip — top-row metrics are real; pass/recon/success need
+            cross-project aggregation that the API does not expose yet. */}
         <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
-          <MetricCell big label="ACTIVE PROJECTS"  value="24"    hint="+3 this week" delta={14} />
-          <MetricCell big label="VALIDATION PASS"  value="92.4%" hint="30-day avg"   delta={1.2} />
-          <MetricCell big label="RECON SCORE"      value="96.5%" hint="All targets"  delta={0.4} />
-          <MetricCell big label="PENDING APPROVAL" value="18"    hint="6 over 24h"   delta={-8} accent="var(--con-warn)" />
-          <MetricCell big label="AGENT SUCCESS"    value="95.2%" hint="6 agents"     delta={2.1} />
+          <MetricCell big label="ACTIVE PROJECTS"
+            value={stats ? String(stats.activeProjects) : "—"}
+            hint={stats ? `${stats.archivedProjects} archived` : "loading…"}
+          />
+          <MetricCell big label="WORKFLOWS RUNNING"
+            value={stats ? String(stats.workflowsRunning) : "—"}
+            hint={stats ? `${stats.totalWorkflows} total` : "loading…"}
+          />
+          <MetricCell big label="PENDING APPROVAL"
+            value={stats ? String(stats.workflowsPending) : "—"}
+            hint={stats ? "awaiting human review" : "loading…"}
+            accent={stats && stats.workflowsPending > 0 ? "var(--con-warn)" : undefined}
+          />
+          <MetricCell big label="COMPLETED"
+            value={stats ? String(stats.workflowsCompleted) : "—"}
+            hint={stats ? "approved + signed-off" : "loading…"}
+          />
+          <MetricCell big label="FAILED"
+            value={stats ? String(stats.workflowsFailed) : "—"}
+            hint={stats ? "rejected + expired" : "loading…"}
+            accent={stats && stats.workflowsFailed > 0 ? "var(--con-err)" : undefined}
+          />
         </div>
 
         {/* Trend + Validation outcomes */}

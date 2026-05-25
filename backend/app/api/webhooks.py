@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.session import get_db
 from app.auth.dependencies import require_permission, resolve_active_org_id
@@ -8,6 +8,7 @@ from app.services.secret_service import encrypt_value
 from app.security.ssrf import SSRFViolation, validate_external_url
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
 from app.api.audit import write_audit
+from app.rate_limiting import limiter
 
 router = APIRouter(tags=["webhooks"])
 
@@ -19,10 +20,13 @@ def _resolve_org_id(db: Session, user_id: str) -> str:
 
 
 class WebhookCreate(BaseModel):
-    url: str
-    secret: str | None = None
-    events: str = "*"
-    description: str | None = None
+    # Length cap + non-empty constraint provides a quick reject before the SSRF
+    # validator runs and resolves DNS. Cheaper for the rate-limited endpoint
+    # under burst load.
+    url: str = Field(min_length=8, max_length=2048)
+    secret: str | None = Field(default=None, max_length=512)
+    events: str = Field(default="*", max_length=512)
+    description: str | None = Field(default=None, max_length=512)
 
 
 @router.get("/webhooks")
@@ -33,6 +37,7 @@ def list_webhooks(user_id: str = Depends(require_permission("admin:llm:read")), 
 
 
 @router.post("/webhooks", status_code=201)
+@limiter.limit("30/minute")
 def create_webhook(
     request: Request,
     data: WebhookCreate,
@@ -63,6 +68,7 @@ def create_webhook(
 
 
 @router.patch("/webhooks/{webhook_id}")
+@limiter.limit("30/minute")
 def update_webhook(
     request: Request,
     webhook_id: str,

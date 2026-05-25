@@ -8,7 +8,11 @@
  * endpoints land.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { useAuth } from "@/lib/auth-context";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 import {
   AlertTriangle,
   Download,
@@ -99,8 +103,20 @@ const RECON_TREND = [
 ];
 
 export default function ValidationPage() {
+  const { token } = useAuth();
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [hasProjects, setHasProjects] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/projects?limit=1`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: unknown[]) => { if (!cancelled) setHasProjects(rows.length > 0); })
+      .catch(() => { if (!cancelled) setHasProjects(false); });
+    return () => { cancelled = true; };
+  }, [token]);
 
   const total = VALIDATION_CHECKS.length;
   const passed = VALIDATION_CHECKS.filter((c) => c.status === "passed").length;
@@ -144,7 +160,12 @@ export default function ValidationPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <DemoBanner message="Validation rules and runs shown here are sample data. Once you POST /projects/{id}/validation-runs the table will populate live." />
+        {hasProjects === false && (
+          <DemoBanner message="No projects yet. Create one in /projects/new, attach validation rules with POST /projects/{id}/validation-rules, then runs land here." />
+        )}
+        {hasProjects === true && (
+          <DemoBanner message="Pass-rate + distribution panels still show sample data. Per-project drill-in via the projects list populates real rule + run rows." />
+        )}
         {/* Top: pass rate hero + distribution */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
           <Card padding="lg">

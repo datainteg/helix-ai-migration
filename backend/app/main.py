@@ -71,9 +71,23 @@ _MAX_BODY_BYTES = (settings.MAX_UPLOAD_MB + 1) * 1024 * 1024
 
 @app.middleware("http")
 async def enforce_body_size(request: Request, call_next):
+    """Reject oversized requests up front.
+
+    Checks Content-Length (cheap, catches well-behaved clients) AND the raw
+    incoming body length AFTER buffering (catches chunked uploads that omit
+    Content-Length). For multipart uploads the per-file validation in
+    storage/local.py still applies on top of this.
+    """
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BODY_BYTES:
-        return JSONResponse(status_code=413, content={"detail": f"Request body exceeds {settings.MAX_UPLOAD_MB + 1} MB limit"})
+    if content_length:
+        try:
+            if int(content_length) > _MAX_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body exceeds {settings.MAX_UPLOAD_MB + 1} MB limit"},
+                )
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
     return await call_next(request)
 
 

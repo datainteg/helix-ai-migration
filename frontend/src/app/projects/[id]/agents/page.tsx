@@ -1,11 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Play, Save } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
-import { Card, Button, StatusBadge, Avatar, Chip, DemoBanner } from "@/components/ui";
+import { Card, Button, StatusBadge, Avatar, Chip, DemoBanner, LoadingState } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
+import {
+  listProjectWorkflowRuns,
+  getWorkflowDetail,
+  type WorkflowRun,
+  type WorkflowDetail,
+} from "@/lib/workflows/api";
 
-const FLOW = [
+const DEMO_FLOW = [
   { id: "intake", label: "Requirement Intake", phase: "Input", color: "indigo" as const, status: "completed" },
   { id: "ba", label: "BA Agent", phase: "Analysis", color: "indigo" as const, status: "completed" },
   { id: "arch", label: "Architect Agent", phase: "Design", color: "violet" as const, status: "running" },
@@ -17,64 +25,138 @@ const FLOW = [
   { id: "final", label: "PM · Final", phase: "Sign-off", color: "default" as const, status: "pending" },
 ];
 
+const AGENT_PHASE: Record<string, { label: string; color: "indigo" | "violet" | "cyan" | "amber" | "green" | "default" }> = {
+  project_context: { label: "Setup", color: "default" },
+  analyst:          { label: "Analysis", color: "indigo" },
+  pm:               { label: "Planning", color: "indigo" },
+  ux_designer:      { label: "Planning", color: "indigo" },
+  architect:        { label: "Design", color: "violet" },
+  architect_stories:{ label: "Design", color: "violet" },
+  architect_readiness:{ label: "Design", color: "violet" },
+  approval_gate:    { label: "Gate", color: "amber" },
+  dev_story:        { label: "Build", color: "cyan" },
+  dev:              { label: "Build", color: "cyan" },
+  qa:               { label: "Validate", color: "green" },
+  code_review:      { label: "Validate", color: "green" },
+  tech_writer:      { label: "Docs", color: "default" },
+};
+
 export default function ProjectAgentsPage() {
   const { id } = useParams<{ id: string }>();
+  const { token } = useAuth();
+  const [runs, setRuns] = useState<WorkflowRun[] | null>(null);
+  const [active, setActive] = useState<WorkflowDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!token || !id) return;
+    let cancelled = false;
+    setLoading(true);
+    listProjectWorkflowRuns(token, String(id), 20)
+      .then(async (rows) => {
+        if (cancelled) return;
+        setRuns(rows);
+        if (rows.length > 0) {
+          try {
+            const detail = await getWorkflowDetail(token, rows[0].workflow_id);
+            if (!cancelled) setActive(detail);
+          } catch {
+            if (!cancelled) setActive(null);
+          }
+        }
+      })
+      .catch(() => { if (!cancelled) setRuns([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [token, id]);
+
+  const flow = active && active.steps.length > 0
+    ? active.steps.map((s, idx) => {
+        const meta = AGENT_PHASE[s.agent_name] ?? { label: "Step", color: "default" as const };
+        return {
+          id: `step-${idx}`,
+          label: s.agent_name.replace(/_/g, " "),
+          phase: meta.label,
+          color: meta.color,
+          status: s.status,
+        };
+      })
+    : DEMO_FLOW;
+  const usingReal = (runs?.length ?? 0) > 0 && active !== null;
+
   return (
     <ProjectShell
       projectId={String(id)}
       projectName="Untitled project"
-      projectStatus="draft"
+      projectStatus={active ? (active.status as any) : "draft"}
       subtitle="Multi-agent workflow canvas with execution log and artifacts."
       actions={<>
         <Button variant="outline"><Save className="h-4 w-4" /> Save</Button>
         <Button><Play className="h-4 w-4" /> Run Workflow</Button>
       </>}
     >
-      <div className="mb-4"><DemoBanner message="The 9-node flow shown here is a static preview. Trigger a BMAD workflow run to populate this canvas with real per-agent state." /></div>
-      <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-12 lg:col-span-8" title="Workflow Canvas">
-          <div className="space-y-3">
-            {FLOW.map((n) => (
-              <div key={n.id} className="flex items-center gap-3">
-                <FlowNode {...n} />
-              </div>
-            ))}
-          </div>
-        </Card>
-        <div className="col-span-12 lg:col-span-4 space-y-4">
-          <Card title="Workflow Details">
-            <dl className="space-y-3 text-[13px]">
-              <div>
-                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Mode</dt>
-                <dd className="mt-0.5 text-ink-2">BMAD · Auto with gates</dd>
-              </div>
-              <div>
-                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Status</dt>
-                <dd className="mt-0.5"><StatusBadge status="running" /></dd>
-              </div>
-              <div>
-                <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Approvers</dt>
-                <dd className="mt-1 flex -space-x-2"><Avatar name="Avery Johnson" /><Avatar name="Mei Chen" /><Avatar name="Sofia Marin" /></dd>
-              </div>
-            </dl>
-          </Card>
-          <Card title="Human Approval">
-            <p className="text-[12.5px] text-ink-3">Review the Architect Agent output before proceeding to execution agents.</p>
-            <div className="mt-3 flex flex-col gap-2">
-              <Button className="w-full justify-center">Approve</Button>
-              <Button variant="outline" className="w-full justify-center">Request changes</Button>
-              <Button variant="danger" className="w-full justify-center">Reject</Button>
+      {loading ? (
+        <LoadingState label="Loading workflow runs…" />
+      ) : (
+        <>
+          {!usingReal && (
+            <div className="mb-4">
+              <DemoBanner message="No workflow runs for this project yet. The flow below is a static preview; Start Workflow above will replace it with real per-agent state." />
             </div>
-          </Card>
-          <Card title="Output Artifacts">
-            <ul className="space-y-1.5 text-[12.5px]">
-              <li className="flex justify-between text-ink-2"><span>plan_v1.md</span><Chip tone="indigo">Plan</Chip></li>
-              <li className="flex justify-between text-ink-2"><span>ddl.sql</span><Chip tone="violet">DDL</Chip></li>
-              <li className="flex justify-between text-ink-2"><span>migrate.py</span><Chip tone="cyan">Code</Chip></li>
-            </ul>
-          </Card>
-        </div>
-      </div>
+          )}
+          <div className="grid grid-cols-12 gap-4">
+            <Card className="col-span-12 lg:col-span-8" title="Workflow Canvas">
+              <div className="space-y-3">
+                {flow.map((n) => (
+                  <div key={n.id} className="flex items-center gap-3">
+                    <FlowNode {...n} />
+                  </div>
+                ))}
+              </div>
+            </Card>
+            <div className="col-span-12 lg:col-span-4 space-y-4">
+              <Card title="Workflow Details">
+                <dl className="space-y-3 text-[13px]">
+                  <div>
+                    <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Mode</dt>
+                    <dd className="mt-0.5 text-ink-2">{active?.mode ?? "BMAD · Auto with gates"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Status</dt>
+                    <dd className="mt-0.5"><StatusBadge status={active?.status ?? "draft"} /></dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11.5px] uppercase tracking-wider text-ink-4 font-medium">Workflow ID</dt>
+                    <dd className="mt-0.5 font-mono text-[11.5px] text-ink-3">{active?.workflow_id ?? "—"}</dd>
+                  </div>
+                </dl>
+              </Card>
+              <Card title="Human Approval">
+                <p className="text-[12.5px] text-ink-3">Review the Architect Agent output before proceeding to execution agents.</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Button className="w-full justify-center">Approve</Button>
+                  <Button variant="outline" className="w-full justify-center">Request changes</Button>
+                  <Button variant="danger" className="w-full justify-center">Reject</Button>
+                </div>
+              </Card>
+              <Card title="Output Artifacts">
+                {active && active.steps.some((s) => s.artifact_path) ? (
+                  <ul className="space-y-1.5 text-[12.5px]">
+                    {active.steps.filter((s) => s.artifact_path).map((s, i) => (
+                      <li key={`art-${i}`} className="flex justify-between text-ink-2 gap-2 min-w-0">
+                        <span className="truncate font-mono text-[11.5px]">{s.artifact_path?.split(/[\\/]/).pop()}</span>
+                        <Chip tone="indigo">{s.agent_name.replace(/_/g, " ")}</Chip>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[12.5px] text-ink-3">No artifacts yet.</p>
+                )}
+              </Card>
+            </div>
+          </div>
+        </>
+      )}
     </ProjectShell>
   );
 }
