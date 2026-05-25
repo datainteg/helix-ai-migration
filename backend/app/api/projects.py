@@ -28,6 +28,9 @@ from app.services.connector_service import (
 )
 from app.rate_limiting import limiter
 from app.api.audit import write_audit
+# SEC-015: stored configs must hit the same host allowlist as freshly
+# submitted configs — re-import the connectors-router enforcer here.
+from app.api.connectors import _enforce_host_allowlist
 
 router = APIRouter(tags=["projects"])
 
@@ -127,6 +130,11 @@ def api_add_requirement(project_id: str, data: RequirementCreate, user_id: str =
 
 @router.post("/projects/{project_id}/sources", response_model=ConnectionResponse, status_code=201)
 def api_add_source(request: Request, project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    # SEC-015: every store-of-config path runs through the allowlist —
+    # otherwise an operator can poison the row at admit-time and the
+    # downstream `/test` / discovery endpoints will dial IMDS / RFC1918.
+    if data.config:
+        _enforce_host_allowlist(data.config)
     org_id = _org_id(user_id, db)
     result = add_source(db, org_id, project_id, data)
     from app.api.audit import write_audit
@@ -143,6 +151,10 @@ def api_list_sources(project_id: str, user_id: str = Depends(get_current_user_id
 
 @router.patch("/projects/{project_id}/sources/{source_id}", response_model=ConnectionResponse)
 def api_update_source(project_id: str, source_id: str, data: ConnectionUpdate, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    # SEC-015: PATCH was previously the loophole — allowed setting host to
+    # 169.254.169.254 with no check, then the unguarded /test path dialed it.
+    if data.config:
+        _enforce_host_allowlist(data.config)
     org_id = _org_id(user_id, db)
     result = update_source(db, org_id, project_id, source_id, data)
     from app.api.audit import write_audit
@@ -168,6 +180,10 @@ async def api_test_source(request: Request, project_id: str, source_id: str, use
     conn, config = get_source_config(db, org_id, project_id, source_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    # SEC-015: revalidate the stored config at delivery time — a row may have
+    # been poisoned before the host allowlist was raised, or DNS may have
+    # rebinded since the row was stored.
+    _enforce_host_allowlist(config)
     result = await svc_test_connection(conn.connector_type, config)
     conn.status = "active" if result.success else "error"
     db.commit()
@@ -181,6 +197,7 @@ async def api_discover_source_schemas(request: Request, project_id: str, source_
     conn, config = get_source_config(db, org_id, project_id, source_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    _enforce_host_allowlist(config)  # SEC-015
     result = await svc_discover_schemas(conn.connector_type, config)
     return [{"schema_name": s.schema_name} for s in result]
 
@@ -189,6 +206,8 @@ async def api_discover_source_schemas(request: Request, project_id: str, source_
 
 @router.post("/projects/{project_id}/targets", response_model=ConnectionResponse, status_code=201)
 def api_add_target(request: Request, project_id: str, data: ConnectionCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    if data.config:
+        _enforce_host_allowlist(data.config)  # SEC-015
     org_id = _org_id(user_id, db)
     result = add_target(db, org_id, project_id, data)
     from app.api.audit import write_audit
@@ -205,6 +224,8 @@ def api_list_targets(project_id: str, user_id: str = Depends(get_current_user_id
 
 @router.patch("/projects/{project_id}/targets/{target_id}", response_model=ConnectionResponse)
 def api_update_target(project_id: str, target_id: str, data: ConnectionUpdate, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    if data.config:
+        _enforce_host_allowlist(data.config)  # SEC-015
     org_id = _org_id(user_id, db)
     result = update_target(db, org_id, project_id, target_id, data)
     from app.api.audit import write_audit
@@ -229,6 +250,7 @@ async def api_test_target(request: Request, project_id: str, target_id: str, use
     conn, config = get_target_config(db, org_id, project_id, target_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    _enforce_host_allowlist(config)  # SEC-015
     result = await svc_test_connection(conn.connector_type, config)
     conn.status = "active" if result.success else "error"
     db.commit()
@@ -242,6 +264,7 @@ async def api_discover_target_schemas(request: Request, project_id: str, target_
     conn, config = get_target_config(db, org_id, project_id, target_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
+    _enforce_host_allowlist(config)  # SEC-015
     result = await svc_discover_schemas(conn.connector_type, config)
     return [{"schema_name": s.schema_name} for s in result]
 
