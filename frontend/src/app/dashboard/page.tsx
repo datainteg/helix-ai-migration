@@ -14,6 +14,7 @@ import { Download, Plus } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { fetchDashboardStats, type DashboardStats } from "@/lib/dashboard/api";
+import { fetchUsageSummary, type UsageSummary } from "@/lib/usage/api";
 
 import { AppShell } from "@/components/layout";
 import {
@@ -99,6 +100,7 @@ export default function DashboardPage() {
   const [trendRange, setTrendRange] = useState("30");
   const { token } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -106,10 +108,15 @@ export default function DashboardPage() {
     fetchDashboardStats(token)
       .then((s) => { if (!cancelled) setStats(s); })
       .catch(() => { if (!cancelled) setStats(null); });
+    fetchUsageSummary(token, 30)
+      .then((u) => { if (!cancelled) setUsage(u); })
+      .catch(() => { if (!cancelled) setUsage(null); });
     return () => { cancelled = true; };
   }, [token]);
 
   const fmtPct = (v: number | null) => (v === null ? "—" : `${v.toFixed(1)}%`);
+  const fmtUsd = (v: number) =>
+    v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(2)}`;
 
   return (
     <AppShell
@@ -158,6 +165,26 @@ export default function DashboardPage() {
             value={stats ? String(stats.workflowsFailed) : "—"}
             hint={stats ? "rejected + expired" : "loading…"}
             accent={stats && stats.workflowsFailed > 0 ? "var(--con-err)" : undefined}
+          />
+        </div>
+
+        {/* LLM spend row — real numbers from /api/v1/usage/llm. */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
+          <MetricCell label="LLM SPEND · 30D"
+            value={usage ? fmtUsd(usage.total_cost_usd) : "—"}
+            hint={usage ? `${(usage.input_tokens + usage.output_tokens).toLocaleString()} tokens` : "loading…"}
+          />
+          <MetricCell label="TOP PROVIDER"
+            value={usage && usage.by_provider.length > 0 ? usage.by_provider.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0].provider : "—"}
+            hint={usage && usage.by_provider.length > 0 ? fmtUsd(usage.by_provider.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0].cost_usd) : ""}
+          />
+          <MetricCell label="TOP AGENT"
+            value={usage && usage.by_agent.length > 0 ? usage.by_agent.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0].agent : "—"}
+            hint={usage && usage.by_agent.length > 0 ? fmtUsd(usage.by_agent.slice().sort((a, b) => b.cost_usd - a.cost_usd)[0].cost_usd) : ""}
+          />
+          <MetricCell label="INPUT / OUTPUT"
+            value={usage ? `${Math.round(usage.input_tokens / 1000)}K / ${Math.round(usage.output_tokens / 1000)}K` : "—"}
+            hint="tokens · 30d window"
           />
         </div>
 

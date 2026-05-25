@@ -7,14 +7,19 @@
  * Posts to `${API_BASE}/api/v1/projects` (unchanged from the previous version).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X, Wand2 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { Button, Card, ErrorBanner, Chip } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import {
+  cloneMigrationTemplate,
+  listMigrationTemplates,
+  type TemplateSummary,
+} from "@/lib/migration-templates/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -46,6 +51,30 @@ export default function NewProjectPage() {
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+
+  useEffect(() => {
+    if (!token) return;
+    listMigrationTemplates(token).then(setTemplates).catch(() => setTemplates([]));
+  }, [token]);
+
+  const handleTemplate = async (tplId: string) => {
+    if (!token || !name.trim()) {
+      setError("Set a project name before cloning a template.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const out = await cloneMigrationTemplate(token, tplId, name.trim(), description.trim() || undefined);
+      router.push(`/projects/${out.project_id}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Template clone failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +127,35 @@ export default function NewProjectPage() {
           <div className="mb-4">
             <ErrorBanner message={error} onDismiss={() => setError("")} />
           </div>
+        )}
+
+        {templates.length > 0 && (
+          <Card
+            title="Start from a template"
+            description="Pre-baked starter packs include source/target defaults, validation rules, and agent prompt overrides. Provide a project name first, then click a template."
+            className="mb-4"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => { setSelectedTemplate(t.id); void handleTemplate(t.id); }}
+                  disabled={loading}
+                  className={`text-left p-3 rounded-[8px] border ${
+                    selectedTemplate === t.id ? "border-ink bg-app-2" : "border-hx hover:bg-app-2"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Wand2 className="h-3.5 w-3.5 text-[var(--con-brand)]" />
+                    <span className="text-[13px] font-medium text-ink">{t.name}</span>
+                    <Chip tone={t.risk_level === "high" ? "err" : t.risk_level === "medium" ? "amber" : "default"}>{t.risk_level}</Chip>
+                  </div>
+                  <p className="text-[11.5px] text-ink-3 line-clamp-3">{t.summary}</p>
+                </button>
+              ))}
+            </div>
+          </Card>
         )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

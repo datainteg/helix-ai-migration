@@ -130,6 +130,132 @@ def api_link_rollback(
     }
 
 
+@router.post("/artifacts/{artifact_id}/generate-rollback")
+def api_generate_rollback(
+    artifact_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """LLM-generate an inverse migration script and link it as the rollback.
+
+    Reads the forward artifact, feeds it to the org's active LLM provider with
+    a fixed system prompt, saves the output as a paired *.rollback.<ext>
+    artifact, sets rollback_artifact_id, and records the LLM usage row.
+
+    Idempotent at the link level — re-running overwrites the previous rollback.
+    """
+    from pathlib import Path
+    from fastapi import HTTPException
+    from app.storage.local import save_artifact_file, sanitize_filename
+    from app.services.artifact_version_service import create_artifact_metadata
+    from app.services.secret_service import decrypt_value
+    from app.services.cost_service import record_usage
+    from app.services.llm_router_service import resolve_routing
+    from app.models.llm import LLMProvider, LLMAgentMapping
+    from agents.runtime.providers import CallContext, get_provider as get_llm_provider
+
+    org_id = resolve_active_org_id(db, user_id)
+    forward = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id, CodeArtifact.organization_id == org_id
+    ).first()
+    if not forward:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    try:
+        content = Path(forward.storage_path).read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Failed to read forward artifact: {exc}")
+
+    provider = (
+        db.query(LLMProvider)
+        .filter(LLMProvider.organization_id == org_id, LLMProvider.status == "active")
+        .first()
+    )
+    if not provider or not provider.secrets:
+        raise HTTPException(status_code=409, detail="No active LLM provider configured")
+
+    mappings = db.query(LLMAgentMapping).filter(LLMAgentMapping.organization_id == org_id).all()
+    pid, model, _temp, max_tokens = resolve_routing(
+        "bmad-agent-rollback", provider.id, provider.default_model, mappings
+    )
+    target_provider = db.query(LLMProvider).filter(LLMProvider.id == pid).first() or provider
+    secret = max(target_provider.secrets, key=lambda s: s.key_version)
+    api_key = decrypt_value(secret.encrypted_api_key)
+
+    adapter = get_llm_provider(target_provider.provider_type)
+    if adapter is None:
+        raise HTTPException(status_code=501, detail=f"No adapter for {target_provider.provider_type}")
+
+    system_prompt = (
+        "You are a senior database engineer producing reverse-migration scripts. "
+        "Given a forward migration (DDL, DML, or migration code), output ONLY the "
+        "exact statements that revert every change. Include DROP for newly created "
+        "objects, ALTER ... DROP COLUMN for added columns, restore previous "
+        "constraints, and reverse data operations where deterministic. Do not "
+        "include explanations, prose, or markdown fences. Output one statement "
+        "per logical revert, in the correct order to leave the schema as it was."
+    )
+    user_prompt = f"Forward migration ({forward.file_type or 'sql'}):\n\n{content}\n\nProduce the rollback now."
+
+    ctx = CallContext(
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        api_key=api_key,
+        base_url=target_provider.base_url,
+        temperature=0.0,
+        max_tokens=int(max_tokens or target_provider.max_tokens or 4096),
+        timeout=float(target_provider.timeout or 60),
+        extra_config=target_provider.extra_config or {},
+    )
+    parsed = adapter.call(ctx)
+    if parsed is None:
+        raise HTTPException(status_code=502, detail="Rollback generation failed (LLM transport error)")
+
+    rollback_text = parsed.get("summary") or parsed.get("rollback") or parsed.get("content") or ""
+    if not rollback_text.strip():
+        rollback_text = str(parsed)
+
+    base = sanitize_filename(forward.filename)
+    rollback_name = f"{base}.rollback.{forward.file_type or 'sql'}"
+    rollback_path = save_artifact_file(forward.project_id, rollback_name, rollback_text.encode("utf-8"))
+    reverse = create_artifact_metadata(
+        db, org_id, forward.project_id, rollback_name, forward.file_type or "sql",
+        str(rollback_path), rollback_text.encode("utf-8"),
+    )
+
+    forward_row = db.query(CodeArtifact).filter(CodeArtifact.id == forward.id).first()
+    if forward_row:
+        forward_row.rollback_artifact_id = reverse.id
+        db.commit()
+
+    try:
+        record_usage(
+            db,
+            organization_id=org_id,
+            provider_type=target_provider.provider_type,
+            model=model,
+            input_tokens=int(len(user_prompt.split()) * 1.3),
+            output_tokens=max(1, len(rollback_text) // 4),
+            project_id=forward.project_id,
+            agent_name="rollback_generator",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    write_audit(db, org_id=org_id, actor_id=user_id, action="rollback_generated",
+                entity_type="artifact", entity_id=forward.id,
+                meta={"rollback_artifact_id": reverse.id}, request=request)
+
+    return {
+        "forward_artifact_id": forward.id,
+        "rollback_artifact_id": reverse.id,
+        "rollback_filename": rollback_name,
+        "bytes": len(rollback_text),
+    }
+
+
 @router.get("/artifacts/{artifact_id}/rollback")
 def api_get_rollback(
     artifact_id: str,
