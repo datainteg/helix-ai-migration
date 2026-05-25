@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import require_permission
+from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.schemas.llm import (
     LLMProviderCreate, LLMProviderUpdate, LLMProviderResponse,
     AgentMappingCreate, AgentMappingResponse, KeyRotateRequest, TestConnectionResponse,
@@ -26,8 +26,13 @@ from agents.runtime.providers import get_provider as _get_provider, list_provide
 
 
 def _org(db, uid):
-    from app.services.auth_service import get_current_user
-    return get_current_user(db, uid).memberships[0].organization_id
+    """Resolve the caller's active org membership.
+
+    SEC-002: must use `resolve_active_org_id` (status='active' filter) — never
+    `user.memberships[0]`, which would silently return a suspended membership
+    and let a removed user keep mutating LLM providers.
+    """
+    return resolve_active_org_id(db, uid)
 
 
 def _models_by_id(ptype: str) -> list[str]:

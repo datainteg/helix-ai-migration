@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
+from app.auth.dependencies import resolve_active_org_id
 from app.schemas.project import (
     ProjectCreate, ProjectResponse,
     SubProjectCreate, SubProjectResponse,
@@ -26,14 +27,18 @@ from app.services.connector_service import (
     discover_columns as svc_discover_columns,
 )
 from app.rate_limiting import limiter
-from app.services.auth_service import get_current_user
 from app.api.audit import write_audit
 
 router = APIRouter(tags=["projects"])
 
 
 def _org_id(user_id: str, db: Session) -> str:
-    return get_current_user(db, user_id).memberships[0].organization_id
+    """Resolve caller's *active* org. SEC-002: previously returned
+    `memberships[0].organization_id` with no status filter, so a suspended
+    member could still mutate projects / connections. Now defers to the
+    canonical helper which raises 403 when no active membership exists.
+    """
+    return resolve_active_org_id(db, user_id)
 
 
 # ── Projects ──
