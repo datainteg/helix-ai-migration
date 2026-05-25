@@ -54,6 +54,26 @@ def user_logout(request: Request, credentials: HTTPAuthorizationCredentials = De
     return {"status": "logged_out"}
 
 
+@router.post("/auth/sse-ticket")
+@limiter.limit("60/minute")
+def issue_sse_ticket(request: Request, user_id: str = Depends(get_current_user_id)):
+    """Mint a short-lived SSE-only token for use as a `?token=` URL param.
+
+    Browser EventSource cannot set Authorization headers, so SSE endpoints must
+    accept a token from the URL — but full-power access tokens in URLs leak
+    into proxy/server logs and Referer headers. This endpoint trades a normal
+    bearer token (sent in the request body via Authorization header) for a
+    60-second token scoped to SSE only, narrowing the leak window.
+    """
+    from datetime import timedelta
+    ticket = create_access_token(
+        user_id,
+        expires_delta=timedelta(seconds=60),
+        extra_claims={"scope": "sse"},
+    )
+    return {"ticket": ticket, "expires_in": 60}
+
+
 @router.post("/auth/refresh", response_model=TokenResponse)
 @limiter.limit("20/minute")
 def refresh_token(request: Request, credentials: HTTPAuthorizationCredentials = Depends(_bearer), user_id: str = Depends(get_current_user_id)):

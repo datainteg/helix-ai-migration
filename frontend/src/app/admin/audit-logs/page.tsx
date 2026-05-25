@@ -18,14 +18,6 @@ interface AuditEntry {
   status?: string;
 }
 
-const DEMO: AuditEntry[] = [
-  { id: "1", action: "provider_added", entity_type: "llm_provider", created_at: "2026-05-23T09:15:00Z", actor: "Avery Johnson", status: "success" },
-  { id: "2", action: "workflow_approved", entity_type: "workflow", created_at: "2026-05-23T08:58:00Z", actor: "Avery Johnson", status: "success" },
-  { id: "3", action: "user_login", entity_type: "user", created_at: "2026-05-23T08:42:00Z", actor: "Mei Chen", status: "success" },
-  { id: "4", action: "project_created", entity_type: "project", created_at: "2026-05-23T08:00:00Z", actor: "Sofia Marin", status: "success" },
-  { id: "5", action: "validation_failed", entity_type: "validation_run", created_at: "2026-05-23T07:30:00Z", actor: "System", status: "failed" },
-];
-
 export default function AuditLogsPage() {
   const { token } = useAuth();
   const [logs, setLogs] = useState<AuditEntry[]>([]);
@@ -39,7 +31,6 @@ export default function AuditLogsPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  const data = logs.length > 0 ? logs : DEMO;
   const actionLabel = (action: string) =>
     action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -71,7 +62,7 @@ export default function AuditLogsPage() {
 
       {loading ? (
         <LoadingState label="Loading audit logs…" />
-      ) : data.length === 0 ? (
+      ) : logs.length === 0 ? (
         <EmptyState title="No audit logs yet" description="Logs track login events, admin changes, provider modifications, and workflow approvals." />
       ) : (
         <Card bodyClassName="p-0">
@@ -86,7 +77,7 @@ export default function AuditLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.map((log) => (
+              {logs.map((log) => (
                 <tr key={log.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
                   <td className="px-4 py-3 font-mono text-[12px] text-ink-3">{formatDate(log.created_at)} · {formatTime(log.created_at)}</td>
                   <td className="px-4 py-3">

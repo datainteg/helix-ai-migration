@@ -11,6 +11,7 @@ is unavailable.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -79,8 +80,10 @@ async def start_bmad_planning_workflow(
             exc,
         )
 
-    # Dev/test fallback — run the graph in-process.
-    result = helix.run()
+    # Dev/test fallback — run the graph in-process. Off-loaded to a worker
+    # thread so the FastAPI event loop does not block on the synchronous
+    # LangGraph state-machine (which itself makes blocking LLM HTTP calls).
+    result = await asyncio.to_thread(helix.run)
     # Local runs get a synthetic workflow_id distinct from the Temporal one.
     result.workflow_id = f"local-{uuid.uuid4().hex[:12]}"
     result.run_id = result.workflow_id

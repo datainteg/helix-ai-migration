@@ -16,6 +16,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
+from app.security.ssrf import SSRFViolation, validate_external_url
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,17 @@ async def deliver_webhook(db: Session, org_id: str, event: str, payload: dict) -
             )
             db.add(delivery)
             db.flush()
+
+            # Re-validate URL at delivery — admit-time check may have been
+            # bypassed if the row was inserted directly into the DB.
+            try:
+                validate_external_url(ep.url)
+            except SSRFViolation as exc:
+                delivery.success = False
+                delivery.error = f"ssrf_block: {exc}"[:255]
+                logger.warning("webhook_ssrf_block event=%s url=%s err=%s", event, ep.url, exc)
+                db.commit()
+                continue
 
             try:
                 res = await client.post(ep.url, content=body, headers=headers)

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 
 
 class ConnectorType(str, Enum):
@@ -149,3 +150,13 @@ class BaseConnector(ABC):
 
     def get_capabilities(self) -> dict[str, bool]:
         return self.capabilities.to_dict()
+
+    @staticmethod
+    async def _run_sync(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run a blocking callable in the default thread pool.
+
+        Used by sync-DB connectors (psycopg2, pymysql, pyodbc, snowflake.connector)
+        to avoid blocking the event loop. SQLAlchemy core/pool calls return after
+        the thread completes; the awaiting coroutine remains schedulable.
+        """
+        return await asyncio.to_thread(fn, *args, **kwargs)

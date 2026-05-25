@@ -18,14 +18,6 @@ interface User {
   created_at: string;
 }
 
-const DEMO: User[] = [
-  { id: "u1", email: "avery@datainteg.io", name: "Avery Johnson", role: "Super Admin", is_active: true, created_at: "2026-03-01T00:00:00Z" },
-  { id: "u2", email: "mei.chen@datainteg.io", name: "Mei Chen", role: "Engineer", is_active: true, created_at: "2026-03-12T00:00:00Z" },
-  { id: "u3", email: "sofia@datainteg.io", name: "Sofia Marin", role: "QA Lead", is_active: true, created_at: "2026-04-05T00:00:00Z" },
-  { id: "u4", email: "rohan@datainteg.io", name: "Rohan Patel", role: "Architect", is_active: true, created_at: "2026-04-18T00:00:00Z" },
-  { id: "u5", email: "liam@datainteg.io", name: "Liam O'Connor", role: "DevOps", is_active: false, created_at: "2026-05-01T00:00:00Z" },
-];
-
 export default function UsersPage() {
   const { token } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -41,8 +33,6 @@ export default function UsersPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  const data = users.length > 0 ? users : DEMO;
-
   return (
     <AdminShell
       title="Users"
@@ -52,7 +42,7 @@ export default function UsersPage() {
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
       {loading ? (
         <LoadingState label="Loading users…" />
-      ) : data.length === 0 ? (
+      ) : users.length === 0 ? (
         <EmptyState title="No users yet" description="Invite teammates to start collaborating on migrations." />
       ) : (
         <Card bodyClassName="p-0">
@@ -67,7 +57,7 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {data.map((u) => (
+              {users.map((u) => (
                 <tr key={u.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">

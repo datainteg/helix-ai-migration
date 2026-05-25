@@ -88,7 +88,9 @@ export default function SprintExecutionPage() {
       setStreamLive(false);
       return;
     }
-    const es = subscribeToExecutions(
+    let es: EventSource | null = null;
+    let cancelled = false;
+    subscribeToExecutions(
       token,
       projectId,
       (rows) => {
@@ -98,13 +100,17 @@ export default function SprintExecutionPage() {
       () => {
         setStreamLive(false);
       },
-    );
-    if (!es) {
-      setStreamLive(false);
-      return;
-    }
+    ).then((handle) => {
+      if (cancelled) {
+        handle?.close();
+        return;
+      }
+      es = handle;
+      if (!handle) setStreamLive(false);
+    });
     return () => {
-      es.close();
+      cancelled = true;
+      es?.close();
       setStreamLive(false);
     };
   }, [token, projectId]);

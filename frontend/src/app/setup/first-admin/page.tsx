@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 import {
   ArrowRight,
   ArrowLeft,
@@ -209,6 +210,7 @@ const emptyProject: ProjectDraft = {
 
 export default function FirstAdminSetupPage() {
   const router = useRouter();
+  const { setSession } = useAuth();
 
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
@@ -326,7 +328,10 @@ export default function FirstAdminSetupPage() {
       throw new Error(body.detail || "Workspace setup failed");
     }
     const body = (await res.json()) as { access_token: string };
-    try { localStorage.setItem("helix_token", body.access_token); } catch { /* SSR safe */ }
+    // Use AuthContext so token state stays in sync with the rest of the app;
+    // setSession persists to localStorage internally. Do NOT redirect — the
+    // wizard owns navigation flow.
+    setSession(body.access_token, { email: data.email, name: data.name });
     setPersisted((p) => ({ ...p, token: body.access_token }));
   };
 

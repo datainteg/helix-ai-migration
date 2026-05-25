@@ -1,4 +1,4 @@
-import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -88,7 +88,7 @@ def rotate_key(db: Session, org_id: str, provider_id: str, new_api_key: str) -> 
         provider_id=provider_id,
         encrypted_api_key=encrypt_value(new_api_key),
         key_version=(latest.key_version + 1) if latest else 1,
-        rotated_at=str(uuid.uuid4()),
+        rotated_at=datetime.now(timezone.utc).isoformat(),
     )
     db.add(new_secret)
     db.commit()

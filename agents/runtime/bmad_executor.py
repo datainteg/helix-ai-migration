@@ -351,8 +351,21 @@ def _resolve_provider_for_org(org_id: str | None) -> dict[str, Any] | None:
     """
     if not org_id:
         return None
+    # Prefer the worker-local SessionLocal when running inside a Temporal
+    # activity. Falls back to backend's SessionLocal for in-process planning
+    # runs. This is what keeps the worker decoupled from FastAPI request scope.
+    SessionLocal = None
     try:
-        from app.db.session import SessionLocal
+        from worker.db.session import SessionLocal as _WorkerSession  # type: ignore
+        SessionLocal = _WorkerSession
+    except Exception:
+        try:
+            from app.db.session import SessionLocal as _AppSession  # type: ignore
+            SessionLocal = _AppSession
+        except Exception as exc:  # noqa: BLE001
+            logger.info("PydanticAI provider lookup skipped — no DB session available: %s", exc)
+            return None
+    try:
         from app.models.llm import LLMAgentMapping, LLMProvider
         from app.services.llm_router_service import resolve_routing
         from app.services.secret_service import decrypt_value

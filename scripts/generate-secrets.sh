@@ -65,6 +65,7 @@ POSTGRES_PASSWORD_VAL="$(rand_hex 16)"        # 32 hex chars
 APP_SECRET_KEY_VAL="$(rand_hex 32)"           # 64 hex chars
 JWT_SECRET_KEY_VAL="$(rand_hex 32)"           # 64 hex chars
 ENCRYPTION_KEY_VAL="$(rand_fernet_key)"       # 44-char Fernet
+AUDIT_HMAC_KEY_VAL="$(rand_hex 32)"           # 64 hex chars (must differ from JWT)
 TEMPORAL_UI_PASSWORD_VAL="$(rand_hex 12)"     # 24 hex chars
 
 if [ "$PRINT_ONLY" = true ]; then
@@ -73,6 +74,7 @@ POSTGRES_PASSWORD=$POSTGRES_PASSWORD_VAL
 APP_SECRET_KEY=$APP_SECRET_KEY_VAL
 JWT_SECRET_KEY=$JWT_SECRET_KEY_VAL
 ENCRYPTION_KEY=$ENCRYPTION_KEY_VAL
+AUDIT_HMAC_KEY=$AUDIT_HMAC_KEY_VAL
 TEMPORAL_UI_PASSWORD=$TEMPORAL_UI_PASSWORD_VAL
 EOF
   exit 0
@@ -119,6 +121,7 @@ upsert POSTGRES_DB           "helix_metadata"
 upsert APP_SECRET_KEY        "$APP_SECRET_KEY_VAL"
 upsert JWT_SECRET_KEY        "$JWT_SECRET_KEY_VAL"
 upsert ENCRYPTION_KEY        "$ENCRYPTION_KEY_VAL"
+upsert AUDIT_HMAC_KEY        "$AUDIT_HMAC_KEY_VAL"
 upsert TEMPORAL_UI_PASSWORD  "$TEMPORAL_UI_PASSWORD_VAL"
 
 # DATABASE_URL needs to reflect the generated password.

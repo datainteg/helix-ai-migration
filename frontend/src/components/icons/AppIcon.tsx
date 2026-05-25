@@ -10,7 +10,20 @@
  * cleanly in tables and list rows.
  */
 
-import * as si from "simple-icons";
+import {
+  siSnowflake,
+  siPostgresql,
+  siMysql,
+  siMongodb,
+  siDatabricks,
+  siGooglebigquery,
+  siApachehive,
+  siApachekafka,
+  siApachespark,
+  siApachecassandra,
+  siRedis,
+  siElasticsearch,
+} from "simple-icons";
 
 interface SimpleIcon {
   title: string;
@@ -27,18 +40,18 @@ type Slug =
   | "iceberg" | "datastage";
 
 const SI_MAP: Partial<Record<Slug, SimpleIcon>> = {
-  snowflake:        (si as Record<string, SimpleIcon>).siSnowflake,
-  postgresql:       (si as Record<string, SimpleIcon>).siPostgresql,
-  mysql:            (si as Record<string, SimpleIcon>).siMysql,
-  mongodb:          (si as Record<string, SimpleIcon>).siMongodb,
-  databricks:       (si as Record<string, SimpleIcon>).siDatabricks,
-  googlebigquery:   (si as Record<string, SimpleIcon>).siGooglebigquery,
-  apachehive:       (si as Record<string, SimpleIcon>).siApachehive,
-  apachekafka:      (si as Record<string, SimpleIcon>).siApachekafka,
-  apachespark:      (si as Record<string, SimpleIcon>).siApachespark,
-  apachecassandra:  (si as Record<string, SimpleIcon>).siApachecassandra,
-  redis:            (si as Record<string, SimpleIcon>).siRedis,
-  elasticsearch:    (si as Record<string, SimpleIcon>).siElasticsearch,
+  snowflake:        siSnowflake,
+  postgresql:       siPostgresql,
+  mysql:            siMysql,
+  mongodb:          siMongodb,
+  databricks:       siDatabricks,
+  googlebigquery:   siGooglebigquery,
+  apachehive:       siApachehive,
+  apachekafka:      siApachekafka,
+  apachespark:      siApachespark,
+  apachecassandra:  siApachecassandra,
+  redis:            siRedis,
+  elasticsearch:    siElasticsearch,
 };
 
 const FALLBACKS: Record<string, { letter: string; bg: string; fg?: string }> = {

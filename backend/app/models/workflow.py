@@ -1,6 +1,6 @@
 """Workflow persistence models — workflow_runs and workflow_steps."""
 
-from sqlalchemy import Column, String, Text, ForeignKey, Integer, DateTime
+from sqlalchemy import Column, String, Text, ForeignKey, Integer, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -40,5 +40,9 @@ class WorkflowStep(BaseModel):
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("workflow_run_id", "step_order", name="uq_workflow_steps_run_order"),
+    )
 
     workflow_run = relationship("WorkflowRun", back_populates="steps")

@@ -25,9 +25,13 @@ class GeminiProvider(BaseProvider):
         import httpx
 
         base = (ctx.base_url or self.default_base_url).rstrip("/")
-        url = f"{base}/v1beta/models/{ctx.model}:generateContent?key={ctx.api_key}"
+        # Send the API key in the x-goog-api-key header instead of the URL
+        # query string so it does not leak into web-server access logs or
+        # browser history. Google's API supports both, header is preferred.
+        url = f"{base}/v1beta/models/{ctx.model}:generateContent"
         resp = httpx.post(
             url,
+            headers={"x-goog-api-key": ctx.api_key} if ctx.api_key else {},
             json={
                 "contents": [
                     {"parts": [{"text": f"{ctx.system_prompt}\n\n{ctx.user_prompt}"}]}

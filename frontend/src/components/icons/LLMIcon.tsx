@@ -8,7 +8,17 @@
  * local/self-hosted runtime.
  */
 
-import * as si from "simple-icons";
+import {
+  siAnthropic,
+  siGoogle,
+  siGooglegemini,
+  siDeepseek,
+  siOpenrouter,
+  siOllama,
+  siMeta,
+  siMistralai,
+  siGooglecloud,
+} from "simple-icons";
 
 interface SimpleIcon {
   title: string;
@@ -22,16 +32,16 @@ type Provider =
   | "openai" | "local" | "bedrock" | "azure" | "custom";
 
 const SI_MAP: Partial<Record<Provider, SimpleIcon>> = {
-  anthropic:  (si as Record<string, SimpleIcon>).siAnthropic,
-  google:     (si as Record<string, SimpleIcon>).siGoogle,
-  gemini:     (si as Record<string, SimpleIcon>).siGooglegemini,
-  deepseek:   (si as Record<string, SimpleIcon>).siDeepseek,
-  openrouter: (si as Record<string, SimpleIcon>).siOpenrouter,
-  ollama:     (si as Record<string, SimpleIcon>).siOllama,
-  meta:       (si as Record<string, SimpleIcon>).siMeta,
-  mistralai:  (si as Record<string, SimpleIcon>).siMistralai,
-  mistral:    (si as Record<string, SimpleIcon>).siMistralai,
-  vertex:     (si as Record<string, SimpleIcon>).siGooglecloud,
+  anthropic:  siAnthropic,
+  google:     siGoogle,
+  gemini:     siGooglegemini,
+  deepseek:   siDeepseek,
+  openrouter: siOpenrouter,
+  ollama:     siOllama,
+  meta:       siMeta,
+  mistralai:  siMistralai,
+  mistral:    siMistralai,
+  vertex:     siGooglecloud,
 };
 
 const FALLBACKS: Record<string, { letter: string; bg: string; fg?: string }> = {

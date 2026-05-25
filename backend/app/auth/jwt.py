@@ -25,9 +25,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
-def create_access_token(user_id: str, expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    user_id: str,
+    expires_delta: timedelta | None = None,
+    extra_claims: dict | None = None,
+) -> str:
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {"sub": user_id, "exp": expire}
+    if extra_claims:
+        to_encode.update(extra_claims)
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 

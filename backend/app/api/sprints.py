@@ -116,6 +116,10 @@ async def api_executions_stream(
         user_id = payload.get("sub")
         if not user_id:
             raise ValueError("missing sub")
+        # Reject full-power tokens used in URLs. Frontend must trade them
+        # via POST /auth/sse-ticket which returns a scope=sse short-TTL ticket.
+        if payload.get("scope") != "sse":
+            raise ValueError("token is not an sse ticket")
         org_id = resolve_active_org_id(db, user_id)
     except Exception:
         from fastapi import HTTPException

@@ -32,6 +32,7 @@ $PostgresPassword     = RandHex 16
 $AppSecretKey         = RandHex 32
 $JwtSecretKey         = RandHex 32
 $EncryptionKey        = RandBase64UrlSafe 32
+$AuditHmacKey         = RandHex 32
 $TemporalUiPassword   = RandHex 12
 
 if ($Print) {
@@ -39,6 +40,7 @@ if ($Print) {
     Write-Output "APP_SECRET_KEY=$AppSecretKey"
     Write-Output "JWT_SECRET_KEY=$JwtSecretKey"
     Write-Output "ENCRYPTION_KEY=$EncryptionKey"
+    Write-Output "AUDIT_HMAC_KEY=$AuditHmacKey"
     Write-Output "TEMPORAL_UI_PASSWORD=$TemporalUiPassword"
     exit 0
 }
@@ -80,6 +82,7 @@ Upsert "POSTGRES_DB"          "helix_metadata"
 Upsert "APP_SECRET_KEY"       $AppSecretKey
 Upsert "JWT_SECRET_KEY"       $JwtSecretKey
 Upsert "ENCRYPTION_KEY"       $EncryptionKey
+Upsert "AUDIT_HMAC_KEY"       $AuditHmacKey
 Upsert "TEMPORAL_UI_PASSWORD" $TemporalUiPassword
 
 $DbUrl = "postgresql://helix:$PostgresPassword@postgres:5432/helix_metadata"

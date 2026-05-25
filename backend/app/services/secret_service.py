@@ -11,16 +11,20 @@ def _get_fernet() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(key))
 
 
-def encrypt_value(value: str) -> str:
+def encrypt_value(value: str | None) -> str:
+    """Encrypt a secret. Empty/None returns "" so providers using ambient
+    credentials (AWS Bedrock with IAM role, Vertex AI with ADC) can be stored
+    without a key. NOT NULL columns accept the empty string."""
     if not value:
-        raise ValueError("Cannot encrypt empty value")
+        return ""
     f = _get_fernet()
     return f.encrypt(value.encode("utf-8")).decode("utf-8")
 
 
-def decrypt_value(encrypted: str) -> str:
+def decrypt_value(encrypted: str | None) -> str:
+    """Decrypt a stored secret. Returns "" for the empty/IAM-auth sentinel."""
     if not encrypted:
-        raise ValueError("Cannot decrypt empty value")
+        return ""
     f = _get_fernet()
     return f.decrypt(encrypted.encode("utf-8")).decode("utf-8")
 

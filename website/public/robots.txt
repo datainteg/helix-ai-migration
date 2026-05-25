@@ -1,4 +1,7 @@
 User-agent: *
 Allow: /
+# Static demo bundle — keep out of search indexes; the meta robots noindex on
+# the page itself is the primary control, this is belt-and-braces.
+Disallow: /helix-console-demo.html
 
 Sitemap: https://helix.datainteg.io/sitemap.xml

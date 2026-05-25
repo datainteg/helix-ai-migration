@@ -423,22 +423,40 @@ export async function createTask(
 
 /**
  * Subscribe to /projects/{id}/sprints/executions/stream as an EventSource.
- * Returns the EventSource handle — caller is responsible for `.close()`.
- * `onSnapshot` fires for every "snapshot" frame (every 2s, contains the
- * latest 50 executions). `onError` fires on network/parse failure.
  *
- * Auth: EventSource can't send custom headers, so the JWT is passed as a
- * `?token=` query string. Backend already enforces org scope after JWT
- * decode, so this is no weaker than the header path.
+ * EventSource cannot send custom headers, so the URL must carry auth in the
+ * query string. To avoid leaking a full-power bearer token into web-server
+ * and proxy logs, we trade the bearer for a 60-second scope=sse ticket from
+ * POST /auth/sse-ticket and use that ticket only.
+ *
+ * Returns a promise that resolves to the EventSource handle (or null if no
+ * token). Caller is responsible for `.close()`.
  */
-export function subscribeToExecutions(
+export async function subscribeToExecutions(
   token: string | null,
   projectId: string,
   onSnapshot: (rows: AgentExecution[]) => void,
   onError?: (e: Event) => void,
-): EventSource | null {
+): Promise<EventSource | null> {
   if (!token) return null;
-  const url = `${API_BASE}/api/v1/projects/${projectId}/sprints/executions/stream?token=${encodeURIComponent(token)}`;
+
+  let ticket: string;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/sse-ticket`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      onError?.(new Event("ticket_failed"));
+      return null;
+    }
+    ticket = (await res.json()).ticket as string;
+  } catch (e) {
+    onError?.(e as Event);
+    return null;
+  }
+
+  const url = `${API_BASE}/api/v1/projects/${projectId}/sprints/executions/stream?token=${encodeURIComponent(ticket)}`;
   const es = new EventSource(url);
   es.addEventListener("message", (ev) => {
     try {

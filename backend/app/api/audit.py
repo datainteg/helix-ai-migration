@@ -5,6 +5,7 @@ import io
 import json
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -17,7 +18,11 @@ router = APIRouter(tags=["audit"])
 
 
 def _compute_entry_hash(log: AuditLog, prev_hash: str | None) -> str:
-    """HMAC-SHA256 over canonical entry fields chained to previous hash."""
+    """HMAC-SHA256 over canonical entry fields chained to previous hash.
+
+    Uses AUDIT_HMAC_KEY (independent from JWT_SECRET_KEY) so JWT rotation does
+    not invalidate historical chain verification.
+    """
     payload = json.dumps({
         "id": log.id,
         "org": log.organization_id,
@@ -27,7 +32,13 @@ def _compute_entry_hash(log: AuditLog, prev_hash: str | None) -> str:
         "entity_id": log.entity_id,
         "prev": prev_hash or "GENESIS",
     }, sort_keys=True)
-    return hmac.new(settings.JWT_SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(settings.AUDIT_HMAC_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _org_lock_key(org_id: str) -> int:
+    """Stable 63-bit signed int from org_id for pg_advisory_xact_lock."""
+    digest = hashlib.sha256(org_id.encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=False) & 0x7FFFFFFFFFFFFFFF
 
 
 def write_audit(
@@ -40,6 +51,14 @@ def write_audit(
     meta: dict = None,
     request: Request = None,
 ):
+    # Serialize chain writes per-org so concurrent writers cannot race on
+    # prev_hash lookup. Released at transaction end. Postgres-only; on other
+    # backends the call is a no-op via try/except.
+    try:
+        db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _org_lock_key(org_id)})
+    except Exception:
+        pass
+
     last = (
         db.query(AuditLog)
         .filter(AuditLog.organization_id == org_id)

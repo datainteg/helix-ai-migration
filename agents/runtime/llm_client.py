@@ -25,8 +25,13 @@ def call_llm(
     try:
         from app.services.llm_router_service import resolve_routing
         from app.models.llm import LLMProvider, LLMAgentMapping
-        from app.db.session import SessionLocal
         from app.services.secret_service import decrypt_value
+        # Prefer worker-local SessionLocal when running inside a Temporal
+        # activity to keep the worker decoupled from FastAPI request scope.
+        try:
+            from worker.db.session import SessionLocal  # type: ignore
+        except Exception:
+            from app.db.session import SessionLocal  # type: ignore
 
         db = SessionLocal()
         try:

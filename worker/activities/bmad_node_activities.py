@@ -303,6 +303,10 @@ def paige_docs_activity(input_data: dict[str, Any]) -> dict[str, Any]:
 def persist_workflow_step_activity(step_data: dict[str, Any]) -> None:
     """Persist an agent step + artifact path to the workflow_steps table.
 
+    Idempotent: upserts on (workflow_run_id, step_order) so Temporal activity
+    retries do not insert duplicate rows. The unique constraint is enforced
+    by alembic migration l3m4n5o6p7q8.
+
     Uses worker-local SessionLocal (worker/db/session.py) — no backend
     package coupling beyond the shared model class.
     """
@@ -312,18 +316,37 @@ def persist_workflow_step_activity(step_data: dict[str, Any]) -> None:
     db = SessionLocal()
     try:
         parsed = step_data.get("parsed") or {}
-        step = WorkflowStep(
-            workflow_run_id=step_data["workflow_run_id"],
-            agent_name=step_data["agent_name"],
-            step_order=step_data["step_order"],
-            status=step_data.get("status", "completed"),
-            raw_output=json.dumps({**parsed, "artifact_path": step_data.get("artifact_path")}),
-            parsed_output_json=parsed,
-            provider_name=step_data.get("mode"),
-            model_name=step_data.get("model_name"),
-            error_message="; ".join(step_data.get("errors", [])) or None,
+        raw_output = json.dumps({**parsed, "artifact_path": step_data.get("artifact_path")})
+        error_message = "; ".join(step_data.get("errors", [])) or None
+
+        existing = (
+            db.query(WorkflowStep)
+            .filter(
+                WorkflowStep.workflow_run_id == step_data["workflow_run_id"],
+                WorkflowStep.step_order == step_data["step_order"],
+            )
+            .first()
         )
-        db.add(step)
+        if existing:
+            existing.agent_name = step_data["agent_name"]
+            existing.status = step_data.get("status", "completed")
+            existing.raw_output = raw_output
+            existing.parsed_output_json = parsed
+            existing.provider_name = step_data.get("mode")
+            existing.model_name = step_data.get("model_name")
+            existing.error_message = error_message
+        else:
+            db.add(WorkflowStep(
+                workflow_run_id=step_data["workflow_run_id"],
+                agent_name=step_data["agent_name"],
+                step_order=step_data["step_order"],
+                status=step_data.get("status", "completed"),
+                raw_output=raw_output,
+                parsed_output_json=parsed,
+                provider_name=step_data.get("mode"),
+                model_name=step_data.get("model_name"),
+                error_message=error_message,
+            ))
         db.commit()
     finally:
         db.close()

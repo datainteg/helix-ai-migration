@@ -22,6 +22,7 @@ Public introspection:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
@@ -156,10 +157,24 @@ class BMADPerNodeWorkflow:
         # Approval gate (signal-driven).
         self._current_step = "awaiting_approval"
         logger.info("BMAD per-node waiting for approval signal: %s", workflow_id)
-        await workflow.wait_condition(
-            lambda: self._approval_decision is not None,
-            timeout=_APPROVAL_TIMEOUT,
-        )
+        try:
+            await workflow.wait_condition(
+                lambda: self._approval_decision is not None,
+                timeout=_APPROVAL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            # No human decision within the window. Treat as expiry so the run
+            # is closed deterministically instead of returning the workflow in
+            # an "awaiting_approval" state forever.
+            self._current_step = "expired"
+            logger.info("BMAD per-node approval expired: %s", workflow_id)
+            return {
+                "workflow_id": workflow_id,
+                "status": "expired",
+                "outputs": self._outputs,
+                "artifact_paths": self._artifact_paths,
+                "approval_notes": self._approval_notes,
+            }
 
         if self._approval_decision != "approved":
             self._current_step = "rejected"

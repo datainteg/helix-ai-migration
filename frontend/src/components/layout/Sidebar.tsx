@@ -22,6 +22,7 @@ import { HelixWordmark } from "./HelixLogo";
 import { Avatar } from "@/components/ui/Avatar";
 import { Kbd } from "@/components/ui/Kbd";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 
 type NavItem = {
   label: string;
@@ -137,7 +138,10 @@ function SearchTrigger() {
   );
 }
 
-function UserFooter({ name = "Avery Johnson", role = "Platform Admin" }) {
+function UserFooter() {
+  const { user } = useAuth();
+  const name = user?.name || user?.email || "Signed in";
+  const role = user?.role || (user ? "Member" : "Sign in");
   return (
     <div className="flex items-center gap-2.5 px-1 py-2 mt-1 border-t border-hx">
       <Avatar name={name} size={26} />

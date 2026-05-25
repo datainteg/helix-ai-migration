@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.db.session import SessionLocal
 from app.models.validation import ValidationRule, ValidationRun, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -57,12 +58,34 @@ async def run_schema_compare(
 
 
 async def execute_validation_run(
+    run_id: str,
+    rule_ids: list[str],
+    connector_configs: dict[str, Any],
+) -> None:
+    """Execute all rules in a validation run and persist results.
+
+    Opens its own SessionLocal because FastAPI BackgroundTasks fire AFTER the
+    request session has been closed by the get_db dependency. Passing a stale
+    session caused commits to fail silently in the background path.
+    """
+    db: Session = SessionLocal()
+    try:
+        run = db.query(ValidationRun).filter(ValidationRun.id == run_id).first()
+        if run is None:
+            logger.warning("validation_run_missing run_id=%s", run_id)
+            return
+        rules = db.query(ValidationRule).filter(ValidationRule.id.in_(rule_ids)).all() if rule_ids else []
+        await _execute(db, run, rules, connector_configs)
+    finally:
+        db.close()
+
+
+async def _execute(
     db: Session,
     run: ValidationRun,
     rules: list[ValidationRule],
     connector_configs: dict[str, Any],
 ) -> ValidationRun:
-    """Execute all rules in a validation run and persist results."""
     from app.services.connector_service import get_row_count
 
     run.status = "running"

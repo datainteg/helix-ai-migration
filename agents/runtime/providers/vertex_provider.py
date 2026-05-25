@@ -14,6 +14,7 @@ account JSON, or workload-identity in GKE).
 from __future__ import annotations
 
 import logging
+import threading
 
 from agents.runtime.providers.base import (
     BaseProvider,
@@ -23,6 +24,32 @@ from agents.runtime.providers.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+# vertexai.init() mutates global SDK state. Serialize calls and memoize the
+# (project, location) tuple so concurrent agents do not race on init.
+_init_lock = threading.Lock()
+_active_init: tuple[str, str] | None = None
+
+
+def _ensure_initialized(project: str, location: str) -> None:
+    """Initialize the vertexai SDK at most once per (project, location).
+
+    If another (project, location) was previously activated in this process,
+    log a warning — the SDK does not safely support per-call switching.
+    """
+    global _active_init
+    import vertexai
+    with _init_lock:
+        if _active_init == (project, location):
+            return
+        if _active_init is not None and _active_init != (project, location):
+            logger.warning(
+                "vertexai.init switching from %s to %s — concurrent calls "
+                "with different projects/locations are not supported",
+                _active_init, (project, location),
+            )
+        vertexai.init(project=project, location=location)
+        _active_init = (project, location)
 
 
 class VertexProvider(BaseProvider):
@@ -34,7 +61,6 @@ class VertexProvider(BaseProvider):
 
     def _call(self, ctx: CallContext):
         try:
-            import vertexai
             from vertexai.generative_models import GenerativeModel
         except ImportError:
             logger.warning("google-cloud-aiplatform not installed — install to use Vertex AI")
@@ -47,7 +73,7 @@ class VertexProvider(BaseProvider):
             return None
         location = cfg.get("gcp_location", "us-central1")
 
-        vertexai.init(project=project, location=location)
+        _ensure_initialized(project, location)
         model = GenerativeModel(ctx.model)
 
         # Vertex SDK doesn't have a top-level system prompt for vanilla Gemini;

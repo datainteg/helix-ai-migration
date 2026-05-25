@@ -35,6 +35,32 @@ def _build_model_id(provider_type: str, model: str) -> str:
     return f"{prefix}{model}"
 
 
+def _build_model(provider_type: str, model: str, api_key: str, base_url: str | None):
+    """Construct a PydanticAI model using explicit Provider constructors.
+
+    Avoids mutating os.environ — that approach was a race hazard across
+    concurrent agent calls. Each call instead owns its own Provider+Model
+    pair with the api_key passed directly.
+    """
+    ptype = provider_type.lower()
+
+    if ptype == "anthropic":
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+        return AnthropicModel(model, provider=AnthropicProvider(api_key=api_key))
+
+    if ptype == "google":
+        from pydantic_ai.models.gemini import GeminiModel
+        from pydantic_ai.providers.google_gla import GoogleGLAProvider
+        return GeminiModel(model, provider=GoogleGLAProvider(api_key=api_key))
+
+    # openai-compatible family: openai, deepseek, openrouter, custom, local.
+    from pydantic_ai.models.openai import OpenAIModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+    provider = OpenAIProvider(api_key=api_key, base_url=base_url) if base_url else OpenAIProvider(api_key=api_key)
+    return OpenAIModel(model, provider=provider)
+
+
 def call_pydantic_ai(
     *,
     agent_name: str,
@@ -60,45 +86,34 @@ def call_pydantic_ai(
         return None
 
     try:
-        model_id = _build_model_id(provider_type, model)
-        # PydanticAI reads API keys from env by default; set the relevant one.
-        import os
-
-        env_var = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GEMINI_API_KEY",
-            "deepseek": "OPENAI_API_KEY",
-            "openrouter": "OPENAI_API_KEY",
-            "custom": "OPENAI_API_KEY",
-            "local": "OPENAI_API_KEY",
-        }.get(provider_type.lower(), "OPENAI_API_KEY")
-
-        previous = os.environ.get(env_var)
-        os.environ[env_var] = api_key
+        # Build the model with an explicit provider. No env-var mutation: this
+        # avoids the global-state race seen when multiple agents fire concurrently
+        # with different keys.
         try:
-            agent = Agent(model_id, result_type=output_model, system_prompt=system_prompt)
-            run = agent.run_sync(user_prompt)
-            result = getattr(run, "data", None) or getattr(run, "output", None)
-            if isinstance(result, output_model):
-                logger.info(
-                    "PydanticAI [ok] agent=%s provider=%s model=%s",
-                    agent_name,
-                    provider_type,
-                    model,
-                )
-                return result
-            logger.warning(
-                "PydanticAI returned non-typed result agent=%s type=%s",
-                agent_name,
-                type(result).__name__,
-            )
+            llm_model = _build_model(provider_type, model, api_key, base_url)
+        except ImportError as exc:
+            # PydanticAI sub-package for this provider isn't installed. Caller
+            # falls back to the legacy httpx client.
+            logger.info("pydantic_ai provider unavailable for %s: %s", provider_type, exc)
             return None
-        finally:
-            if previous is None:
-                os.environ.pop(env_var, None)
-            else:
-                os.environ[env_var] = previous
+
+        agent = Agent(llm_model, result_type=output_model, system_prompt=system_prompt)
+        run = agent.run_sync(user_prompt)
+        result = getattr(run, "data", None) or getattr(run, "output", None)
+        if isinstance(result, output_model):
+            logger.info(
+                "PydanticAI [ok] agent=%s provider=%s model=%s",
+                agent_name,
+                provider_type,
+                model,
+            )
+            return result
+        logger.warning(
+            "PydanticAI returned non-typed result agent=%s type=%s",
+            agent_name,
+            type(result).__name__,
+        )
+        return None
 
     except Exception as exc:  # noqa: BLE001 — caller falls back on None
         logger.warning(

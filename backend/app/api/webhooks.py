@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.services.secret_service import encrypt_value
+from app.security.ssrf import SSRFViolation, validate_external_url
 from app.models.webhook import WebhookEndpoint, WebhookDelivery
 from app.api.audit import write_audit
 
@@ -39,6 +40,10 @@ def create_webhook(
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org_id(db, user_id)
+    try:
+        validate_external_url(data.url)
+    except SSRFViolation as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid webhook URL: {exc}")
     # HMAC signing secret is stored encrypted; the signer decrypts on send.
     encrypted_secret = encrypt_value(data.secret) if data.secret else None
     ep = WebhookEndpoint(
@@ -68,9 +73,12 @@ def update_webhook(
     org_id = _resolve_org_id(db, user_id)
     ep = db.query(WebhookEndpoint).filter(WebhookEndpoint.id == webhook_id, WebhookEndpoint.organization_id == org_id).first()
     if not ep:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Webhook not found")
     if data.url:
+        try:
+            validate_external_url(data.url)
+        except SSRFViolation as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid webhook URL: {exc}")
         ep.url = data.url
     if data.events:
         ep.events = data.events
@@ -107,8 +115,6 @@ def list_deliveries(
     user_id: str = Depends(require_permission("admin:llm:read")),
     db: Session = Depends(get_db),
 ):
-    from fastapi import HTTPException
-
     org_id = _resolve_org_id(db, user_id)
     # Verify the webhook endpoint actually belongs to the caller's org before
     # exposing its delivery history (payload + response_body may contain secrets).

@@ -8,6 +8,9 @@ interface AuthState {
   user: { email: string; name: string } | null;
   login: (email: string, password: string) => Promise<void>;
   setupFirstAdmin: (data: FirstAdminData) => Promise<void>;
+  /** Apply a token captured outside the helper (e.g. multi-step wizard
+   * persisting via direct API calls). Does NOT redirect; caller controls flow. */
+  setSession: (token: string, user?: { email: string; name: string } | null) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -59,7 +62,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     localStorage.setItem("helix_token", data.access_token);
     setToken(data.access_token);
-    setUser({ email, name: email.split("@")[0] });
+    // Fetch the real user record so the UI does not fall back to
+    // email.split("@")[0] (the placeholder used until /auth/me responds).
+    try {
+      const meRes = await fetch(`${API_BASE}/api/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${data.access_token}` },
+      });
+      if (meRes.ok) {
+        const me = await meRes.json();
+        setUser({ email: me.email, name: me.name });
+      } else {
+        setUser({ email, name: email.split("@")[0] });
+      }
+    } catch {
+      setUser({ email, name: email.split("@")[0] });
+    }
     router.push("/dashboard");
   };
 
@@ -87,8 +104,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/login");
   };
 
+  const setSession = (newToken: string, newUser?: { email: string; name: string } | null) => {
+    try { localStorage.setItem("helix_token", newToken); } catch { /* SSR safe */ }
+    setToken(newToken);
+    if (newUser !== undefined) setUser(newUser);
+  };
+
   return (
-    <AuthContext.Provider value={{ token, user, login: loginFn, setupFirstAdmin, logout, loading }}>
+    <AuthContext.Provider value={{ token, user, login: loginFn, setupFirstAdmin, setSession, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

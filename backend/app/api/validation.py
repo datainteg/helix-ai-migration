@@ -67,7 +67,8 @@ async def start_validation(
 
     if rules:
         from app.services.validation_service import execute_validation_run
-        background_tasks.add_task(execute_validation_run, db, run, rules, connector_configs)
+        rule_ids = [r.id for r in rules]
+        background_tasks.add_task(execute_validation_run, run.id, rule_ids, connector_configs)
         return {"id": run.id, "status": "pending", "rule_count": len(rules)}
 
     run.status = "completed"
