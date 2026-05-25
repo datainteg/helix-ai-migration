@@ -7,33 +7,67 @@
  * active sprint. Tab-filterable, with optimistic UI feedback on approve/reject.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { ShieldCheck, CheckCircle2 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Card, Chip, MetricCell, Tabs, EmptyState } from "@/components/ui";
-import { SprintApprovalCard } from "@/components/sprints";
 import {
-  getActiveSprint,
-  getApprovalsForSprint,
-  PROJECT_ID,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  LoadingState,
+  MetricCell,
+  Tabs,
+} from "@/components/ui";
+import { SprintApprovalCard } from "@/components/sprints";
+import { useAuth } from "@/lib/auth-context";
+import {
+  decideApproval,
+  fetchActiveSprint,
+  fetchApprovals,
+  seedSprints,
+  type Sprint,
+  type SprintApproval,
 } from "@/lib/sprints";
-import type { SprintApproval } from "@/lib/sprints";
 
 type Filter = "all" | "pending" | "approved" | "rejected";
 type ApprovalStatus = SprintApproval["status"];
 
 export default function SprintApprovalPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const active = getActiveSprint();
-  const approvals = getApprovalsForSprint(active.id);
-
+  const [active, setActive] = useState<Sprint | null>(null);
+  const [approvals, setApprovals] = useState<SprintApproval[]>([]);
   const [filter, setFilter] = useState<Filter>("pending");
-  // Tracks user-driven outcomes per approval id (since the source list is static).
   const [decisions, setDecisions] = useState<Record<string, "approved" | "rejected">>({});
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchActiveSprint(token, projectId)
+      .then(setActive)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  useEffect(() => {
+    if (!token || !active) {
+      setApprovals([]);
+      return;
+    }
+    fetchApprovals(token, active.id)
+      .then(setApprovals)
+      .catch(() => setApprovals([]));
+  }, [token, active]);
 
   const resolve = (a: SprintApproval): ApprovalStatus => decisions[a.id] ?? a.status;
 
@@ -61,10 +95,56 @@ export default function SprintApprovalPage() {
 
   const handleApprove = (id: string) => {
     setDecisions((d) => ({ ...d, [id]: "approved" }));
+    if (token) decideApproval(token, id, "approved").catch(() => {});
   };
   const handleReject = (id: string) => {
     setDecisions((d) => ({ ...d, [id]: "rejected" }));
+    if (token) decideApproval(token, id, "rejected").catch(() => {});
   };
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Approval center"
+        crumbs={["Projects", projectId, "Sprints", "Approvals"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (!active) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Approval center"
+        crumbs={["Projects", projectId, "Sprints", "Approvals"]}
+      >
+        <Card>
+          <EmptyState
+            title="No active sprint"
+            description="Start a sprint or run the seed to populate demo data."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

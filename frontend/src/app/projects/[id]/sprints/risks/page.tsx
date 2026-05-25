@@ -7,18 +7,22 @@
  * 5x5 likelihood × impact heatmap, and detail cards sorted by severity.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/layout";
-import { Card, MetricCell } from "@/components/ui";
+import { Button, Card, EmptyState, LoadingState, MetricCell } from "@/components/ui";
 import { SprintRiskCard } from "@/components/sprints";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getActiveSprint,
-  getRisksForSprint,
-  PROJECT_ID,
+  fetchActiveSprint,
+  fetchRisks,
+  seedSprints,
+  type RiskCategory,
+  type RiskLevel,
+  type Sprint,
+  type SprintRisk,
 } from "@/lib/sprints";
-import type { RiskCategory, RiskLevel, SprintRisk } from "@/lib/sprints";
 
 const LEVEL_ORDER: Record<RiskLevel, number> = { critical: 0, high: 1, med: 2, low: 3 };
 const LEVEL_COLOR: Record<RiskLevel, string> = {
@@ -47,10 +51,35 @@ const LEVEL_CELL: Record<RiskLevel, { lik: number; imp: number }> = {
 
 export default function SprintRisksPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const active = getActiveSprint();
-  const risks = getRisksForSprint(active.id);
+  const [active, setActive] = useState<Sprint | null>(null);
+  const [risks, setRisks] = useState<SprintRisk[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchActiveSprint(token, projectId)
+      .then(setActive)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  useEffect(() => {
+    if (!token || !active) {
+      setRisks([]);
+      return;
+    }
+    fetchRisks(token, active.id)
+      .then(setRisks)
+      .catch(() => setRisks([]));
+  }, [token, active]);
 
   const counts = useMemo(() => {
     const c: Record<RiskLevel, number> = { critical: 0, high: 0, med: 0, low: 0 };
@@ -87,6 +116,50 @@ export default function SprintRisksPage() {
     byCategory.forEach((v) => { if (v.length > m) m = v.length; });
     return Math.max(1, m);
   }, [byCategory]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Risk dashboard"
+        crumbs={["Projects", projectId, "Sprints", "Risks"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (!active) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Risk dashboard"
+        crumbs={["Projects", projectId, "Sprints", "Risks"]}
+      >
+        <Card>
+          <EmptyState
+            title="No active sprint"
+            description="Start a sprint or run the seed to populate demo data."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

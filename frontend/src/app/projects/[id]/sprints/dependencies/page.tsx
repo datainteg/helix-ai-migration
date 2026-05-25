@@ -8,7 +8,7 @@
  * (P0 count, blocked count, completion ratio) and lists blocked task titles.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import ReactFlow, {
   Background, BackgroundVariant, Controls,
@@ -18,14 +18,18 @@ import "reactflow/dist/style.css";
 import { AlertTriangle, CheckCircle2, Circle } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Card, Chip } from "@/components/ui";
+import { Button, Card, Chip, EmptyState, LoadingState } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getActiveSprint,
-  getTasksForSprint,
-  PROJECT_ID,
+  fetchActiveSprint,
+  fetchTasks,
+  seedSprints,
+  type Priority,
+  type Sprint,
+  type SprintTask,
+  type TaskStatus,
 } from "@/lib/sprints";
-import type { Priority, SprintTask, TaskStatus } from "@/lib/sprints";
 
 // Status → column index for auto-layout.
 const STATUS_COL: Record<TaskStatus, number> = {
@@ -100,9 +104,35 @@ const NODE_TYPES = { task: TaskNode };
 
 export default function SprintDependenciesPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
-  const active = getActiveSprint();
-  const tasks = getTasksForSprint(active.id);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
+
+  const [active, setActive] = useState<Sprint | null>(null);
+  const [tasks, setTasks] = useState<SprintTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchActiveSprint(token, projectId)
+      .then(setActive)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  useEffect(() => {
+    if (!token || !active) {
+      setTasks([]);
+      return;
+    }
+    fetchTasks(token, active.id)
+      .then(setTasks)
+      .catch(() => setTasks([]));
+  }, [token, active]);
 
   const { rfNodes, rfEdges } = useMemo(() => {
     // Build columns by status; row = ordinal within column.
@@ -154,6 +184,50 @@ export default function SprintDependenciesPage() {
     });
     return { rfNodes: nodes, rfEdges: edges };
   }, [tasks]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINT DEPENDENCIES · ${projectId}`}
+        title="Task Dependency Graph"
+        crumbs={["Projects", projectId, "Sprints", "Dependencies"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (!active) {
+    return (
+      <AppShell
+        eyebrow={`SPRINT DEPENDENCIES · ${projectId}`}
+        title="Task Dependency Graph"
+        crumbs={["Projects", projectId, "Sprints", "Dependencies"]}
+      >
+        <Card>
+          <EmptyState
+            title="No active sprint"
+            description="Start a sprint or run the seed to populate demo data."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   const p0Count        = tasks.filter((t) => t.priority === "P0").length;
   const blockedTasks   = tasks.filter((t) => t.status === "blocked");

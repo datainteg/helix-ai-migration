@@ -7,7 +7,7 @@
  * task detail panel on the right.
  */
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   Sparkles,
@@ -26,6 +26,7 @@ import {
   Tabs,
   Avatar,
   EmptyState,
+  LoadingState,
 } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import {
@@ -33,11 +34,13 @@ import {
   TASK_STATUS_ACCENT,
   TASK_STATUS_LABEL,
 } from "@/components/sprints";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getSprints,
-  getTasksForSprint,
-  getActiveSprint,
-  PROJECT_ID,
+  fetchSprints,
+  fetchActiveSprint,
+  fetchTasks,
+  seedSprints,
+  type Sprint,
   type SprintTask,
 } from "@/lib/sprints";
 
@@ -46,20 +49,96 @@ const VAL_TONE = { pass: "ok", warn: "warn", fail: "err", pending: "default" } a
 
 export default function SprintBoardPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const sprints = getSprints();
-  const active = getActiveSprint();
-  const [selectedSprintId, setSelectedSprintId] = useState<string>(active.id);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [active, setActive] = useState<Sprint | null>(null);
+  const [selectedSprintId, setSelectedSprintId] = useState<string>("");
+  const [tasks, setTasks] = useState<SprintTask[]>([]);
   const [selectedTask, setSelectedTask] = useState<SprintTask | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      fetchSprints(token, projectId),
+      fetchActiveSprint(token, projectId),
+    ])
+      .then(([list, act]) => {
+        setSprints(list);
+        setActive(act);
+        setSelectedSprintId(act?.id ?? list[0]?.id ?? "");
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  useEffect(() => {
+    if (!token || !selectedSprintId) {
+      setTasks([]);
+      return;
+    }
+    fetchTasks(token, selectedSprintId)
+      .then(setTasks)
+      .catch(() => setTasks([]));
+  }, [token, selectedSprintId]);
 
   const tabs = useMemo(
     () => sprints.map((s) => ({ id: s.id, label: s.name, count: s.metrics.tasksTotal })),
     [sprints]
   );
-  const tasks = useMemo(() => getTasksForSprint(selectedSprintId), [selectedSprintId]);
 
   const handleTaskClick = (task: SprintTask) => setSelectedTask(task);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint planning board"
+        crumbs={["Projects", projectId, "Sprints", "Board"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (sprints.length === 0 || !active) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint planning board"
+        crumbs={["Projects", projectId, "Sprints", "Board"]}
+      >
+        <Card>
+          <EmptyState
+            title="No active sprint"
+            description="Start a sprint or run the seed to populate demo data."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

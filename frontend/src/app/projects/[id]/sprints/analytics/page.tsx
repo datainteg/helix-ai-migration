@@ -7,14 +7,30 @@
  * validation + recon trend lines, and a per-sprint stats table.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, BarChart3 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card, MetricCell, Donut, AreaChart, StatusBadge } from "@/components/ui";
+import {
+  AreaChart,
+  Button,
+  Card,
+  Donut,
+  EmptyState,
+  LoadingState,
+  MetricCell,
+  StatusBadge,
+} from "@/components/ui";
 import { SprintVelocityChart } from "@/components/sprints";
-import { getSprints, getVelocity, PROJECT_ID } from "@/lib/sprints";
+import { useAuth } from "@/lib/auth-context";
+import {
+  fetchSprints,
+  fetchVelocity,
+  seedSprints,
+  type Sprint,
+  type VelocityPoint,
+} from "@/lib/sprints";
 
 // Fake agent contribution split — purely illustrative for analytics demo.
 const AGENT_BREAKDOWN: Array<{ label: string; value: number; color: string }> = [
@@ -29,10 +45,31 @@ const AGENT_BREAKDOWN: Array<{ label: string; value: number; color: string }> = 
 
 export default function SprintAnalyticsPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const sprints = getSprints();
-  const velocity = getVelocity();
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [velocity, setVelocity] = useState<VelocityPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      fetchSprints(token, projectId),
+      fetchVelocity(token, projectId),
+    ])
+      .then(([list, vel]) => {
+        setSprints(list);
+        setVelocity(vel);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
 
   const avgVelocity = useMemo(() => {
     const delivered = velocity.map((v) => v.delivered);
@@ -68,6 +105,50 @@ export default function SprintAnalyticsPage() {
   );
 
   const totalAgent = AGENT_BREAKDOWN.reduce((a, b) => a + b.value, 0);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint analytics"
+        crumbs={["Projects", projectId, "Sprints", "Analytics"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (sprints.length === 0) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint analytics"
+        crumbs={["Projects", projectId, "Sprints", "Analytics"]}
+      >
+        <Card>
+          <EmptyState
+            title="No sprints yet"
+            description="Run the seed to populate demo sprints, or create one from the API."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

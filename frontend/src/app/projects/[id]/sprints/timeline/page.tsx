@@ -8,13 +8,14 @@
  * checkpoints derived from sprint milestones / endDates.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Filter } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card, Chip } from "@/components/ui";
-import { getSprints, PROJECT_ID, type Sprint } from "@/lib/sprints";
+import { Button, Card, Chip, EmptyState, LoadingState } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
+import { fetchSprints, seedSprints, type Sprint } from "@/lib/sprints";
 
 const HEALTH_FILL: Record<Sprint["health"], string> = {
   "on-track":  "var(--con-ok)",
@@ -49,17 +50,33 @@ interface MigrationCheckpoint {
 
 export default function SprintTimelinePage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const sprints = getSprints();
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchSprints(token, projectId)
+      .then(setSprints)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
 
   // Compute global date range
   const range = useMemo(() => {
+    if (sprints.length === 0) return { min: 0, max: 0, span: 1 };
     const starts = sprints.map((s) => new Date(s.startDate).getTime());
     const ends = sprints.map((s) => new Date(s.endDate).getTime());
     const min = Math.min(...starts);
     const max = Math.max(...ends);
-    return { min, max, span: max - min };
+    return { min, max, span: Math.max(1, max - min) };
   }, [sprints]);
 
   // x-coordinate within the track (relative to LABEL_COL_WIDTH offset)
@@ -72,6 +89,7 @@ export default function SprintTimelinePage() {
   // Month markers across the visible span
   const monthMarkers = useMemo(() => {
     const out: Array<{ x: number; label: string }> = [];
+    if (sprints.length === 0) return out;
     const d = new Date(range.min);
     d.setUTCDate(1);
     while (d.getTime() <= range.max) {
@@ -85,20 +103,84 @@ export default function SprintTimelinePage() {
       d.setUTCMonth(d.getUTCMonth() + 1);
     }
     return out;
-  }, [range]);
+  }, [range, sprints.length]);
 
-  // Migration-wide checkpoints derived from sprint milestones / endDates
+  // Migration-wide checkpoints derived from sprint milestones / endDates.
+  // Defensive: works with any sprint count (>=1).
   const checkpoints = useMemo<MigrationCheckpoint[]>(() => {
-    const s = (idx: number) => sprints[idx];
-    return [
-      { id: "cp1", label: "Discovery Complete",   date: s(0).endDate, color: "var(--con-ok)" },
-      { id: "cp2", label: "Mapping Complete",     date: s(1).endDate, color: "var(--con-ok)" },
-      { id: "cp3", label: "Conversion Complete",  date: s(2).endDate, color: "var(--con-warn)" },
-      { id: "cp4", label: "Validation Passed",    date: s(3).milestones[1]?.date ?? s(3).endDate, color: "var(--con-info)" },
-      { id: "cp5", label: "Recon Approved",       date: s(3).endDate, color: "var(--con-info)" },
-      { id: "cp6", label: "Production Ready",     date: s(4).endDate, color: "var(--con-brand)" },
+    const s = (idx: number) => sprints[Math.min(idx, sprints.length - 1)];
+    if (sprints.length === 0) return [];
+    const palette = [
+      "var(--con-ok)",
+      "var(--con-ok)",
+      "var(--con-warn)",
+      "var(--con-info)",
+      "var(--con-info)",
+      "var(--con-brand)",
     ];
+    const labels = [
+      "Discovery Complete",
+      "Mapping Complete",
+      "Conversion Complete",
+      "Validation Passed",
+      "Recon Approved",
+      "Production Ready",
+    ];
+    return labels.map((label, i) => {
+      const target = s(i);
+      const customMilestone = i === 3 ? target.milestones[1]?.date : undefined;
+      return {
+        id: `cp${i + 1}`,
+        label,
+        date: customMilestone ?? target.endDate,
+        color: palette[i] ?? "var(--con-brand)",
+      };
+    });
   }, [sprints]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint timeline & roadmap"
+        crumbs={["Projects", projectId, "Sprints", "Timeline"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (sprints.length === 0) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint timeline & roadmap"
+        crumbs={["Projects", projectId, "Sprints", "Timeline"]}
+      >
+        <Card>
+          <EmptyState
+            title="No sprints yet"
+            description="Run the seed to populate demo sprints, or create one from the API."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   const sprintsHeight = sprints.length * ROW_HEIGHT;
   const totalHeight =
@@ -225,7 +307,8 @@ export default function SprintTimelinePage() {
                     />
                     {/* Progress overlay */}
                     {(() => {
-                      const pct = s.metrics.storyPointsDone / s.metrics.storyPointsTotal;
+                      const denom = s.metrics.storyPointsTotal || 1;
+                      const pct = s.metrics.storyPointsDone / denom;
                       const pw = Math.max(0, Math.round(w * pct));
                       return (
                         <rect

@@ -4,17 +4,30 @@
  * /projects/[id]/sprints/releases — Migration Release Dashboard.
  *
  * Upcoming release hero + stage timeline + deployment checklist + all
- * releases table for the project. Pulls from `getReleases()`.
+ * releases table for the project. Pulls from the releases API.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { CheckCircle2, Circle, Rocket, ShieldCheck, ShieldAlert } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Card, Chip, ProgressBar, StatusBadge, EmptyState } from "@/components/ui";
-import { getReleases, PROJECT_ID } from "@/lib/sprints";
-import type { ReleaseStage } from "@/lib/sprints";
+import {
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  LoadingState,
+  ProgressBar,
+  StatusBadge,
+} from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
+import {
+  fetchReleases,
+  seedSprints,
+  type MigrationRelease,
+  type ReleaseStage,
+} from "@/lib/sprints";
 
 const STAGES: { id: ReleaseStage; label: string }[] = [
   { id: "planned",          label: "Planned" },
@@ -40,9 +53,25 @@ function scoreColor(v: number, kind: "validation" | "recon"): string {
 
 export default function MigrationReleasesPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const releases = getReleases();
+  const [releases, setReleases] = useState<MigrationRelease[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchReleases(token, projectId)
+      .then(setReleases)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
   const upcoming = releases[0];
 
   const checklistDone = useMemo(() => {
@@ -51,6 +80,28 @@ export default function MigrationReleasesPage() {
     const done = upcoming.checklist.filter((c) => c.done).length;
     return Math.round((done / upcoming.checklist.length) * 100);
   }, [upcoming]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Migration releases"
+        crumbs={["Projects", projectId, "Sprints", "Releases"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
 
   if (!upcoming) {
     return (
@@ -63,7 +114,12 @@ export default function MigrationReleasesPage() {
           <EmptyState
             icon={<Rocket className="h-4 w-4" />}
             title="No releases scheduled"
-            description="Releases will appear here once the first cutover is planned."
+            description="Run the seed to populate demo data, or schedule a cutover from the API."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
           />
         </Card>
       </AppShell>

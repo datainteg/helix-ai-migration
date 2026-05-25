@@ -7,17 +7,19 @@
  * based) with a colour/status legend and side-panel summary statistics.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Maximize2 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, EmptyState, LoadingState } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import { MigrationMappingCanvas } from "@/components/sprints";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getMappingGraph,
-  PROJECT_ID,
+  fetchMapping,
+  seedSprints,
+  type MappingEdge,
   type MappingNode as MNode,
   type MappingNodeStatus,
 } from "@/lib/sprints";
@@ -34,9 +36,28 @@ const STATUS_LIST: Array<{ key: MappingNodeStatus; label: string; color: string 
 
 export default function SprintMappingPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const { nodes, edges } = getMappingGraph();
+  const [nodes, setNodes] = useState<MNode[]>([]);
+  const [edges, setEdges] = useState<MappingEdge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchMapping(token, projectId)
+      .then((data) => {
+        setNodes(data.nodes);
+        setEdges(data.edges);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
 
   // Aggregate counts per status
   const statusCounts = useMemo(() => {
@@ -69,6 +90,50 @@ export default function SprintMappingPage() {
         label: e.label,
       }));
   }, [edges, nodes]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow="SPRINT MAPPING SHOWCASE"
+        title="Migration Execution Mapping"
+        crumbs={["Projects", projectId, "Sprints", "Mapping"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (nodes.length === 0) {
+    return (
+      <AppShell
+        eyebrow="SPRINT MAPPING SHOWCASE"
+        title="Migration Execution Mapping"
+        crumbs={["Projects", projectId, "Sprints", "Mapping"]}
+      >
+        <Card>
+          <EmptyState
+            title="No mapping data yet"
+            description="Run the seed to populate demo sprints, or create one from the API."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

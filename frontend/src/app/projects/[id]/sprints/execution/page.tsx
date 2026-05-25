@@ -7,19 +7,21 @@
  * runs, failed queue (with retry), and blocked workflows from sprint tasks.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { RefreshCw, Pause, AlertTriangle, RotateCw } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card, Chip, MetricCell } from "@/components/ui";
+import { Button, Card, Chip, EmptyState, LoadingState, MetricCell } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getExecutions,
-  getActiveSprint,
-  getTasksForSprint,
-  PROJECT_ID,
+  fetchActiveSprint,
+  fetchExecutions,
+  fetchTasks,
+  seedSprints,
   type AgentExecution,
+  type Sprint,
   type SprintTask,
 } from "@/lib/sprints";
 
@@ -57,11 +59,42 @@ function formatStarted(iso: string): string {
 
 export default function SprintExecutionPage() {
   const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? PROJECT_ID);
+  const projectId = String(params?.id ?? "");
+  const { token } = useAuth();
 
-  const executions = getExecutions();
-  const active = getActiveSprint();
-  const tasks = getTasksForSprint(active.id);
+  const [executions, setExecutions] = useState<AgentExecution[]>([]);
+  const [active, setActive] = useState<Sprint | null>(null);
+  const [tasks, setTasks] = useState<SprintTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    if (!token || !projectId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      fetchExecutions(token, projectId),
+      fetchActiveSprint(token, projectId),
+    ])
+      .then(([ex, act]) => {
+        setExecutions(ex);
+        setActive(act);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token, projectId]);
+
+  useEffect(() => {
+    if (!token || !active) {
+      setTasks([]);
+      return;
+    }
+    fetchTasks(token, active.id)
+      .then(setTasks)
+      .catch(() => setTasks([]));
+  }, [token, active]);
 
   const counts = useMemo(() => {
     return {
@@ -71,6 +104,50 @@ export default function SprintExecutionPage() {
       retrying:  executions.filter((e) => e.status === "retrying").length,
     };
   }, [executions]);
+
+  const handleSeed = () => {
+    if (!token || !projectId) return;
+    setSeeding(true);
+    seedSprints(token, projectId)
+      .then(() => {
+        if (typeof window !== "undefined") window.location.reload();
+      })
+      .catch(() => setSeeding(false));
+  };
+
+  if (loading) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint execution"
+        crumbs={["Projects", projectId, "Sprints", "Execution"]}
+      >
+        <LoadingState />
+      </AppShell>
+    );
+  }
+
+  if (!active) {
+    return (
+      <AppShell
+        eyebrow={`SPRINTS · ${projectId}`}
+        title="Sprint execution"
+        crumbs={["Projects", projectId, "Sprints", "Execution"]}
+      >
+        <Card>
+          <EmptyState
+            title="No active sprint"
+            description="Start a sprint or run the seed to populate demo data."
+            action={
+              <Button variant="primary" loading={seeding} onClick={handleSeed}>
+                Run seed
+              </Button>
+            }
+          />
+        </Card>
+      </AppShell>
+    );
+  }
 
   const activeRuns = executions.filter((e) =>
     ["running", "retrying", "queued"].includes(e.status)
