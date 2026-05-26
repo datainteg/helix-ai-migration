@@ -49,19 +49,112 @@ ciphertext.
 
 ## Per-org DEK rotation (DI-C1)
 
-`POST /admin/org/rotate-dek` is now safe to call: it re-encrypts every
-per-org ciphertext column inside the same transaction before the old
-DEK is marked inactive. Reads during the rotation continue to succeed
-via `_get_dek_for_decrypt`, which walks historical DEKs in reverse
-version order.
+`POST /admin/org/rotate-dek` is now safe to call. The rotation flow:
 
-If the re-encryption pass fails, the transaction rolls back and the
-old DEK remains active — no data is bricked.
+1. Flips the prior active DEK row to `is_active=False` and stamps
+   `rotated_at`.
+2. Inserts a new DEK row (`is_active=True`, `key_version` bumped).
+3. Walks the per-org DEK target list and rewraps each ciphertext
+   column from old DEK -> new DEK.
+4. Commits.
 
-Operators adding a new per-org-encrypted column MUST extend
-`envelope_encryption_service.re_encrypt_all_secrets`'s default
-`targets` list so rotation includes the new column. Silent omission
-would leave the new column un-rewrappable on rotation.
+If the re-encryption pass fails, the entire transaction rolls back
+and the old DEK remains the active one — no data is bricked. Reads
+during the rotation continue to succeed via `_get_dek_for_decrypt`,
+which walks historical (inactive) DEKs in reverse version order.
+
+### Uniqueness model (DI-C1 follow-up)
+
+Originally `org_data_encryption_keys.organization_id` was `UNIQUE`,
+which guaranteed `IntegrityError` on the second-row insert that
+rotation requires. Migration `2af2b45b4051_dek_partial_unique_active`
+replaces the full unique with a **partial unique index** on
+`(organization_id) WHERE is_active = true`:
+
+- At most ONE active DEK per org (still enforced at the DB layer).
+- Any number of inactive historical DEKs may coexist (required so
+  the legacy-DEK decrypt walk keeps working).
+
+The model declaration in `app/models/encryption.py` mirrors this with
+an `Index(..., unique=True, postgresql_where=is_active==True,
+sqlite_where=is_active==True)` so `Base.metadata.create_all` (used by
+the test suite) produces the same shape.
+
+### Per-org-DEK targets vs flat-KEK targets
+
+There are TWO encryption paths in the codebase, and rotation handles
+them via different functions:
+
+| Path | Sealed via | Rotated via |
+| --- | --- | --- |
+| Per-org DEK | `encrypt_for_org` / `decrypt_for_org` | `rotate_dek` -> `re_encrypt_all_secrets` |
+| Flat KEK (master) | `secret_service.encrypt_value` (MultiFernet) | `rotate_kek_secrets` (opportunistic rewrap via `rewrap_if_legacy`) |
+
+`re_encrypt_all_secrets`'s default `targets` list is **empty** in
+HEAD: no production column uses the per-org DEK yet
+(`LLMProviderSecret.encrypted_api_key` is sealed via the flat KEK).
+Mixing the two paths is the original DI-C1 bug — passing a
+flat-KEK column to `re_encrypt_all_secrets` gets `InvalidToken` on
+every row and silently rewraps nothing.
+
+When a new column starts using `encrypt_for_org`, register it in the
+`_DEFAULT_PER_ORG_DEK_TARGETS` list at the top of
+`envelope_encryption_service.py`. Silent omission would leave the new
+column un-rewrappable on rotation.
+
+### Operator runbook — rotating the DEK
+
+```sh
+# 1. Take a logical backup (PITR snapshot or pg_dump) of
+#    public.org_data_encryption_keys plus every table listed in
+#    _DEFAULT_PER_ORG_DEK_TARGETS BEFORE rotation. The rotation is
+#    transactional, but a corrupted KEK or external surprise would
+#    leave you needing this.
+pg_dump -t org_data_encryption_keys -t llm_provider_secrets ...
+
+# 2. Apply the schema fix (drops full unique, adds partial unique).
+cd backend && alembic upgrade head
+
+# 3. Trigger the rotation for one org via the admin API.
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H "X-Org-Id: $ORG_ID" \
+     "$API/admin/org/rotate-dek"
+
+# 4. Confirm the response. Expected shape:
+#    {"created": false, "rewrapped": {...}, "new_version": "2"}
+#
+#    For HEAD, "rewrapped" will be {} until a per-org-DEK column is
+#    registered. That is expected and not a bug — the flat-KEK
+#    columns rotate via `rotate_kek_secrets` instead.
+
+# 5. Spot-check that the prior row is preserved.
+psql -c "SELECT key_version, is_active, rotated_at
+           FROM org_data_encryption_keys
+          WHERE organization_id = '$ORG_ID'
+          ORDER BY key_version::int;"
+
+# Expected: 2 rows -- version 1 (is_active=f, rotated_at NOT NULL),
+#                     version 2 (is_active=t, rotated_at NULL).
+```
+
+### Operator runbook — rewrapping flat-KEK ciphertext
+
+If the master `ENCRYPTION_KEY` is being promoted away from the legacy
+sha256-derived key, walk every flat-KEK column with the opportunistic
+rewrap helper:
+
+```py
+from app.db.session import SessionLocal
+from app.services.envelope_encryption_service import rotate_kek_secrets
+
+with SessionLocal() as db:
+    counts = rotate_kek_secrets(db)
+    print(counts)   # {"llm_provider_secrets": <N>}
+```
+
+`rewrap_if_legacy` (in `secret_service.py`) returns `None` for
+ciphertext that's already direct-key-sealed, so this is idempotent
+and safe to re-run.
 
 ## UUID -> String(36) alignment (DI-C5)
 

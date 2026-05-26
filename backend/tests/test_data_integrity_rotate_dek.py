@@ -1,26 +1,25 @@
-"""DI-C1 regression: rotate_dek must re-encrypt before deactivating.
+"""DI-C1 regression: rotate_dek must complete without IntegrityError
+and must keep historical inactive DEK rows so prior ciphertext is
+still decryptable via `_get_dek_for_decrypt`'s fallback walk.
 
-Before the DI-C1 fix, rotate_dek flipped the old DEK's is_active=False
-and inserted a new one without touching ciphertext. Any subsequent
-decrypt_for_org hit the new DEK and failed with InvalidToken.
+This file replaces the original assumption that
+`LLMProviderSecret.encrypted_api_key` is rewrapped on rotation. That
+column is sealed with `secret_service.encrypt_value` (flat-KEK
+MultiFernet over the master KEK), NOT with `encrypt_for_org` (per-org
+DEK), so rotation here would silently `InvalidToken`-skip it. See
+`docs/MIGRATION_NOTES.md` for the KEK-rotation runbook used to rewrap
+flat-KEK ciphertext.
 
-This test:
-  1. Seeds an org with a DEK + a row of ciphertext (via the
-     LLMProviderSecret table, the default re_encrypt target).
-  2. Calls rotate_dek with the default targets.
-  3. Decrypts the row using the post-rotation active DEK and asserts
-     the plaintext round-trips.
+For the per-org-DEK uniqueness / rotate-twice regression coverage,
+see also `test_rotate_dek_partial_unique.py`.
 """
 
 from __future__ import annotations
 
 import uuid
 
-import pytest
-
 from app.models.encryption import OrgDataEncryptionKey
 from app.models.identity import Organization
-from app.models.llm import LLMProvider, LLMProviderSecret
 from app.services.envelope_encryption_service import (
     decrypt_for_org,
     encrypt_for_org,
@@ -28,66 +27,49 @@ from app.services.envelope_encryption_service import (
 )
 
 
-def _make_org_with_provider(db, org_id: str, plaintext_secret: str) -> str:
-    """Create org + LLM provider + encrypted secret, return secret_id."""
+def _seed_org(db) -> str:
+    org_id = str(uuid.uuid4())
     db.add(Organization(id=org_id, name="t", slug=f"t-{uuid.uuid4().hex[:6]}"))
     db.commit()
-
-    provider = LLMProvider(
-        id=str(uuid.uuid4()),
-        organization_id=org_id,
-        provider_type="anthropic",
-        name="prod",
-        default_model="claude-haiku-4-5",
-    )
-    db.add(provider)
-    db.commit()
-
-    # Encrypt with the org DEK (this also creates the DEK on first call).
-    ciphertext = encrypt_for_org(db, org_id, plaintext_secret)
-    secret = LLMProviderSecret(
-        id=str(uuid.uuid4()),
-        provider_id=provider.id,
-        encrypted_api_key=ciphertext,
-        key_version=1,
-    )
-    db.add(secret)
-    db.commit()
-    return secret.id
+    return org_id
 
 
 def test_rotate_dek_preserves_secret_readability(db_session):
-    org_id = str(uuid.uuid4())
+    """Encrypt with the org DEK, rotate, read → still decrypts.
+
+    The default re-encryption target list is empty (no production
+    column uses the per-org DEK in HEAD), so the ciphertext is not
+    proactively rewrapped. Reads continue to succeed because
+    `_get_dek_for_decrypt` walks inactive historical DEKs in reverse
+    version order.
+    """
+    org_id = _seed_org(db_session)
     plaintext = "sk-test-rotation-canary-12345"
-    secret_id = _make_org_with_provider(db_session, org_id, plaintext)
+    ciphertext = encrypt_for_org(db_session, org_id, plaintext)
 
     # Sanity: the encrypted value decrypts back to the original.
-    pre_secret = db_session.query(LLMProviderSecret).filter_by(id=secret_id).one()
-    assert decrypt_for_org(db_session, org_id, pre_secret.encrypted_api_key) == plaintext
+    assert decrypt_for_org(db_session, org_id, ciphertext) == plaintext
 
-    # Rotate. This should re-encrypt the secret with the new DEK.
+    # Rotate. Must not raise IntegrityError.
     result = rotate_dek(db_session, org_id)
     assert result["created"] is False
-    # The default target list includes LLMProviderSecret; verify it
-    # was rewrapped.
-    assert result["rewrapped"].get("llm_provider_secrets") == 1
+    assert result["new_version"] == "2"
 
-    # Pull a fresh row from the DB (post-rewrap).
-    db_session.expire_all()
-    post_secret = db_session.query(LLMProviderSecret).filter_by(id=secret_id).one()
-
-    # The ciphertext should have changed (different DEK ⇒ different
-    # ciphertext even for the same plaintext).
-    assert post_secret.encrypted_api_key != pre_secret.encrypted_api_key
-
-    # And it must still decrypt to the original plaintext using the
-    # NEW active DEK.
-    assert decrypt_for_org(db_session, org_id, post_secret.encrypted_api_key) == plaintext
+    # Same ciphertext (sealed with the prior DEK) still decrypts.
+    assert decrypt_for_org(db_session, org_id, ciphertext) == plaintext
 
 
 def test_rotate_dek_marks_old_inactive(db_session):
-    org_id = str(uuid.uuid4())
-    _make_org_with_provider(db_session, org_id, "anything")
+    """After rotation: old DEK row persists with is_active=False.
+
+    Critical regression: the prior implementation with `unique=True`
+    on `organization_id` could not produce this state (the INSERT for
+    the new row failed before the flip took effect). With the partial
+    unique on (`organization_id WHERE is_active`), historical rows
+    coexist freely.
+    """
+    org_id = _seed_org(db_session)
+    encrypt_for_org(db_session, org_id, "anything")
 
     rotate_dek(db_session, org_id)
 
