@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -16,6 +17,109 @@ from app.services.llm_provider_adapters import ProviderConnectionConfig, build_l
 from app.services.secret_service import encrypt_value, decrypt_value, mask_key
 
 
+# SEC-010 — keys inside `extra_config` whose VALUES must be encrypted at rest.
+# Anything in this set is wrapped as `{"__encrypted": true, "value": <ciphertext>}`
+# before the JSON column hits the DB, and unwrapped transparently on read.
+# Bedrock / Vertex / Azure store their long-lived credentials here, not in `api_key`.
+_SECRET_KEYS = frozenset({
+    "aws_secret_access_key",
+    "aws_session_token",
+    "service_account_json",
+    "client_secret",
+    "private_key",
+    "passphrase",
+    "gcp_service_account_json",
+    "azure_client_secret",
+})
+
+# Sentinel marker — a dict shaped like this is a "this value is encrypted" envelope.
+_ENC_FLAG = "__encrypted"
+
+
+def _is_encrypted_envelope(value: Any) -> bool:
+    return isinstance(value, dict) and value.get(_ENC_FLAG) is True and "value" in value
+
+
+def encrypt_extra_config(extra: dict | None) -> dict | None:
+    """Return a copy of `extra_config` with every sensitive value sealed.
+
+    Non-sensitive keys pass through untouched. Already-encrypted envelopes
+    are left as-is so re-saving a previously-encrypted row is idempotent.
+    Empty/None inputs return as-is.
+    """
+    if not extra:
+        return extra
+    out: dict[str, Any] = {}
+    for k, v in extra.items():
+        if k in _SECRET_KEYS and v is not None and v != "":
+            if _is_encrypted_envelope(v):
+                # already encrypted (e.g. round-trip via PATCH echoing GET) — leave alone
+                out[k] = v
+            else:
+                # Stringify before encrypt: aws_session_token / service_account_json
+                # may be dict-or-str; we serialise dicts to JSON so decryption returns
+                # the exact same shape via json.loads on the consumer side.
+                import json as _json
+                if not isinstance(v, str):
+                    plain = _json.dumps(v, sort_keys=True)
+                else:
+                    plain = v
+                out[k] = {_ENC_FLAG: True, "value": encrypt_value(plain)}
+        else:
+            out[k] = v
+    return out
+
+
+def decrypt_extra_config(extra: dict | None) -> dict | None:
+    """Return a copy of `extra_config` with every encrypted envelope opened.
+
+    Used on read paths that need the plaintext — e.g. when constructing a
+    `ProviderConnectionConfig` for the adapter, or building a CallContext
+    for the LLM transport. NEVER call this when returning the dict to the
+    API client (use `_redact_extra_config` instead).
+    """
+    if not extra:
+        return extra
+    out: dict[str, Any] = {}
+    for k, v in extra.items():
+        if k in _SECRET_KEYS and _is_encrypted_envelope(v):
+            try:
+                plain = decrypt_value(v.get("value", ""))
+                # service_account_json may be JSON — try to deserialise, fall back to str
+                if k in {"service_account_json", "gcp_service_account_json"}:
+                    import json as _json
+                    try:
+                        out[k] = _json.loads(plain)
+                    except Exception:
+                        out[k] = plain
+                else:
+                    out[k] = plain
+            except Exception:
+                out[k] = ""
+        else:
+            out[k] = v
+    return out
+
+
+def _redact_extra_config(extra: dict | None) -> dict | None:
+    """Mask sensitive values for client-facing responses.
+
+    The presence of the key is preserved (so the UI can show "configured"),
+    but the actual ciphertext is replaced with a fixed mask string. Plaintext
+    secrets that somehow slip past the encrypt path (legacy unmigrated rows)
+    are ALSO masked here as a belt-and-braces defence.
+    """
+    if not extra:
+        return extra
+    out: dict[str, Any] = {}
+    for k, v in extra.items():
+        if k in _SECRET_KEYS and v not in (None, "", {}):
+            out[k] = "***"
+        else:
+            out[k] = v
+    return out
+
+
 def create_provider(db: Session, org_id: str, data: LLMProviderCreate) -> LLMProviderResponse:
     provider = LLMProvider(
         organization_id=org_id,
@@ -26,7 +130,7 @@ def create_provider(db: Session, org_id: str, data: LLMProviderCreate) -> LLMPro
         temperature=data.temperature,
         max_tokens=data.max_tokens,
         timeout=data.timeout,
-        extra_config=data.extra_config,
+        extra_config=encrypt_extra_config(data.extra_config),
     )
     db.add(provider)
     db.flush()
@@ -66,7 +170,12 @@ def update_provider(db: Session, org_id: str, provider_id: str, data: LLMProvide
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(provider, field, value)
+        if field == "extra_config":
+            # SEC-010: re-encrypt sensitive keys on every update so PATCH that
+            # supplies fresh aws_secret_access_key never lands plaintext.
+            setattr(provider, field, encrypt_extra_config(value))
+        else:
+            setattr(provider, field, value)
     db.commit()
     db.refresh(provider)
     return _to_response(provider)
@@ -121,7 +230,9 @@ async def test_connection(db: Session, org_id: str, provider_id: str) -> TestCon
             name=provider.name,
             base_url=provider.base_url,
             timeout=provider.timeout,
-            extra_config=provider.extra_config or {},
+            # SEC-010: decrypt sealed extra_config values before the adapter
+            # signs the upstream request — adapters expect plaintext secrets.
+            extra_config=decrypt_extra_config(provider.extra_config) or {},
         )
     )
     return await adapter.test_connection(api_key)
@@ -228,5 +339,7 @@ def _to_response(provider: LLMProvider) -> LLMProviderResponse:
         timeout=provider.timeout,
         status=provider.status,
         api_key_masked=masked,
-        extra_config=provider.extra_config,
+        # SEC-010: never echo plaintext (or ciphertext) of sensitive keys
+        # back to the API client; the masked sentinel is enough for the UI.
+        extra_config=_redact_extra_config(provider.extra_config),
     )

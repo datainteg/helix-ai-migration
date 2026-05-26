@@ -30,6 +30,7 @@ from app.api.audit import write_audit
 from app.models.artifacts import CodeArtifact, ArtifactReview, CodeArtifactVersion
 from app.models.workflow import WorkflowRun
 from app.utils.idempotency import idempotent
+from app.services.llm_provider_service import decrypt_extra_config as _decrypt_extra_config
 
 router = APIRouter(tags=["workflow-ops"])
 
@@ -280,7 +281,8 @@ async def pair_review_artifact(
         temperature=0.0,
         max_tokens=int(reviewer.max_tokens or 2048),
         timeout=float(reviewer.timeout or 60),
-        extra_config=reviewer.extra_config or {},
+        # SEC-010: decrypt sealed sensitive keys before handing the dict to the LLM transport
+        extra_config=(_decrypt_extra_config(reviewer.extra_config) or {}),
     )
     parsed = adapter.call(ctx)
     if parsed is None:

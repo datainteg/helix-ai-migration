@@ -12,6 +12,7 @@ from app.storage.local import sanitize_filename, save_artifact_file, validate_up
 from app.api.audit import write_audit
 from app.schemas.pagination import PaginatedResponse, paginate
 from app.utils.idempotency import idempotent
+from app.services.llm_provider_service import decrypt_extra_config as _dec
 
 router = APIRouter(tags=["artifacts"])
 
@@ -269,7 +270,8 @@ async def api_generate_rollback(
         temperature=0.0,
         max_tokens=int(max_tokens or target_provider.max_tokens or 4096),
         timeout=float(target_provider.timeout or 60),
-        extra_config=target_provider.extra_config or {},
+        # SEC-010: decrypt sealed sensitive keys before handing the dict to the LLM transport
+        extra_config=(_dec(target_provider.extra_config) or {}),
     )
     parsed = adapter.call(ctx)
     if parsed is None:

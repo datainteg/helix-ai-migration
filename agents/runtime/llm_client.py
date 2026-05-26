@@ -15,6 +15,21 @@ from agents.runtime.providers import CallContext, get_provider
 logger = logging.getLogger(__name__)
 
 
+def _decrypt_extra_config_safe(extra: dict | None) -> dict | None:
+    """SEC-010 helper — best-effort decrypt of sealed extra_config envelopes.
+
+    Imported lazily so this worker-side module doesn't hard-depend on the
+    backend package at import time (Temporal activity boot order).
+    """
+    if not extra:
+        return extra
+    try:
+        from app.services.llm_provider_service import decrypt_extra_config
+        return decrypt_extra_config(extra)
+    except Exception:  # noqa: BLE001
+        return extra
+
+
 def call_llm(
     agent_name: str,
     system_prompt: str,
@@ -70,7 +85,8 @@ def call_llm(
                 temperature=float(temp),
                 max_tokens=int(max_tokens),
                 timeout=float(provider_obj.timeout),
-                extra_config=provider_obj.extra_config or {},
+                # SEC-010: decrypt sealed sensitive keys before handing the dict to the provider
+                extra_config=_decrypt_extra_config_safe(provider_obj.extra_config) or {},
             )
             return adapter.call(ctx)
         finally:
