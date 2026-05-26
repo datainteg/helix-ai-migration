@@ -4,11 +4,19 @@ Public surface mirrors the CLI commands so users can move between the two
 without learning two APIs. Resource namespaces are exposed as attributes
 (`helix.projects`, `helix.workflows`, `helix.cost`, …) so call sites read
 naturally.
+
+Pagination envelope (v0.2.0+)
+------------------------------
+Converted list endpoints now return ``{items: T[], total: int, limit: int,
+offset: int}`` instead of a bare array.  All ``.list()`` methods silently
+unwrap the envelope so existing callers keep working unchanged.  Call the
+companion ``paginated_*()`` methods (or use the low-level ``_get_paginated()``
+helper) when you need ``total`` / paging metadata.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 import httpx
 
@@ -23,6 +31,42 @@ class HelixError(RuntimeError):
         self.path = path
 
 
+class PaginatedResponse(TypedDict):
+    """Envelope returned by converted list endpoints."""
+
+    items: list[dict]
+    total: Optional[int]
+    limit: int
+    offset: int
+
+
+def _unwrap(data: Any) -> list[dict]:
+    """Return ``data["items"]`` if the response is a pagination envelope,
+    otherwise return *data* unchanged (bare-array back-compat)."""
+    if isinstance(data, dict) and "items" in data:
+        return data["items"]
+    return data  # bare-array fallback
+
+
+def _as_paginated(data: Any) -> PaginatedResponse:
+    """Coerce *data* to a :class:`PaginatedResponse`.
+
+    If the server still returns a bare array (endpoint not yet converted),
+    synthesises an envelope with ``total=len(data)``, ``limit=len(data)``,
+    ``offset=0`` so callers always see a consistent shape.
+    """
+    if isinstance(data, dict) and "items" in data:
+        return PaginatedResponse(
+            items=data["items"],
+            total=data.get("total"),
+            limit=data.get("limit", len(data["items"])),
+            offset=data.get("offset", 0),
+        )
+    # bare-array fallback
+    items: list[dict] = data if isinstance(data, list) else []
+    return PaginatedResponse(items=items, total=len(items), limit=len(items), offset=0)
+
+
 class _Resource:
     def __init__(self, client: "Helix") -> None:
         self._c = client
@@ -30,7 +74,11 @@ class _Resource:
 
 class _Projects(_Resource):
     def list(self) -> list[dict]:
-        return self._c._get("/api/v1/projects?limit=200")
+        return _unwrap(self._c._get("/api/v1/projects?limit=200"))
+
+    def paginated(self) -> PaginatedResponse:
+        """Return the full pagination envelope for projects."""
+        return _as_paginated(self._c._get("/api/v1/projects?limit=200"))
 
     def get(self, project_id: str) -> dict:
         return self._c._get(f"/api/v1/projects/{project_id}")
@@ -51,8 +99,14 @@ class _Workflows(_Resource):
 
     def list(self, project_id: Optional[str] = None) -> list[dict]:
         if project_id:
-            return self._c._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100")
-        return self._c._get("/api/v1/agent-workflows?limit=100")
+            return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100"))
+        return _unwrap(self._c._get("/api/v1/agent-workflows?limit=100"))
+
+    def paginated(self, project_id: Optional[str] = None) -> PaginatedResponse:
+        """Return the full pagination envelope for workflows."""
+        if project_id:
+            return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100"))
+        return _as_paginated(self._c._get("/api/v1/agent-workflows?limit=100"))
 
     def approve(self, workflow_id: str, notes: str = "") -> dict:
         return self._c._post(f"/api/v1/agent-workflows/{workflow_id}/signal-approve", {"decision": "approved", "notes": notes})
@@ -84,7 +138,11 @@ class _Cost(_Resource):
 
 class _Templates(_Resource):
     def list(self) -> list[dict]:
-        return self._c._get("/api/v1/migration-templates")
+        return _unwrap(self._c._get("/api/v1/migration-templates"))
+
+    def paginated(self) -> PaginatedResponse:
+        """Return the full pagination envelope for migration templates."""
+        return _as_paginated(self._c._get("/api/v1/migration-templates"))
 
     def clone(self, template_id: str, project_name: str, description: str | None = None) -> dict:
         return self._c._post("/api/v1/migration-templates/clone", {
@@ -96,7 +154,11 @@ class _Templates(_Resource):
 
 class _Cutovers(_Resource):
     def list(self, project_id: str) -> list[dict]:
-        return self._c._get(f"/api/v1/projects/{project_id}/cutovers")
+        return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/cutovers"))
+
+    def paginated(self, project_id: str) -> PaginatedResponse:
+        """Return the full pagination envelope for cutovers."""
+        return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/cutovers"))
 
     def create(self, project_id: str, source_ref: str, target_ref: str, *, workflow_id: str | None = None, notes: str | None = None) -> dict:
         return self._c._post(f"/api/v1/projects/{project_id}/cutovers", {
@@ -127,7 +189,11 @@ class _Knowledge(_Resource):
         })
 
     def search(self, q: str, limit: int = 5) -> list[dict]:
-        return self._c._get(f"/api/v1/knowledge/search?q={q}&limit={limit}")
+        return _unwrap(self._c._get(f"/api/v1/knowledge/search?q={q}&limit={limit}"))
+
+    def search_paginated(self, q: str, limit: int = 5) -> PaginatedResponse:
+        """Return the full pagination envelope for knowledge search results."""
+        return _as_paginated(self._c._get(f"/api/v1/knowledge/search?q={q}&limit={limit}"))
 
 
 class _SchemaDrift(_Resource):
@@ -143,7 +209,11 @@ class _SchemaDrift(_Resource):
 
 class _Artifacts(_Resource):
     def list_for_project(self, project_id: str) -> list[dict]:
-        return self._c._get(f"/api/v1/projects/{project_id}/artifacts")
+        return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/artifacts"))
+
+    def list_for_project_paginated(self, project_id: str) -> PaginatedResponse:
+        """Return the full pagination envelope for project artifacts."""
+        return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/artifacts"))
 
     def generate_rollback(self, artifact_id: str) -> dict:
         return self._c._post(f"/api/v1/artifacts/{artifact_id}/generate-rollback", {})
@@ -182,6 +252,13 @@ class Helix:
 
     def whoami(self) -> dict:
         return self._get("/api/v1/auth/me")
+
+    # ── Paginated helper ──────────────────────────────────────────────
+
+    def _get_paginated(self, path: str) -> PaginatedResponse:
+        """GET *path* and return a :class:`PaginatedResponse` regardless of
+        whether the server sends a bare array or a pagination envelope."""
+        return _as_paginated(self._get(path))
 
     # ── Internals ─────────────────────────────────────────────────────
 
