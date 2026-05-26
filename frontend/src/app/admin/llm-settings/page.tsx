@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useId, useState } from "react";
 import { Plus, Check, X, BrainCircuit } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { LLMIcon } from "@/components/icons";
@@ -71,6 +71,10 @@ export default function LLMSettingsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
   const [error, setError] = useState("");
+
+  // Stable ids for form fields — unique even if the component renders twice.
+  const uid = useId();
+  const fieldId = (name: string) => `${uid}-${name}`;
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -262,8 +266,9 @@ export default function LLMSettingsPage() {
           <form onSubmit={submitForm} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Provider type</label>
+                <label htmlFor={fieldId("provider-type")} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Provider type</label>
                 <select
+                  id={fieldId("provider-type")}
                   value={form.provider_type}
                   onChange={(e) => handleProviderTypeChange(e.target.value)}
                   className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] focus-ring disabled:opacity-60 disabled:cursor-not-allowed"
@@ -275,8 +280,9 @@ export default function LLMSettingsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Display name</label>
+                <label htmlFor={fieldId("name")} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Display name</label>
                 <input
+                  id={fieldId("name")}
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
@@ -287,8 +293,9 @@ export default function LLMSettingsPage() {
               {/* Base URL — hidden for SDK-managed providers (bedrock/vertex/azure use extra_config). */}
               {!["bedrock", "vertex", "azure"].includes(form.provider_type) && (
                 <div>
-                  <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Base URL</label>
+                  <label htmlFor={fieldId("base-url")} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Base URL</label>
                   <input
+                    id={fieldId("base-url")}
                     value={form.base_url}
                     onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
                     className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
@@ -297,9 +304,10 @@ export default function LLMSettingsPage() {
                 </div>
               )}
               <div>
-                <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Default model</label>
+                <label htmlFor={fieldId("default-model")} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">Default model</label>
                 {availableModels.length > 0 ? (
                   <select
+                    id={fieldId("default-model")}
                     value={form.default_model}
                     onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
                     className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3 text-[13.5px] font-mono focus-ring"
@@ -309,6 +317,7 @@ export default function LLMSettingsPage() {
                   </select>
                 ) : (
                   <input
+                    id={fieldId("default-model")}
                     value={form.default_model}
                     onChange={(e) => setForm((f) => ({ ...f, default_model: e.target.value }))}
                     className="w-full h-10 rounded-[8px] border border-hx bg-surface px-3.5 text-[13.5px] font-mono focus-ring"
@@ -323,7 +332,7 @@ export default function LLMSettingsPage() {
             <ExtraConfigFields ptype={form.provider_type} values={form.extra_config} onChange={setExtra} />
 
             <div>
-              <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
+              <label htmlFor={fieldId("api-key")} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
                 API key{" "}
                 {editingProviderId ? (
                   <span className="text-ink-4 font-normal">(leave blank to keep current)</span>
@@ -332,6 +341,7 @@ export default function LLMSettingsPage() {
                 ) : null}
               </label>
               <input
+                id={fieldId("api-key")}
                 type="password"
                 value={form.api_key}
                 onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
@@ -494,13 +504,15 @@ function ExtraInput({
   mono?: boolean;
   required?: boolean;
 }) {
+  const id = useId();
   return (
     <div>
-      <label className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
+      <label htmlFor={id} className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
         {label}
         {required && <span className="text-err"> *</span>}
       </label>
       <input
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

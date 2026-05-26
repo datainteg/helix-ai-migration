@@ -24,7 +24,7 @@
  * still store the token in localStorage so other parts of the app pick it up.
  */
 
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import React, { useEffect, useId, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -1295,23 +1295,43 @@ function StepLaunch({ data, persisted }: { data: WizardData; persisted: Persiste
 
 // ─── Form primitives ──────────────────────────────────────────────────
 
+/**
+ * FormRow — label + field wrapper.
+ *
+ * Automatically generates a stable id via useId() and injects it into the
+ * first React element child so that `<label htmlFor>` is always wired even
+ * when the caller doesn't pass an explicit id.  Pass `htmlFor` to override
+ * (e.g. when children is a complex fragment).
+ */
 function FormRow({
   label,
   hint,
   children,
   span,
+  htmlFor: htmlForProp,
 }: {
   label: string;
   hint?: string;
   children: ReactNode;
   span?: 1 | 2;
+  htmlFor?: string;
 }) {
+  const autoId = useId();
+  const fieldId = htmlForProp ?? autoId;
+
+  // Inject `id` into the first element child so the label binds correctly.
+  const child = React.Children.toArray(children)[0];
+  const enhancedChildren =
+    child && React.isValidElement<{ id?: string }>(child)
+      ? [React.cloneElement(child, { id: child.props.id ?? fieldId }), ...React.Children.toArray(children).slice(1)]
+      : children;
+
   return (
     <div className={span === 2 ? "sm:col-span-2" : undefined}>
-      <label className="block text-[11.5px] font-medium text-ink-2 mb-1.5">
+      <label htmlFor={fieldId} className="block text-[11.5px] font-medium text-ink-2 mb-1.5">
         {label}
       </label>
-      {children}
+      {enhancedChildren}
       {hint && <div className="text-[11px] text-ink-4 mt-1">{hint}</div>}
     </div>
   );
