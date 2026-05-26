@@ -26,6 +26,7 @@ from app.services.connector_service import (
     discover_tables as svc_discover_tables,
     discover_columns as svc_discover_columns,
 )
+from app.schemas.pagination import PaginatedResponse, paginate
 from app.rate_limiting import limiter
 from app.api.audit import write_audit
 # SEC-015: stored configs must hit the same host allowlist as freshly
@@ -54,7 +55,7 @@ def api_create_project(request: Request, data: ProjectCreate, user_id: str = Dep
     return result
 
 
-@router.get("/projects", response_model=list[ProjectResponse])
+@router.get("/projects", response_model=PaginatedResponse[ProjectResponse])
 def api_list_projects(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
@@ -62,8 +63,13 @@ def api_list_projects(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    """List projects for the caller's org (paginated envelope).
+
+    Breaking change vs v0.x: response is now ``{items, total, limit, offset}``
+    instead of a bare array.  See REVIEW_API_CONTRACT.md §API-C2.
+    """
     rows = list_projects(db, _org_id(user_id, db), include_archived=include_archived)
-    return rows[offset : offset + limit]
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
