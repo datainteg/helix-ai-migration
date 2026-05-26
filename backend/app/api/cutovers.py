@@ -141,7 +141,7 @@ def _serialize(c: MigrationCutover) -> CutoverResponse:
     status_code=201,
     response_model=CutoverResponse,
 )
-@idempotent("create_cutover")
+@idempotent("create_cutover", status_code=201)
 async def api_create_cutover(
     project_id: str,
     data: CutoverCreate,

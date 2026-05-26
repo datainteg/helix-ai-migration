@@ -290,7 +290,7 @@ def api_burndown(
 # ── Mutations ──────────────────────────────────────────────────────
 
 @router.post("/projects/{project_id}/sprints", response_model=SprintResponse, status_code=201)
-@idempotent("create_sprint")
+@idempotent("create_sprint", status_code=201)
 async def api_create_sprint(
     project_id: str,
     data: SprintCreate,
@@ -317,7 +317,7 @@ async def api_create_sprint(
 
 
 @router.post("/sprints/{sprint_id}/tasks", response_model=SprintTaskResponse, status_code=201)
-@idempotent("create_sprint_task")
+@idempotent("create_sprint_task", status_code=201)
 async def api_create_task(
     sprint_id: str,
     data: SprintTaskCreate,

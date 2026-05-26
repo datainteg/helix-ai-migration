@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, type ReactNode } from "react";
+import { useCallback, useId, useRef, type ReactNode } from "react";
 import { useFocusTrap } from "@/lib/use-focus-trap";
 
 /**
@@ -54,10 +54,13 @@ export function Modal({
   const onEscape = useCallback(() => onClose(), [onClose]);
   useFocusTrap(dialogRef, open, onEscape);
 
-  if (!open) return null;
+  // useId ensures unique ids even when multiple modals mount concurrently
+  // (e.g. a nested confirmation on top of a primary form modal).
+  const uid = useId();
+  const titleId = title ? `${uid}-title` : undefined;
+  const descId = description ? `${uid}-desc` : undefined;
 
-  const titleId = title ? "modal-title" : undefined;
-  const descId = description ? "modal-desc" : undefined;
+  if (!open) return null;
 
   return (
     <div

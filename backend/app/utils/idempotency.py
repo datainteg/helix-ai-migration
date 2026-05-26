@@ -13,16 +13,26 @@ REVIEW_API_CONTRACT.md §1 row 3 is:
 
 Shape
 -----
-* The decorator `@idempotent("create_workflow")` (route-name string) is
-  applied to a FastAPI POST handler.
+* The decorator `@idempotent("create_workflow", status_code=201)` (route-name
+  string + the route's declared HTTP status code) is applied to a FastAPI
+  POST handler.
 * On entry it hashes `(org_id, endpoint_name, body_sha256, key)` and
   looks up the hash in Redis under `idempotency:{hash}`.
-* HIT → replays the cached JSON body verbatim (returns 200 with the
-  same shape the original response had, plus an `Idempotency-Replayed`
-  header so the caller can tell).
+* HIT → replays the stored JSON body with the ORIGINAL status_code (not
+  hard-coded 200), plus an `Idempotency-Replayed` header so the caller
+  can tell.  The body was stored via the same serialization path as MISS,
+  so shape/field-ordering is symmetric.
 * MISS → runs the handler. If the handler succeeds (2xx) the response
   is captured and stored for 24h. Non-2xx responses are NOT cached —
   the caller is expected to retry with a fresh key.
+
+Cache envelope format
+---------------------
+Redis value is a JSON object: ``{"status_code": <int>, "body": <dict>}``.
+Both MISS and HIT paths serialize Pydantic models via
+``model.model_dump(mode="json")`` so the body shape is identical in both
+cases (same field ordering, same ``exclude_none`` behaviour as FastAPI's
+default pipeline, consistent datetime serialization).
 
 Failure modes
 -------------
@@ -122,18 +132,69 @@ async def _read_body(request: Request) -> bytes:
     return request._body  # type: ignore[attr-defined]
 
 
-def idempotent(endpoint_name: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS):
-    """Decorator: cache successful 2xx responses for 24h per `(org, key, body)`.
+def _serialize_result(result: Any) -> dict | list | Any:
+    """Serialize a handler return value to a JSON-safe structure.
 
-    Applies to FastAPI route handlers that take a `request: Request` and an
-    `org_id: str` argument (the common pattern across this codebase). If
+    Uses the same serialization path for both MISS (storing) and HIT
+    (replaying) so the two code paths are symmetric:
+
+    * Pydantic model  → ``model_dump(mode="json")`` — respects field
+      aliases, validators, and exclude_none behaviour exactly as
+      FastAPI's ``response_model`` pipeline would.
+    * dict / list     → passed through ``jsonable_encoder`` for
+      datetime/UUID coercion.
+    * Anything else   → ``jsonable_encoder`` as fallback.
+    """
+    try:
+        # BaseModel covers Pydantic v2; model_dump(mode="json") serializes
+        # datetimes, UUIDs, enums to JSON-native types in the same way that
+        # FastAPI's response_model serializer does.
+        from pydantic import BaseModel
+        if isinstance(result, BaseModel):
+            return result.model_dump(mode="json")
+    except ImportError:
+        pass
+
+    from fastapi.encoders import jsonable_encoder
+    return jsonable_encoder(result)
+
+
+def idempotent(
+    endpoint_name: str,
+    *,
+    status_code: int = 200,
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+):
+    """Decorator: cache successful 2xx responses for 24h per ``(org, key, body)``.
+
+    Parameters
+    ----------
+    endpoint_name:
+        Logical name used in the cache key (e.g. ``"create_sprint"``).
+        Must be unique across all decorated endpoints in the org
+        namespace.
+    status_code:
+        The HTTP status code that the route handler *declares* (e.g.
+        ``status_code=201`` for create endpoints).  This is stored in
+        the cache envelope and replayed verbatim on HIT so that clients
+        see ``201`` on the second call, not a hard-coded ``200``.
+        **Must match the ``status_code=`` kwarg on the ``@router.post``
+        decorator above this one.**  Defaults to ``200`` for
+        backward-compatibility with endpoints that don't declare an
+        explicit code.
+    ttl_seconds:
+        TTL for the Redis cache entry.  Defaults to 24 h.
+
+    Applies to FastAPI route handlers that take a ``request: Request`` and an
+    ``org_id: str`` argument (the common pattern across this codebase). If
     the handler doesn't have those, the helper falls back to MISS-always
     behaviour rather than crashing — non-invasive.
 
-    Usage:
-        @router.post("/projects/{pid}/agent-workflows")
-        @idempotent("start_workflow")
-        async def start_workflow(...):
+    Usage::
+
+        @router.post("/projects/{pid}/sprints", status_code=201)
+        @idempotent("create_sprint", status_code=201)
+        async def api_create_sprint(...):
             ...
     """
 
@@ -177,45 +238,61 @@ def idempotent(endpoint_name: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS):
             if cached_raw:
                 try:
                     cached = json.loads(cached_raw)
-                    status_code = int(cached.get("status_code", 200))
+                    # BUG-FIX (API-C4-1): replay the status_code that was
+                    # stored when the response was first created — NOT a
+                    # hard-coded 200.  Routes declaring status_code=201 (e.g.
+                    # POST /sprints, POST /cutovers) must replay 201 so
+                    # clients can distinguish create-vs-replay-after-create.
+                    cached_status = int(cached.get("status_code", status_code))
                     body = cached.get("body")
                 except Exception:
                     # Malformed cache entry; fall through to fresh call.
                     cached = None
                 else:
-                    headers = {REPLAY_HEADER: "true"}
+                    replay_headers = {REPLAY_HEADER: "true"}
+                    # BUG-FIX (API-C4-2): body was stored via
+                    # _serialize_result() which uses model_dump(mode="json")
+                    # for Pydantic models — same path as below on MISS — so
+                    # field ordering and validation are symmetric.
                     return JSONResponse(
                         content=body,
-                        status_code=status_code,
-                        headers=headers,
+                        status_code=cached_status,
+                        headers=replay_headers,
                     )
 
             # MISS — run the real handler.
             result = await func(*args, **kwargs)
 
             # Capture the response body for cache. The handler typically
-            # returns a Pydantic model or dict — fastapi converts it to
-            # JSON later. We need the dict form here, so:
+            # returns a Pydantic model or dict — FastAPI converts it to
+            # JSON later. We need the dict form here for storage.
             cached_body: Any
-            status_code = 200
+            cached_status_code: int
             if isinstance(result, Response):
                 # Handler returned a raw Response; only cache 2xx.
                 if 200 <= result.status_code < 300 and isinstance(result, JSONResponse):
                     cached_body = json.loads(result.body.decode())
-                    status_code = result.status_code
+                    cached_status_code = result.status_code
                 else:
                     return result
             else:
-                # Pydantic / dict / list — serialize via FastAPI's encoder
-                # so datetimes etc. are ISO-8601 in the cached body too.
-                from fastapi.encoders import jsonable_encoder
-                cached_body = jsonable_encoder(result)
+                # BUG-FIX (API-C4-1): use the status_code declared by the
+                # decorator (which must match @router.post(..., status_code=))
+                # instead of the previous hard-coded 200.
+                #
+                # BUG-FIX (API-C4-2): serialize via _serialize_result() which
+                # uses model_dump(mode="json") for Pydantic models — the same
+                # serialization that FastAPI's response_model pipeline applies.
+                # This ensures MISS and HIT produce structurally identical
+                # bodies (same field ordering, same datetime format).
+                cached_body = _serialize_result(result)
+                cached_status_code = status_code
 
             try:
                 redis_client.setex(
                     redis_full_key,
                     ttl_seconds,
-                    json.dumps({"status_code": status_code, "body": cached_body}),
+                    json.dumps({"status_code": cached_status_code, "body": cached_body}),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Redis SETEX failed in idempotency store: %s", exc)
