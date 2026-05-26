@@ -32,6 +32,7 @@ import {
   StatusBadge,
   Tabs,
   DemoBanner,
+  ErrorBanner,
 } from "@/components/ui";
 
 // ─── Demo data — TODO: hydrate from API ────────────────────────────
@@ -109,6 +110,7 @@ export default function ValidationPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [hasProjects, setHasProjects] = useState<boolean | null>(null);
   const [orgStats, setOrgStats] = useState<DashboardStats | null>(null);
+  const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
     if (!token) return;
@@ -116,10 +118,10 @@ export default function ValidationPage() {
     fetch(`${API_BASE}/api/v1/projects?limit=1`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: unknown[]) => { if (!cancelled) setHasProjects(rows.length > 0); })
-      .catch(() => { if (!cancelled) setHasProjects(false); });
+      .catch((e: unknown) => { if (!cancelled) { setHasProjects(false); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load projects"); } });
     fetchDashboardStats(token)
       .then((s) => { if (!cancelled) setOrgStats(s); })
-      .catch(() => { if (!cancelled) setOrgStats(null); });
+      .catch((e: unknown) => { if (!cancelled) { setOrgStats(null); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load dashboard stats"); } });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -168,6 +170,7 @@ export default function ValidationPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
         {hasProjects === false && (
           <DemoBanner message="No projects yet. Create one in /projects/new, attach validation rules with POST /projects/{id}/validation-rules, then runs land here." />
         )}

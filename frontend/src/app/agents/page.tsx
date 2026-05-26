@@ -28,6 +28,7 @@ import {
   StatusBadge,
   Tabs,
   DemoBanner,
+  ErrorBanner,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { listOrgWorkflowRuns, type WorkflowRun as ApiWorkflowRun } from "@/lib/workflows/api";
@@ -138,13 +139,14 @@ function groupOf(phase: string): PhaseKey {
 export default function AgentsPage() {
   const { token } = useAuth();
   const [realRuns, setRealRuns] = useState<ApiWorkflowRun[] | null>(null);
+  const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     listOrgWorkflowRuns(token, 100)
       .then((rows) => { if (!cancelled) setRealRuns(rows); })
-      .catch(() => { if (!cancelled) setRealRuns([]); });
+      .catch((e: unknown) => { if (!cancelled) { setRealRuns([]); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load workflow runs"); } });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -196,6 +198,7 @@ export default function AgentsPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
         {!usingRealData && (
           <DemoBanner message="Run list shown here is sample. Once your first BMAD workflow lands the table populates from /agent-workflows." />
         )}

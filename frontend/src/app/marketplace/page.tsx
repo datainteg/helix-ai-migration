@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { Package, Puzzle, ShieldAlert, BookOpen, Bot, Filter } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card, Chip, EmptyState, LoadingState } from "@/components/ui";
+import { Button, Card, Chip, EmptyState, ErrorBanner, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -43,12 +43,14 @@ export default function MarketplacePage() {
   const [items, setItems] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
     fetch(`${API_BASE}/api/v1/marketplace`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.ok ? r.json() : [])
-      .then(setItems)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((data: Entry[]) => setItems(data))
+      .catch((e: unknown) => { setItems([]); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load marketplace"); })
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -61,6 +63,7 @@ export default function MarketplacePage() {
       description="Community-contributed connectors, agents, validators, and recipes."
       crumbs={["Marketplace"]}
     >
+      {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         <Filter className="h-3.5 w-3.5 text-ink-4" />
         {[

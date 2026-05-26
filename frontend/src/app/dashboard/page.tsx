@@ -30,6 +30,7 @@ import {
   Tabs,
   Chip,
   DemoBanner,
+  ErrorBanner,
 } from "@/components/ui";
 import { AppIcon, AgentIcon, LLMIcon } from "@/components/icons";
 
@@ -101,16 +102,17 @@ export default function DashboardPage() {
   const { token } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     fetchDashboardStats(token)
       .then((s) => { if (!cancelled) setStats(s); })
-      .catch(() => { if (!cancelled) setStats(null); });
+      .catch((e: unknown) => { if (!cancelled) { setStats(null); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load dashboard stats"); } });
     fetchUsageSummary(token, 30)
       .then((u) => { if (!cancelled) setUsage(u); })
-      .catch(() => { if (!cancelled) setUsage(null); });
+      .catch((e: unknown) => { if (!cancelled) { setUsage(null); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load usage summary"); } });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -139,6 +141,7 @@ export default function DashboardPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
         {stats?.hasAnyData ? null : (
           <DemoBanner message="Charts and tables below are sample. Once you create a project and run a workflow, the metric strip + workflow tiles populate from real data." />
         )}
