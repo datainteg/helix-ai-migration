@@ -278,7 +278,7 @@ async def stream_workflow_progress(
     so a closed browser tab tears the loop down immediately
     instead of running to the 2-min cap.
     """
-    from app.auth.jwt import decode_access_token
+    from app.auth.jwt import decode_access_token_async
     from app.auth.dependencies import resolve_active_org_id
     from app.db.session import SessionLocal
 
@@ -286,7 +286,7 @@ async def stream_workflow_progress(
     auth_db = SessionLocal()
     try:
         try:
-            payload = decode_access_token(token)
+            payload = await decode_access_token_async(token)
             user_id = payload.get("sub")
             if not user_id:
                 raise ValueError("missing sub")
