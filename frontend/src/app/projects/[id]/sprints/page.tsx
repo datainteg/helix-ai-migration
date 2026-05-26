@@ -8,7 +8,7 @@
  * sprint as a card, and the urgent footer (approvals + risks).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Plus, X } from "lucide-react";
 
@@ -338,6 +338,12 @@ function NewSprintModal({
   const [endDate, setEndDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const baseId = useId();
+  const nameId = `${baseId}-name`;
+  const goalId = `${baseId}-goal`;
+  const statusId = `${baseId}-status`;
+  const startId = `${baseId}-start`;
+  const endId = `${baseId}-end`;
 
   // Escape close + focus trap owned by useFocusTrap above.
 
@@ -398,20 +404,26 @@ function NewSprintModal({
         >
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">NAME</label>
+              <label htmlFor={nameId} className="eyebrow text-[10px] mb-1 block">
+                NAME <span aria-hidden className="text-err">*</span>
+                <span className="sr-only">(required)</span>
+              </label>
               <input
+                id={nameId}
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 autoFocus
                 required
+                aria-required
                 className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
                 placeholder="Sprint 4 — Validation"
               />
             </div>
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">GOAL</label>
+              <label htmlFor={goalId} className="eyebrow text-[10px] mb-1 block">GOAL</label>
               <textarea
+                id={goalId}
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 rows={3}
@@ -420,8 +432,9 @@ function NewSprintModal({
               />
             </div>
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">STATUS</label>
+              <label htmlFor={statusId} className="eyebrow text-[10px] mb-1 block">STATUS</label>
               <select
+                id={statusId}
                 value={status}
                 onChange={(e) => setStatus(e.target.value as "planning" | "active")}
                 className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
@@ -432,8 +445,9 @@ function NewSprintModal({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">START</label>
+                <label htmlFor={startId} className="eyebrow text-[10px] mb-1 block">START</label>
                 <input
+                  id={startId}
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
@@ -441,8 +455,9 @@ function NewSprintModal({
                 />
               </div>
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">END</label>
+                <label htmlFor={endId} className="eyebrow text-[10px] mb-1 block">END</label>
                 <input
+                  id={endId}
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
@@ -451,7 +466,7 @@ function NewSprintModal({
               </div>
             </div>
             {error && (
-              <div className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
+              <div role="alert" aria-live="assertive" className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
                 {error}
               </div>
             )}

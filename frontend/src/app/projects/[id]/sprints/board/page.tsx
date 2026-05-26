@@ -7,7 +7,7 @@
  * task detail panel on the right.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFocusTrap } from "@/lib/use-focus-trap";
 import { useParams } from "next/navigation";
 import {
@@ -473,6 +473,14 @@ function NewTaskModal({
   const [riskLevel, setRiskLevel] = useState<SprintTask["riskLevel"]>("low");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const baseId = useId();
+  const titleFieldId = `${baseId}-title`;
+  const typeId = `${baseId}-type`;
+  const priorityId = `${baseId}-priority`;
+  const storyPointsId = `${baseId}-pts`;
+  const riskId = `${baseId}-risk`;
+  const ownerId = `${baseId}-owner`;
+  const agentId = `${baseId}-agent`;
 
   // Escape close is owned by useFocusTrap above — no per-modal listener.
 
@@ -535,21 +543,27 @@ function NewTaskModal({
         >
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">TITLE</label>
+              <label htmlFor={titleFieldId} className="eyebrow text-[10px] mb-1 block">
+                TITLE <span aria-hidden className="text-err">*</span>
+                <span className="sr-only">(required)</span>
+              </label>
               <input
+                id={titleFieldId}
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 autoFocus
                 required
+                aria-required
                 className="w-full h-8 px-2.5 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
                 placeholder="Convert customer DDL to Snowflake"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">TYPE</label>
+                <label htmlFor={typeId} className="eyebrow text-[10px] mb-1 block">TYPE</label>
                 <select
+                  id={typeId}
                   value={type}
                   onChange={(e) => setType(e.target.value as SprintTask["type"])}
                   className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
@@ -560,8 +574,9 @@ function NewTaskModal({
                 </select>
               </div>
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">PRIORITY</label>
+                <label htmlFor={priorityId} className="eyebrow text-[10px] mb-1 block">PRIORITY</label>
                 <select
+                  id={priorityId}
                   value={priority}
                   onChange={(e) => setPriority(e.target.value as SprintTask["priority"])}
                   className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
@@ -574,8 +589,9 @@ function NewTaskModal({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">STORY POINTS</label>
+                <label htmlFor={storyPointsId} className="eyebrow text-[10px] mb-1 block">STORY POINTS</label>
                 <input
+                  id={storyPointsId}
                   type="number"
                   min={0}
                   max={100}
@@ -585,8 +601,9 @@ function NewTaskModal({
                 />
               </div>
               <div>
-                <label className="eyebrow text-[10px] mb-1 block">RISK</label>
+                <label htmlFor={riskId} className="eyebrow text-[10px] mb-1 block">RISK</label>
                 <select
+                  id={riskId}
                   value={riskLevel}
                   onChange={(e) => setRiskLevel(e.target.value as SprintTask["riskLevel"])}
                   className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
@@ -598,8 +615,9 @@ function NewTaskModal({
               </div>
             </div>
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">OWNER (optional)</label>
+              <label htmlFor={ownerId} className="eyebrow text-[10px] mb-1 block">OWNER (optional)</label>
               <input
+                id={ownerId}
                 type="text"
                 value={ownerName}
                 onChange={(e) => setOwnerName(e.target.value)}
@@ -608,8 +626,9 @@ function NewTaskModal({
               />
             </div>
             <div>
-              <label className="eyebrow text-[10px] mb-1 block">AI AGENT</label>
+              <label htmlFor={agentId} className="eyebrow text-[10px] mb-1 block">AI AGENT</label>
               <select
+                id={agentId}
                 value={aiAgent}
                 onChange={(e) => setAiAgent(e.target.value)}
                 className="w-full h-8 px-2 text-[12.5px] rounded-[8px] border border-hx bg-surface text-ink focus-ring"
@@ -622,7 +641,7 @@ function NewTaskModal({
               </select>
             </div>
             {error && (
-              <div className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
+              <div role="alert" aria-live="assertive" className="rounded-[8px] border border-hx bg-[var(--con-err-soft)] px-3 py-2 text-[11.5px] text-err">
                 {error}
               </div>
             )}

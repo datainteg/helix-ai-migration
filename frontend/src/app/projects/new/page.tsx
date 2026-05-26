@@ -7,7 +7,7 @@
  * Posts to `${API_BASE}/api/v1/projects` (unchanged from the previous version).
  */
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sparkles, X, Wand2 } from "lucide-react";
@@ -78,6 +78,18 @@ export default function NewProjectPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      setError("Project name is required.");
+      return;
+    }
+    if (!sourceSystem) {
+      setError("Pick a source system.");
+      return;
+    }
+    if (!targetSystem) {
+      setError("Pick a target system.");
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -191,10 +203,11 @@ export default function NewProjectPage() {
             description="Pick the systems Helix will read from and write to."
           >
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Source system">
+              <Field label="Source system" required>
                 <select
                   value={sourceSystem}
                   onChange={(e) => setSourceSystem(e.target.value)}
+                  required
                   className="w-full h-9 rounded-[7px] border border-hx bg-surface px-3 text-[13px] text-ink focus-ring font-mono"
                 >
                   <option value="">Select source…</option>
@@ -204,10 +217,11 @@ export default function NewProjectPage() {
                 </select>
               </Field>
 
-              <Field label="Target system">
+              <Field label="Target system" required>
                 <select
                   value={targetSystem}
                   onChange={(e) => setTargetSystem(e.target.value)}
+                  required
                   className="w-full h-9 rounded-[7px] border border-hx bg-surface px-3 text-[13px] text-ink focus-ring font-mono"
                 >
                   <option value="">Select target…</option>
@@ -280,6 +294,12 @@ export default function NewProjectPage() {
 
 // ─── Helpers ───────────────────────────────────────────────────
 
+/**
+ * Field — auto-binds htmlFor/id to its single child <input>/<select>/
+ * <textarea> via React.cloneElement, so callers don't have to thread an
+ * id by hand. Decorative asterisk has aria-hidden + an sr-only "(required)"
+ * hint; the child input gets aria-required when required is true.
+ */
 function Field({
   label,
   required,
@@ -289,13 +309,29 @@ function Field({
   required?: boolean;
   children: React.ReactNode;
 }) {
+  const autoId = React.useId();
+  // If the child is a single form element, clone it with id + aria-required.
+  const child = React.isValidElement(children)
+    ? React.cloneElement(children as React.ReactElement<{ id?: string; "aria-required"?: boolean }>, {
+        id: (children.props as { id?: string }).id ?? autoId,
+        ...(required ? { "aria-required": true } : {}),
+      })
+    : children;
   return (
     <div>
-      <label className="block text-[11.5px] uppercase tracking-[0.08em] font-mono text-ink-4 mb-1.5">
+      <label
+        htmlFor={(child as React.ReactElement<{ id?: string }>)?.props?.id ?? autoId}
+        className="block text-[11.5px] uppercase tracking-[0.08em] font-mono text-ink-4 mb-1.5"
+      >
         {label}
-        {required && <span className="text-err ml-1">*</span>}
+        {required && (
+          <>
+            <span aria-hidden className="text-err ml-1">*</span>
+            <span className="sr-only"> (required)</span>
+          </>
+        )}
       </label>
-      {children}
+      {child}
     </div>
   );
 }
