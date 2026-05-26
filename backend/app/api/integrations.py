@@ -42,6 +42,7 @@ from app.db.session import get_db
 from app.models.workflow import WorkflowRun
 from app.services.workflow_service import update_workflow_run_status
 from app.api.audit import write_audit
+from app.auth.dependencies import user_has_permission, resolve_active_membership
 
 router = APIRouter(tags=["integrations"])
 logger = logging.getLogger(__name__)
@@ -138,6 +139,38 @@ async def slack_command(request: Request):
                 "response_type": "ephemeral",
                 "text": f"`{workflow_id}` status: *{run.status}* (mode: {run.mode})",
             }
+
+        # SEC-012: verify the mapped Helix user has `agent:approve` permission
+        # AND belongs to the workflow's own organisation.  Both checks must pass
+        # before we forward the signal — an attacker with a valid Slack identity
+        # but wrong/missing Helix role must not be able to approve any workflow.
+        try:
+            membership = resolve_active_membership(db, helix_user)
+        except Exception:
+            return {"response_type": "ephemeral", "text": "Your Helix account has no active organization membership."}
+
+        if membership.organization_id != run.organization_id:
+            logger.warning(
+                "Slack permission denied: user %s org %s != workflow org %s",
+                helix_user, membership.organization_id, run.organization_id,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "response_type": "ephemeral",
+                    "text": "You don't have approval permission in the workflow's organization.",
+                },
+            )
+
+        if not user_has_permission(db, helix_user, "agent:approve"):
+            logger.warning("Slack permission denied: user %s lacks agent:approve", helix_user)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "response_type": "ephemeral",
+                    "text": "You don't have approval permission in the workflow's organization.",
+                },
+            )
 
         # Forward the signal via the Temporal client. The endpoint is
         # `async def` so we MUST `await` the inner coroutine — the previous
