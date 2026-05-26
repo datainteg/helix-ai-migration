@@ -110,6 +110,13 @@ cd "$ROOT_DIR"
 
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.build.yml)
 
+# Caddy reverse-proxy is gated behind the `tls` profile in docker-compose.yml.
+# Auto-enable it when --domain is set (operator wants public TLS).
+COMPOSE_PROFILES=()
+if [ -n "${DOMAIN:-}" ]; then
+  COMPOSE_PROFILES=(--profile tls)
+fi
+
 confirm() {
   # Usage: confirm "message" "expected"
   if $NON_INTERACTIVE; then
@@ -123,7 +130,7 @@ confirm() {
 # ── Stop/teardown shortcuts ──────────────────────────────────────────
 if $DOWN; then
   log "Stopping the stack…"
-  docker compose "${COMPOSE_FILES[@]}" down
+  docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" down
   ok "Stopped. Volumes preserved."
   exit 0
 fi
@@ -138,7 +145,7 @@ if $NUKE; then
   else
     warn "--non-interactive set; proceeding without confirmation."
   fi
-  docker compose "${COMPOSE_FILES[@]}" down -v
+  docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" down -v
   ok "Stack torn down. All data deleted."
   exit 0
 fi
@@ -452,16 +459,16 @@ build_args=()
 if $REBUILD; then
   build_args+=(--no-cache --pull)
 fi
-docker compose "${COMPOSE_FILES[@]}" build "${build_args[@]}"
+docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" build "${build_args[@]}"
 ok "Images built."
 
 # ── 4. Start stack ───────────────────────────────────────────────────
 log "Starting Postgres + Redis + Temporal…"
-docker compose "${COMPOSE_FILES[@]}" up -d postgres redis temporal
+docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" up -d postgres redis temporal
 
 log "Waiting for Postgres to accept connections…"
 for i in $(seq 1 30); do
-  if docker compose "${COMPOSE_FILES[@]}" exec -T postgres pg_isready -U "${POSTGRES_USER:-helix}" >/dev/null 2>&1; then
+  if docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" exec -T postgres pg_isready -U "${POSTGRES_USER:-helix}" >/dev/null 2>&1; then
     ok "Postgres ready."
     break
   fi
@@ -474,7 +481,7 @@ done
 
 # ── 5. Migrations ────────────────────────────────────────────────────
 log "Bringing up backend (will run alembic on startup)…"
-docker compose "${COMPOSE_FILES[@]}" up -d backend worker frontend
+docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" up -d backend worker frontend
 
 log "Waiting for backend /api/v1/readyz (DB-gated)…"
 backend_url="http://localhost:${BACKEND_HOST_PORT:-8000}/api/v1/readyz"
@@ -489,7 +496,7 @@ for i in $(seq 1 60); do
 done
 if ! $ready; then
   err "Backend did not pass /readyz within 120s. Recent logs:"
-  docker compose "${COMPOSE_FILES[@]}" logs --tail=80 backend >&2 || true
+  docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" logs --tail=80 backend >&2 || true
   exit 1
 fi
 ok "Backend ready."

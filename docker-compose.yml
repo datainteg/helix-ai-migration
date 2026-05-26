@@ -135,7 +135,7 @@ services:
       # Temporal UI v2.31+ supports HTTP basic auth via these env vars.
       # Operators MUST set TEMPORAL_AUTH_ENABLED and TEMPORAL_UI_PASSWORD explicitly.
       # Leaving auth disabled on a publicly reachable UI is a security risk.
-      - TEMPORAL_AUTH_ENABLED=${TEMPORAL_AUTH_ENABLED}
+      - TEMPORAL_AUTH_ENABLED=${TEMPORAL_AUTH_ENABLED:-false}
       - TEMPORAL_AUTH_PROVIDER_URL=
       - TEMPORAL_UI_PUBLIC_PATH=/
     depends_on:
@@ -248,6 +248,12 @@ services:
     # Terminates HTTPS on 443, proxies /api/* to backend and /* to frontend.
     # HELIX_PUBLIC_DOMAIN must point at this VM's external IP before first start
     # (Caddy performs an ACME HTTP-01 challenge on port 80).
+    #
+    # Gated behind the `tls` profile so `docker compose up` (no flags) starts a
+    # local stack without Caddy. For production TLS deploys:
+    #   docker compose --profile tls up -d
+    # setup.sh adds --profile tls automatically when --domain is passed.
+    profiles: ["tls"]
     image: caddy:2-alpine
     container_name: helix-caddy
     restart: unless-stopped
@@ -256,7 +262,7 @@ services:
       - "443:443"
       - "443:443/udp"   # HTTP/3 (QUIC)
     environment:
-      HELIX_PUBLIC_DOMAIN: ${HELIX_PUBLIC_DOMAIN:?HELIX_PUBLIC_DOMAIN is required — set to your domain (e.g. helix.example.com)}
+      HELIX_PUBLIC_DOMAIN: ${HELIX_PUBLIC_DOMAIN:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
