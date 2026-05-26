@@ -16,6 +16,26 @@
 # For e2-standard-2+ (8 GB), scale up via env vars (recommended pattern below):
 #   export BACKEND_MEM=1200m WORKER_MEM=1200m POSTGRES_MEM=900m TEMPORAL_MEM=800m FRONTEND_MEM=500m
 #   docker compose up
+#
+# ── Volume design — two named volumes (B-5 fix) ──────────────────────────────
+#
+#   helix_artifacts  — user-uploaded migration artifacts (SQL / Python scripts).
+#                      Written and read exclusively by the backend service, mounted
+#                      at /app/data/artifacts (ARTIFACT_STORAGE_PATH env var).
+#
+#   helix_planning   — BMAD agent planning artifacts (Markdown + latest.json index).
+#                      Written by the worker at /app/_bmad-output/planning-artifacts/
+#                      as mandated by _bmad/bmm/config.yaml's `output_folder` setting.
+#                      Mounted read-only into the backend at /app/_bmad-output so the
+#                      GET /api/v1/agent-workflows/{id}/artifact-content endpoint can
+#                      resolve worker-produced BMAD paths without path translation.
+#
+# Background: prior to this fix both services shared `helix_artifacts` but mounted
+# it at different container paths (/app/data/artifacts vs /app/_bmad-output). The
+# worker wrote into _bmad-output/ while the backend saw data/artifacts/ as the
+# volume root — those are non-overlapping sub-trees inside the same volume, so the
+# artifact-content API always returned 404 for BMAD-generated outputs (B-5).
+# ─────────────────────────────────────────────────────────────────────────────
 
 x-image-prefix: &image-prefix ${HELIX_IMAGE_PREFIX:-helix}
 x-image-tag: &image-tag ${HELIX_IMAGE_TAG:-latest}
@@ -165,6 +185,9 @@ services:
         condition: service_healthy
     volumes:
       - helix_artifacts:/app/data/artifacts
+      # B-5: read-only view of worker BMAD output so artifact-content API can
+      # resolve /app/_bmad-output/planning-artifacts/{project}/{agent}/*.md paths.
+      - helix_planning:/app/_bmad-output:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
@@ -190,9 +213,10 @@ services:
       temporal:
         condition: service_healthy
     volumes:
-      # W-002: BMAD config writes artifacts to /app/_bmad-output/planning-artifacts.
-      # Volume MUST be at /app/_bmad-output so artifacts persist across restarts.
-      - helix_artifacts:/app/_bmad-output
+      # W-002 / B-5: BMAD config writes artifacts to /app/_bmad-output/planning-artifacts.
+      # Uses helix_planning (not helix_artifacts) so the backend can mount the same
+      # volume read-only at /app/_bmad-output without sharing the uploads namespace.
+      - helix_planning:/app/_bmad-output
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
@@ -252,6 +276,10 @@ volumes:
   helix_postgres_data:
     driver: local
   helix_artifacts:
+    driver: local
+  # B-5: separate volume for BMAD planning artifacts written by the worker.
+  # Mounted rw in worker (/app/_bmad-output) and ro in backend (/app/_bmad-output).
+  helix_planning:
     driver: local
   caddy_data:
     driver: local

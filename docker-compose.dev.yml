@@ -7,6 +7,10 @@
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml up
+#
+# Volume note (mirrors docker-compose.yml B-5 fix):
+#   helix_artifacts — user uploads, backend rw at /app/data/artifacts
+#   helix_planning  — BMAD planning artifacts, worker rw + backend ro at /app/_bmad-output
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -18,6 +22,8 @@ services:
       - ./agents:/app/agents
       - ./_bmad:/app/_bmad
       - helix_artifacts:/app/data/artifacts
+      # B-5: read-only view of worker BMAD planning artifacts (mirrors prod).
+      - helix_planning:/app/_bmad-output:ro
     environment:
       APP_ENV: development
 
@@ -28,8 +34,9 @@ services:
       - ./agents:/app/agents
       - ./_bmad:/app/_bmad
       - ./backend:/app/backend
-      # W-002: mirror the prod volume path so BMAD artifacts persist in dev.
-      - helix_artifacts:/app/_bmad-output
+      # W-002 / B-5: helix_planning (not helix_artifacts) so uploads and BMAD
+      # artifacts remain in separate volumes, matching the prod volume layout.
+      - helix_planning:/app/_bmad-output
     environment:
       APP_ENV: development
 
