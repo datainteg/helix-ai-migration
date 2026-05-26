@@ -201,6 +201,63 @@ docker push ghcr.io/your-org/frontend:v0.5.0
 
 ---
 
+## Requirements lockfile regeneration
+
+**Important:** `backend/requirements.lock` and `worker/requirements.lock` must be
+regenerated with Python 3.11 on Linux whenever `requirements.txt` files are
+modified. This ensures ABI-compatible wheels are selected for the production
+runtime and prevents silent failures at container startup.
+
+### Why this matters
+
+Lockfiles contain pinned versions of all transitive dependencies. When `pip-compile`
+runs, it resolves wheels based on the Python version and OS platform of the host
+where it runs. If a lockfile is compiled on Windows / Python 3.13 but the
+production container runs on Linux / Python 3.11, the installed wheels may have
+mismatched ABI tags (`cp313` vs `cp311`, Windows-only packages like `pywin32`),
+causing import failures.
+
+### Regenerating lockfiles
+
+The `scripts/lock-requirements.sh` script handles this automatically:
+
+```bash
+# Regenerate both lockfiles using Docker (guaranteed Python 3.11 + Linux)
+./scripts/lock-requirements.sh
+
+# Or regenerate just one
+./scripts/lock-requirements.sh backend
+./scripts/lock-requirements.sh worker
+
+# Bump all versions to latest before regenerating
+./scripts/lock-requirements.sh --upgrade
+```
+
+The script:
+1. Verifies Docker is installed (required).
+2. Runs `pip-compile` inside a `python:3.11-slim-bookworm` container.
+3. Writes the regenerated `*.lock` files to the host.
+4. Prints a reminder to commit the changes.
+
+### CI / pre-commit check
+
+Add a CI check to verify lockfiles are up-to-date:
+
+```yaml
+- name: Check requirements.lock freshness
+  run: |
+    ./scripts/lock-requirements.sh backend
+    git diff --exit-code backend/requirements.lock
+    ./scripts/lock-requirements.sh worker
+    git diff --exit-code worker/requirements.lock
+```
+
+Developers who modify `requirements.txt` must regenerate + commit the corresponding
+`.lock` file in the same PR. This ensures `docker compose build` always produces
+deterministic images.
+
+---
+
 ## Day-2 ops
 
 ### Logs
