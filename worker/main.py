@@ -7,6 +7,13 @@ with a signal-driven human approval gate).
 Behaviour on Temporal connect failure:
   - `APP_ENV=production`: exit non-zero so Docker restart_policy kicks in.
   - dev/test: log and exit 0 so unit tests don't need Temporal running.
+
+BMAD Artifact Path Contract (W-002):
+  - BMAD config specifies: planning_artifacts = "{project-root}/_bmad-output/planning-artifacts"
+  - In container with HELIX_PROJECT_ROOT=/app: resolves to /app/_bmad-output/planning-artifacts
+  - Docker Compose volume mount: helix_artifacts:/app/_bmad-output
+  - These paths must align so artifacts persist across restarts.
+  - A runtime assertion verifies the artifact directory is writable at startup.
 """
 
 from __future__ import annotations
@@ -17,10 +24,12 @@ import os
 import signal
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from agents.runtime.bmad_loader import load_bmad_config
 from worker.activities.bmad_activities import execute_bmad_graph_activity
 from worker.activities.bmad_node_activities import (
     amelia_code_review_activity,
@@ -47,8 +56,62 @@ TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
 APP_ENV = os.getenv("APP_ENV", "development")
 
 
+def _verify_bmad_artifact_store() -> bool:
+    """Verify that the BMAD artifact directory is writable at startup.
+
+    Returns True if the artifact store is ready, False otherwise.
+    Logs clear errors if the check fails.
+
+    W-002 / W-013: This assertion ensures the compose volume mount is correctly
+    configured at /app/_bmad-output (or wherever HELIX_PROJECT_ROOT points).
+    If the volume fails to mount (e.g. volume name mismatch), this catches it
+    before the worker accepts tasks from Temporal.
+    """
+    try:
+        cfg = load_bmad_config()
+        planning_root = Path(cfg.planning_artifacts).parent
+        planning_root.mkdir(parents=True, exist_ok=True)
+
+        # Attempt a test write to verify the filesystem is writable.
+        test_file = planning_root / ".healthcheck"
+        test_file.touch()
+        test_file.unlink()
+
+        logger.info(
+            "BMAD artifact store verified: planning_artifacts=%s, parent=%s (writable)",
+            cfg.planning_artifacts,
+            planning_root,
+        )
+        return True
+    except OSError as exc:
+        logger.error(
+            "BMAD artifact directory not writable. Check volume mount at /app/_bmad-output. "
+            "Error: %s",
+            exc,
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Failed to verify BMAD artifact store: %s. "
+            "This likely indicates a compose volume mount misconfiguration.",
+            exc,
+        )
+        return False
+
+
 async def main() -> int:
     """Connect to Temporal and run the worker. Returns process exit code."""
+    # W-002/W-013: Verify BMAD artifact store before accepting tasks from Temporal.
+    # Fail fast if the compose volume mount is misconfigured.
+    if not _verify_bmad_artifact_store():
+        if APP_ENV == "production":
+            logger.error("BMAD artifact store verification failed in production — exiting non-zero.")
+            return 1
+        logger.warning(
+            "BMAD artifact store verification failed (env=%s) — continuing in dev mode.",
+            APP_ENV,
+        )
+
     logger.info("Connecting to Temporal at %s", TEMPORAL_ADDRESS)
     try:
         client = await Client.connect(TEMPORAL_ADDRESS)

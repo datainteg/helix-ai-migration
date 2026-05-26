@@ -105,15 +105,25 @@ class Settings(BaseSettings):
             # Disallow regex-based origins in production. Use explicit allowlist only.
             if self.CORS_ORIGIN_REGEX:
                 raise ValueError("CORS_ORIGIN_REGEX must be empty in production; use explicit CORS_ORIGINS")
-            # Validate ENCRYPTION_KEY is a proper base64-encoded 32-byte Fernet key
+            # Validate ENCRYPTION_KEY is a proper 44-char url-safe base64 Fernet key.
+            # Length check MUST come first — adding '==' before decoding would allow
+            # a 43-char key (missing padding) to pass silently, which Fernet rejects
+            # at runtime with ValueError on the first encrypt/decrypt call.
             import base64
+            _key = self.ENCRYPTION_KEY
+            if len(_key) != 44:
+                raise ValueError(
+                    f"ENCRYPTION_KEY must be exactly 44 chars (Fernet key with = padding); "
+                    f"got len={len(_key)}. "
+                    "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                )
             try:
-                decoded = base64.urlsafe_b64decode(self.ENCRYPTION_KEY + "==")
+                decoded = base64.urlsafe_b64decode(_key)
                 if len(decoded) != 32:
                     raise ValueError
             except Exception:
                 raise ValueError(
-                    "ENCRYPTION_KEY must be a base64-encoded 32-byte key. "
+                    "ENCRYPTION_KEY must be a valid url-safe base64-encoded 32-byte key. "
                     "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
                 )
 
