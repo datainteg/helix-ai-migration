@@ -72,7 +72,14 @@ export default function ProjectsPage() {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: APIProject[]) => setProjects(Array.isArray(data) ? data : []))
+      .then((data: unknown) => {
+        // Backend returns a paginated envelope {items, total, limit, offset}.
+        // Guard against bare-array responses from older backends.
+        const items: APIProject[] = Array.isArray(data)
+          ? (data as APIProject[])
+          : (((data as any).items as APIProject[]) ?? []);
+        setProjects(items);
+      })
       .catch(() => setProjects([]))
       .finally(() => setLoading(false));
   }, [token]);

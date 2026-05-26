@@ -297,7 +297,8 @@ const burndownFromWire = (w: WireBurndown): BurndownPoint => ({
 // ── Public fetchers ────────────────────────────────────────────────
 
 export async function fetchSprints(token: string | null, projectId: string): Promise<Sprint[]> {
-  const rows = await req<WireSprint[]>(`/projects/${projectId}/sprints`, token);
+  const data = await req<unknown>(`/projects/${projectId}/sprints`, token);
+  const rows: WireSprint[] = Array.isArray(data) ? data : ((data as any).items ?? []);
   return rows.map(sprintFromWire);
 }
 
@@ -312,7 +313,8 @@ export async function fetchSprint(token: string | null, sprintId: string): Promi
 }
 
 export async function fetchTasks(token: string | null, sprintId: string): Promise<SprintTask[]> {
-  const rows = await req<WireTask[]>(`/sprints/${sprintId}/tasks`, token);
+  const data = await req<unknown>(`/sprints/${sprintId}/tasks`, token);
+  const rows: WireTask[] = Array.isArray(data) ? data : ((data as any).items ?? []);
   return rows.map(taskFromWire);
 }
 

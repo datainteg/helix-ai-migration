@@ -80,8 +80,9 @@ async function req<T>(path: string, token: string, init: RequestInit = {}): Prom
   return res.json() as Promise<T>;
 }
 
-export function listCutovers(token: string, projectId: string): Promise<Cutover[]> {
-  return req<Cutover[]>(`/api/v1/projects/${projectId}/cutovers`, token);
+export async function listCutovers(token: string, projectId: string): Promise<Cutover[]> {
+  const data = await req<unknown>(`/api/v1/projects/${projectId}/cutovers`, token);
+  return Array.isArray(data) ? data : ((data as any).items ?? []);
 }
 
 export function createCutover(token: string, projectId: string, data: CutoverCreateInput): Promise<Cutover> {

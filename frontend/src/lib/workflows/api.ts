@@ -37,12 +37,19 @@ async function get<T>(path: string, token: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function listOrgWorkflowRuns(token: string, limit = 50): Promise<WorkflowRun[]> {
-  return get<WorkflowRun[]>(`/api/v1/agent-workflows?limit=${limit}`, token);
+/** Unwrap a list endpoint that may return a bare array or a paginated envelope. */
+function unwrapItems<T>(data: unknown): T[] {
+  return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
 }
 
-export function listProjectWorkflowRuns(token: string, projectId: string, limit = 50): Promise<WorkflowRun[]> {
-  return get<WorkflowRun[]>(`/api/v1/projects/${projectId}/agent-workflows?limit=${limit}`, token);
+export async function listOrgWorkflowRuns(token: string, limit = 50): Promise<WorkflowRun[]> {
+  const data = await get<unknown>(`/api/v1/agent-workflows?limit=${limit}`, token);
+  return unwrapItems<WorkflowRun>(data);
+}
+
+export async function listProjectWorkflowRuns(token: string, projectId: string, limit = 50): Promise<WorkflowRun[]> {
+  const data = await get<unknown>(`/api/v1/projects/${projectId}/agent-workflows?limit=${limit}`, token);
+  return unwrapItems<WorkflowRun>(data);
 }
 
 export function getWorkflowDetail(token: string, workflowId: string): Promise<WorkflowDetail> {

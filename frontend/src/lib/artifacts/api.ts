@@ -27,12 +27,19 @@ async function get<T>(path: string, token: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function listProjectArtifacts(token: string, projectId: string, limit = 100): Promise<Artifact[]> {
-  return get<Artifact[]>(`/api/v1/projects/${projectId}/artifacts?limit=${limit}`, token);
+/** Unwrap a list endpoint that may return a bare array or a paginated envelope. */
+function unwrapItems<T>(data: unknown): T[] {
+  return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
 }
 
-export function listOrgArtifacts(token: string, limit = 100): Promise<Artifact[]> {
-  return get<Artifact[]>(`/api/v1/artifacts?limit=${limit}`, token);
+export async function listProjectArtifacts(token: string, projectId: string, limit = 100): Promise<Artifact[]> {
+  const data = await get<unknown>(`/api/v1/projects/${projectId}/artifacts?limit=${limit}`, token);
+  return unwrapItems<Artifact>(data);
+}
+
+export async function listOrgArtifacts(token: string, limit = 100): Promise<Artifact[]> {
+  const data = await get<unknown>(`/api/v1/artifacts?limit=${limit}`, token);
+  return unwrapItems<Artifact>(data);
 }
 
 export function listArtifactVersions(token: string, artifactId: string): Promise<Artifact[]> {

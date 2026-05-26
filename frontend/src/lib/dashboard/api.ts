@@ -54,11 +54,18 @@ function fromWire(wire: StatsWire): DashboardStats {
   };
 }
 
+/** Unwrap a list endpoint that may return a bare array or a paginated envelope. */
+function unwrapItems<T>(data: unknown): T[] {
+  return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
+}
+
 async function fallbackStats(token: string): Promise<DashboardStats> {
-  const [projects, workflows] = await Promise.all([
-    fetchJson<ProjectWire[]>("/api/v1/projects?include_archived=true&limit=200", token),
-    fetchJson<WorkflowWire[]>("/api/v1/agent-workflows?limit=200", token),
+  const [rawProjects, rawWorkflows] = await Promise.all([
+    fetchJson<unknown>("/api/v1/projects?include_archived=true&limit=200", token),
+    fetchJson<unknown>("/api/v1/agent-workflows?limit=200", token),
   ]);
+  const projects = unwrapItems<ProjectWire>(rawProjects);
+  const workflows = unwrapItems<WorkflowWire>(rawWorkflows);
   const active = projects.filter((p) => p.status !== "archived").length;
   const archived = projects.length - active;
   const counts = workflows.reduce(
