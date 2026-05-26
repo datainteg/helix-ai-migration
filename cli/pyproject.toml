@@ -1,6 +1,6 @@
 [project]
 name = "helix-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Helix Migration CLI"
 authors = [{name = "Helix Migration"}]
 license = {text = "Apache-2.0"}

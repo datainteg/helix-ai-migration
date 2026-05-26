@@ -3,6 +3,12 @@
 No external dependencies beyond `httpx` (already used elsewhere in the repo)
 and stdlib. Auth state persists in ~/.helix/config.json so commands don't
 need --token on every call.
+
+Pagination envelope (v0.2.0+)
+------------------------------
+Converted list endpoints now return ``{items: T[], total: int, limit: int,
+offset: int}`` instead of a bare array.  All list helpers silently unwrap the
+envelope so existing CLI commands keep working unchanged.
 """
 
 from __future__ import annotations
@@ -35,6 +41,14 @@ def _save_config(cfg: dict[str, Any]) -> None:
         _CONFIG_FILE.chmod(0o600)
     except Exception:
         pass
+
+
+def _unwrap(data: Any) -> list[dict]:
+    """Return ``data["items"]`` if the response is a pagination envelope,
+    otherwise return *data* unchanged (bare-array back-compat)."""
+    if isinstance(data, dict) and "items" in data:
+        return data["items"]
+    return data  # bare-array fallback
 
 
 class HelixClient:
@@ -71,7 +85,7 @@ class HelixClient:
     # ── Projects ──────────────────────────────────────────────────────
 
     def list_projects(self) -> list[dict]:
-        return self._get("/api/v1/projects?limit=200")
+        return _unwrap(self._get("/api/v1/projects?limit=200"))
 
     def create_project(self, name: str, description: str = "") -> dict:
         return self._post("/api/v1/projects", {"name": name, "description": description})
@@ -89,8 +103,8 @@ class HelixClient:
 
     def list_workflows(self, project_id: Optional[str] = None) -> list[dict]:
         if project_id:
-            return self._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100")
-        return self._get("/api/v1/agent-workflows?limit=100")
+            return _unwrap(self._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100"))
+        return _unwrap(self._get("/api/v1/agent-workflows?limit=100"))
 
     # ── Cost ──────────────────────────────────────────────────────────
 
@@ -103,7 +117,7 @@ class HelixClient:
     # ── Templates ─────────────────────────────────────────────────────
 
     def list_templates(self) -> list[dict]:
-        return self._get("/api/v1/migration-templates")
+        return _unwrap(self._get("/api/v1/migration-templates"))
 
     def clone_template(self, template_id: str, project_name: str) -> dict:
         return self._post(
@@ -114,7 +128,7 @@ class HelixClient:
     # ── Cutovers ──────────────────────────────────────────────────────
 
     def list_cutovers(self, project_id: str) -> list[dict]:
-        return self._get(f"/api/v1/projects/{project_id}/cutovers")
+        return _unwrap(self._get(f"/api/v1/projects/{project_id}/cutovers"))
 
     def transition_cutover(self, cutover_id: str, target_state: str, notes: str = "") -> dict:
         return self._post(
