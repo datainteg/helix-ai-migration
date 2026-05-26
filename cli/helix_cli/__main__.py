@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from helix_cli import __version__
@@ -99,6 +102,191 @@ def _cmd_cutover_transition(client: HelixClient, args: argparse.Namespace) -> No
     _print(client.transition_cutover(args.cutover_id, args.target_state, args.notes or ""))
 
 
+# ── admin bootstrap ────────────────────────────────────────────────────────────
+
+_SENTINEL_FILE = Path(".helix-bootstrap")
+
+
+def _read_sentinel() -> dict[str, str]:
+    """Read creds written by setup.sh into .helix-bootstrap (key=value lines)."""
+    if not _SENTINEL_FILE.exists():
+        return {}
+    cfg: dict[str, str] = {}
+    for line in _SENTINEL_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        cfg[k.strip()] = v.strip()
+    return cfg
+
+
+def _cmd_admin_bootstrap(client: HelixClient, args: argparse.Namespace) -> int:
+    """helix admin bootstrap — create the first super-admin user headlessly.
+
+    Exit codes:
+      0  success (or already bootstrapped — idempotent)
+      1  network / unexpected error
+      2  auth / validation error from the server
+    """
+    import getpass as _getpass
+
+    # Override API URL if provided
+    if getattr(args, "api", None):
+        client.api_url = args.api.rstrip("/")
+
+    # Resolve credentials: flags → sentinel file → interactive
+    sentinel = _read_sentinel()
+
+    email = (
+        getattr(args, "email", None)
+        or os.getenv("HELIX_ADMIN_EMAIL")
+        or sentinel.get("ADMIN_EMAIL")
+    )
+    password = (
+        getattr(args, "password", None)
+        or os.getenv("HELIX_ADMIN_PASSWORD")
+        or sentinel.get("ADMIN_PASSWORD")
+    )
+    org_name = (
+        getattr(args, "org_name", None)
+        or os.getenv("HELIX_ORG_NAME")
+        or sentinel.get("ORG_NAME")
+        or "Helix"
+    )
+    display_name = (
+        getattr(args, "display_name", None)
+        or os.getenv("HELIX_ADMIN_NAME")
+        or sentinel.get("ADMIN_NAME")
+        or "Admin"
+    )
+
+    if not email:
+        print("error: --email is required (or set HELIX_ADMIN_EMAIL)", file=sys.stderr)
+        return 2
+
+    # Password: try --password-stdin, then flag, then prompt
+    if getattr(args, "password_stdin", False):
+        password = sys.stdin.readline().rstrip("\n")
+    elif not password:
+        password = _getpass.getpass(f"Password for {email}: ")
+
+    if not password:
+        print("error: password is required", file=sys.stderr)
+        return 2
+
+    # TOS acceptance gate
+    if not getattr(args, "accept_tos", False) and not sentinel.get("ACCEPT_TOS"):
+        print(
+            "error: you must pass --accept-tos to confirm acceptance of the "
+            "Helix terms of service before bootstrapping.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Derive org slug from org_name
+    import re
+    org_slug = re.sub(r"[^a-z0-9]+", "-", org_name.lower()).strip("-") or "helix"
+
+    try:
+        result = client.bootstrap_first_admin(
+            email=email,
+            password=password,
+            name=display_name,
+            org_name=org_name,
+            org_slug=org_slug,
+        )
+        token_len = len(result.get("access_token", ""))
+        print(
+            f"Bootstrap complete. Admin user {email!r} created. "
+            f"Token saved to ~/.helix/config.json (length={token_len})."
+        )
+        return 0
+    except RuntimeError as exc:
+        msg = str(exc)
+        if msg == "already bootstrapped":
+            print("Already bootstrapped — first admin exists. Nothing to do.")
+            return 0
+        # 401/403 → exit 2; network/other → exit 1
+        print(f"error: {msg}", file=sys.stderr)
+        if msg.startswith(("401", "403", "400")):
+            return 2
+        return 1
+
+
+# ── helix install (one-liner wrapper) ─────────────────────────────────────────
+
+
+def _cmd_install(client: HelixClient, args: argparse.Namespace) -> int:
+    """helix install — run setup.sh then bootstrap the first admin.
+
+    One-liner:
+        pipx install helix-cli && helix install --domain helix.example.com \\
+            --admin-email ops@example.com
+
+    The command:
+      1. Verifies setup.sh is present in the current working directory.
+      2. Runs ./setup.sh with any extra flags passed via --setup-flags.
+      3. Waits for the backend to be reachable (inherits setup.sh readyz gate).
+      4. Runs `helix admin bootstrap` with the supplied credentials.
+    """
+    setup_script = Path("setup.sh")
+    if not setup_script.exists():
+        print(
+            "error: setup.sh not found in the current directory. "
+            "Run this command from the cloned helix-ai-migration repo root.",
+            file=sys.stderr,
+        )
+        return 1
+
+    domain = getattr(args, "domain", None) or ""
+    admin_email = getattr(args, "admin_email", None) or ""
+    admin_password = getattr(args, "admin_password", None) or ""
+    org_name = getattr(args, "org_name", None) or "Helix"
+    setup_flags = getattr(args, "setup_flags", None) or []
+
+    # Build setup.sh invocation
+    cmd = ["/bin/bash", "setup.sh"] + setup_flags
+    if domain:
+        # Pass domain as env-var hint; setup.sh reads NEXT_PUBLIC_API_URL
+        env = {
+            **os.environ,
+            "NEXT_PUBLIC_API_URL": f"https://{domain}",
+            "CORS_ORIGINS": f'["https://{domain}"]',
+            "FRONTEND_URL": f"https://{domain}",
+            "PUBLIC_HOSTNAME": domain,
+        }
+    else:
+        env = None
+
+    print(f"Running ./setup.sh{' ' + ' '.join(setup_flags) if setup_flags else ''} ...")
+    try:
+        ret = subprocess.call(cmd, env=env)
+    except OSError as exc:
+        print(f"error: could not run setup.sh: {exc}", file=sys.stderr)
+        return 1
+    if ret != 0:
+        print(f"error: setup.sh exited with code {ret}", file=sys.stderr)
+        return 1
+
+    # Determine API URL
+    api_url = f"https://{domain}" if domain else "http://localhost:8000"
+    client.api_url = api_url
+
+    # Synthesise a fake Namespace for bootstrap
+    bootstrap_ns = argparse.Namespace(
+        api=api_url,
+        email=admin_email or None,
+        password=admin_password or None,
+        password_stdin=False,
+        org_name=org_name,
+        display_name="Admin",
+        accept_tos=True,
+    )
+    print("Running admin bootstrap ...")
+    return _cmd_admin_bootstrap(client, bootstrap_ns)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="helix", description="Helix Migration CLI")
     p.add_argument("--version", action="version", version=f"helix {__version__}")
@@ -168,6 +356,60 @@ def build_parser() -> argparse.ArgumentParser:
     ct.add_argument("--notes")
     ct.set_defaults(func=_cmd_cutover_transition)
 
+    # admin
+    adm = sub.add_parser("admin", help="Administrative commands (no auth token required for bootstrap)")
+    adm_sub = adm.add_subparsers(dest="adm_cmd", required=True)
+    bs = adm_sub.add_parser(
+        "bootstrap",
+        help=(
+            "Create the first super-admin user. Reads .helix-bootstrap sentinel "
+            "file if no flags are given. Idempotent: exits 0 if already done."
+        ),
+    )
+    bs.add_argument("--api", help="API base URL (default: HELIX_API_URL or http://localhost:8000)")
+    bs.add_argument("--email", help="Admin email address (or set HELIX_ADMIN_EMAIL)")
+    bs.add_argument(
+        "--password",
+        help="Admin password (omit to prompt, or use --password-stdin)",
+    )
+    bs.add_argument(
+        "--password-stdin",
+        dest="password_stdin",
+        action="store_true",
+        help="Read password from stdin (first line only). Useful for scripts.",
+    )
+    bs.add_argument("--org-name", dest="org_name", default=None, help="Organisation display name (default: Helix)")
+    bs.add_argument("--display-name", dest="display_name", default=None, help="Admin user display name (default: Admin)")
+    bs.add_argument(
+        "--accept-tos",
+        dest="accept_tos",
+        action="store_true",
+        help="Confirm acceptance of the Helix terms of service. Required.",
+    )
+    bs.set_defaults(func=_cmd_admin_bootstrap)
+
+    # install
+    inst = sub.add_parser(
+        "install",
+        help=(
+            "One-command install: run ./setup.sh then bootstrap the first admin. "
+            "Example: pipx install helix-cli && helix install "
+            "--domain helix.example.com --admin-email ops@example.com"
+        ),
+    )
+    inst.add_argument("--domain", help="Public hostname (e.g. helix.example.com). Sets NEXT_PUBLIC_API_URL.")
+    inst.add_argument("--admin-email", dest="admin_email", help="First admin email address")
+    inst.add_argument("--admin-password", dest="admin_password", help="First admin password (omit to prompt)")
+    inst.add_argument("--org-name", dest="org_name", default="Helix", help="Organisation display name")
+    inst.add_argument(
+        "--setup-flags",
+        dest="setup_flags",
+        nargs="*",
+        default=[],
+        help="Extra flags forwarded to setup.sh (e.g. --rebuild)",
+    )
+    inst.set_defaults(func=_cmd_install)
+
     return p
 
 
@@ -176,7 +418,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     client = HelixClient()
     try:
-        args.func(client, args)
+        result = args.func(client, args)
+        # Commands that manage their own exit codes return an int.
+        if isinstance(result, int):
+            return result
         return 0
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)

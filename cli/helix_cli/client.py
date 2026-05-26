@@ -136,6 +136,49 @@ class HelixClient:
             {"target_state": target_state, "notes": notes},
         )
 
+    # ── Bootstrap (no auth required) ─────────────────────────────────
+
+    def bootstrap_first_admin(
+        self,
+        email: str,
+        password: str,
+        name: str,
+        org_name: str,
+        org_slug: str,
+    ) -> dict:
+        """POST /api/v1/auth/first-admin.
+
+        Returns the token response on success.
+        Raises RuntimeError("already bootstrapped") with status 400 when a
+        super-admin already exists (idempotent — callers should exit 0).
+        Raises RuntimeError with the HTTP status/detail on any other error.
+        """
+        res = httpx.post(
+            f"{self.api_url}/api/v1/auth/first-admin",
+            json={
+                "email": email,
+                "password": password,
+                "name": name,
+                "organization_name": org_name,
+                "organization_slug": org_slug,
+            },
+            timeout=30,
+        )
+        if res.status_code == 400:
+            detail = ""
+            try:
+                detail = res.json().get("detail", "")
+            except Exception:
+                detail = res.text[:200]
+            if "already" in detail.lower() or "exists" in detail.lower():
+                raise RuntimeError("already bootstrapped")
+            raise RuntimeError(f"400 {detail or res.reason_phrase}")
+        self._raise_for(res)
+        body = res.json()
+        self.token = body["access_token"]
+        _save_config({"api_url": self.api_url, "token": self.token, "email": email})
+        return body
+
     # ── Internals ─────────────────────────────────────────────────────
 
     def _get(self, path: str) -> Any:
