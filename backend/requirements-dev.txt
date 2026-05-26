@@ -1,0 +1,9 @@
+# Development and test dependencies — NOT installed in the production Docker image.
+# Local dev setup: pip install -r backend/requirements-dev.txt
+# CI test setup:   pip install -r backend/requirements-dev.txt
+#
+# This file extends production deps; install order matters for pip resolver.
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

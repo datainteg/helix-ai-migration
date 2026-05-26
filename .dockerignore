@@ -6,6 +6,12 @@
 **/.mypy_cache
 **/.ruff_cache
 
+# Test output and coverage reports
+htmlcov
+.coverage
+**/.coverage
+**/htmlcov
+
 # Local virtualenvs
 .venv
 venv
@@ -57,3 +63,14 @@ agents/bmad/BMAD-METHOD/README_VN.md
 
 # Generated BMAD artifacts (created at runtime, not part of image)
 _bmad-output
+
+# W-006: directories not needed in the worker image.
+# backend/alembic is excluded because the worker must NOT run migrations;
+# including it in the image tempts operators to run `alembic upgrade head`
+# from the wrong container.
+backend/alembic/
+# The frontend app and static website have no worker runtime dependency.
+frontend/
+website/
+# Top-level test suites.
+tests/

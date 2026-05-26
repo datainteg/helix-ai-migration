@@ -1,0 +1,17 @@
+# backend/.dockerignore — used when building with context set to backend/ directly.
+# The primary build context is the repo root (see backend/Dockerfile COPY paths).
+# This file guards against accidental `docker build backend/` invocations and
+# provides a second layer of exclusion for backend-specific artifacts.
+
+# Test cache and coverage
+.pytest_cache
+htmlcov
+.coverage
+*.egg-info
+.mypy_cache
+
+# Local runtime artifacts
+*.pyc
+__pycache__
+test.db
+tests/

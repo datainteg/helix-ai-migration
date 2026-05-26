@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -14,7 +14,7 @@ RUN if [ -f requirements.lock ]; then \
     fi
 
 
-FROM python:3.11-slim AS runner
+FROM python:3.11-slim-bookworm AS runner
 
 WORKDIR /app
 
@@ -23,6 +23,12 @@ ENV PATH="/install/bin:$PATH"
 ENV PYTHONPATH="/install/lib/python3.11/site-packages:/app"
 ENV HELIX_PROJECT_ROOT=/app
 ENV BMAD_METHOD_ROOT=/app/agents/bmad/BMAD-METHOD
+
+# unixodbc: required by the pyodbc wheel used in connectors/sqlserver.
+# libodbc2 is the Debian 12 (bookworm) package name for the shared library.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unixodbc libodbc2 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /install
 COPY backend/ .
@@ -36,7 +42,13 @@ USER 1000
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Align with docker-compose.yml healthcheck: interval=30s, timeout=10s,
+# start_period=30s, retries=3.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" || exit 1
 
-CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+# exec-form ENTRYPOINT — PID 1 is uvicorn, not sh.
+# SIGTERM from `docker stop` is forwarded directly to uvicorn for graceful shutdown.
+# Alembic migrations are handled by the separate `backend-migrate` compose service (F2).
+# UVICORN_WORKERS defaults to 2 (safe for e2-medium 2-vCPU); override via env.
+ENTRYPOINT ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2}"]
