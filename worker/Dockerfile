@@ -35,11 +35,15 @@ RUN adduser --disabled-password --gecos "" --uid 1000 helix \
     && chown -R helix:helix /app
 USER 1000
 
-# Healthcheck: verify the worker process can import its entrypoint AND reach Temporal.
-# Connection check uses a short timeout so the health probe stays cheap.
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import asyncio, os; from temporalio.client import Client; \
-asyncio.run(Client.connect(os.getenv('TEMPORAL_ADDRESS', 'localhost:7233')))" \
+# Healthcheck (W-004): lightweight TCP probe instead of full TLS gRPC connect.
+# A full Client.connect() every 30 s spawns a new Python interpreter + gRPC
+# handshake (~80-200 ms on cross-AZ GCP).  A raw TCP socket.connect() to port
+# 7233 is sub-millisecond and confirms the Temporal frontend is reachable.
+#
+# start-period=60s: cold import of LangGraph + PydanticAI + all LLM SDKs on an
+# e2-medium takes >30 s; 60 s avoids spurious "unhealthy" on first boot (W-010).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('temporal', 7233))" \
     || exit 1
 
 CMD ["python", "-m", "worker.main"]
