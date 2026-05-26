@@ -32,7 +32,7 @@ layout. Do NOT author prompts inline in Helix code — Helix loads SKILL.md
 ### Get the stack running
 
 ```bash
-git clone https://github.com/<your-fork>/helix-ai-migration.git
+git clone https://github.com/datainteg/helix-ai-migration.git
 cd helix-ai-migration
 
 # Generate secrets (writes .env)

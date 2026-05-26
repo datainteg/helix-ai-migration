@@ -25,7 +25,7 @@ proxy (Caddy, Traefik, etc.) in front of the `frontend` + `backend` containers.
 ## One-click install (recommended)
 
 ```bash
-git clone https://github.com/<your-fork>/helix-ai-migration.git
+git clone https://github.com/datainteg/helix-ai-migration.git
 cd helix-ai-migration
 ./setup.sh           # Linux / macOS / WSL
 # or:
@@ -59,7 +59,7 @@ After it finishes, open `http://localhost:3000/setup/first-admin` and follow the
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/<your-fork>/helix-ai-migration.git
+git clone https://github.com/datainteg/helix-ai-migration.git
 cd helix-ai-migration
 
 # 2. Generate strong secrets into .env
@@ -112,16 +112,28 @@ First-run flow inside the UI:
 
 ### Firewall recommendation
 
+When a reverse proxy (Caddy / nginx) terminates TLS on the same host, the
+backend (port 8000) and frontend (port 3000) should be bound to loopback only
+so the proxy can reach them but the public internet cannot.
+
 ```bash
 # Allow only what the public needs.
 ufw allow 22/tcp        # SSH
-ufw allow 3000/tcp      # Frontend (or 80/443 if proxied)
-ufw allow 8000/tcp      # Backend API
+ufw allow 80/tcp        # HTTP (ACME challenge + redirect to HTTPS)
+ufw allow 443/tcp       # HTTPS (Caddy / nginx)
+# DO NOT open 3000 or 8000 directly — the reverse proxy handles them
+#   over loopback (127.0.0.1).
 # Temporal UI: do NOT open to internet. Use SSH tunnel from your laptop:
 #   ssh -L 8233:localhost:8233 user@server
 # Then open http://localhost:8233 locally.
 ufw enable
 ```
+
+> **Before wave-2 (F2 compose change):** docker-compose.yml bound backend and
+> frontend to `0.0.0.0` by default. Wave-2 changed the default bind to
+> `127.0.0.1`. If you are running a pre-wave-2 stack, **do not** open port
+> 8000 to the public internet via a firewall rule — it exposes the full API,
+> admin endpoints, OpenAPI docs, and Prometheus metrics.
 
 ---
 
@@ -147,6 +159,17 @@ You set these manually:
 | `SMTP_*` | Optional — required only for email invitations. |
 
 See [.env.example](.env.example) for the full list with comments.
+
+### DATABASE_URL driver note (asyncpg vs psycopg2)
+
+`DATABASE_URL` should always use the `postgresql://` scheme (psycopg2 driver).
+The async SQLAlchemy engine in the backend rewrites this automatically to
+`postgresql+asyncpg://` for async contexts (background tasks, SSE streams).
+Sync paths (Alembic migrations, wrapped sync DB work) continue using psycopg2.
+
+**Do not manually set `DATABASE_URL` to `postgresql+asyncpg://`** — the
+application rewrites it at startup and a double-prefix will cause connection
+errors. See `backend/app/db/session.py` lines 8–10 for the rewrite logic.
 
 ---
 
@@ -200,6 +223,63 @@ docker compose pull            # or rebuild
 docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
+
+> **Note:** on a fresh install the backend container runs `alembic upgrade
+> head` automatically on boot (see `backend/Dockerfile`). The manual step
+> above is only needed when upgrading an existing installation that is already
+> running.
+
+#### Wave-1 / wave-2 / wave-3 migration list
+
+All migrations are applied automatically by `alembic upgrade head`. The table
+below is a reference for operators who need to audit what changed between
+versions.
+
+| Revision | Wave | Description |
+|----------|------|-------------|
+| `eadec18c9cfc` | wave-1 | `workflow_steps.parsed_output` → JSONB (DI fix) |
+| `8f881cfc333e` | wave-1 | Identity UUID columns → String(36) (destructive on existing data — take a Postgres backup first) |
+| `p7q8r9s0t1u2` | wave-1 | Missing indexes for performance (perf fix) |
+| `2af2b45b4051` | wave-2 | `org_data_encryption_keys.organization_id` UNIQUE → partial UNIQUE on `(organization_id) WHERE is_active=true`. Required for DEK rotation (DI-C1). Safe to rerun. |
+| `q8r9s0t1u2v3` | wave-2 | Encrypts plaintext secrets in `llm_providers.extra_config` (Bedrock `aws_secret_access_key`, Vertex `service_account_json`, Azure `client_secret`). Idempotent; skips already-encrypted rows (SEC-010). |
+
+If upgrading from wave-1 to wave-2 on a live database, take a Postgres backup
+**before** running `alembic upgrade head` — `8f881cfc333e` is destructive on
+existing identity columns and cannot be auto-reversed.
+
+#### Post-upgrade verification
+
+After `alembic upgrade head` succeeds:
+
+1. **Confirm no orphaned workflows:** check for workflows stuck in
+   `awaiting_approval` and approve or reject them before running the upgrade
+   if you need a clean cutover.
+
+2. **DEK health check (wave-2+):**
+   ```sql
+   SELECT COUNT(DISTINCT organization_id)
+   FROM org_data_encryption_keys
+   WHERE is_active = true;
+   -- should equal the number of organizations
+   ```
+
+3. **Extra-config encryption check (wave-2+):**
+   ```sql
+   SELECT COUNT(*) FROM llm_providers WHERE extra_config IS NOT NULL;
+   -- if > 0, verify rows were re-encrypted by q8r9s0t1u2v3
+   ```
+
+4. **KEK rotation (if required by your security policy):**
+   ```bash
+   docker compose exec backend python -m app.cli.rotate rotate-keks --confirm
+   ```
+
+5. **Smoke test list:**
+   - `GET /api/v1/readyz` → `{"status": "ok"}`
+   - `GET /api/v1/health` → `{"status": "ok"}`
+   - `POST /api/v1/auth/login` with a known account → 200
+   - `GET /api/v1/projects?limit=1` → pagination envelope `{items, total, limit, offset}`
+   - Temporal UI reachable on localhost:8233 via SSH tunnel
 
 ### Postgres backup
 
@@ -296,6 +376,164 @@ on each platform.
 | **Docker-friendly PaaS** (Render, Railway, Fly.io) | Each service deploys separately. You'll need to publish images to a registry. Use their managed Postgres + Redis instead of the bundled containers — point `DATABASE_URL` + `REDIS_URL` at the managed instance. |
 | **Kubernetes** | Use `docker-compose.yml` as a starting point. Convert with `kompose` or write Helm chart. Postgres + Redis + Temporal as separate StatefulSets. |
 | **Cloud Run / App Runner** | One container per service. Backend + worker + frontend as separate services. Bring your own Postgres + Redis + Temporal Cloud. |
+
+---
+
+## GCP one-VM deploy
+
+Recommended instance: `e2-standard-2` (2 vCPU, 8 GB RAM). The documented
+4 GB floor is too tight; the Compose stack consumes ~4.8 GB before OS
+overhead and will OOM-kill the worker under load on an `e2-medium`.
+
+### Step-by-step
+
+1. **Reserve a static external IP** (required — ephemeral IPs break
+   `NEXT_PUBLIC_API_URL` and TLS certs on VM restart):
+   ```bash
+   gcloud compute addresses create helix-vm-ip --region=us-central1
+   gcloud compute instances add-access-config INSTANCE_NAME \
+     --access-config-name="External NAT" --address=STATIC_IP
+   ```
+
+2. **Create a DNS A record:** `helix.example.com → STATIC_IP` (TTL 300).
+   Wait for propagation (`dig helix.example.com`) before running `setup.sh`.
+
+3. **GCP firewall rules** (tag your VM with `helix-vm` at creation):
+   ```bash
+   # Allow HTTPS (TLS termination by Caddy on the VM)
+   gcloud compute firewall-rules create helix-allow-https \
+     --direction=INGRESS --action=ALLOW --rules=tcp:443 \
+     --source-ranges=0.0.0.0/0 --target-tags=helix-vm
+
+   # Allow HTTP (ACME challenge + redirect)
+   gcloud compute firewall-rules create helix-allow-http \
+     --direction=INGRESS --action=ALLOW --rules=tcp:80 \
+     --source-ranges=0.0.0.0/0 --target-tags=helix-vm
+
+   # SSH via IAP (no public port required)
+   gcloud compute firewall-rules create helix-allow-iap-ssh \
+     --direction=INGRESS --action=ALLOW --rules=tcp:22 \
+     --source-ranges=35.235.240.0/20 --target-tags=helix-vm
+   # DO NOT open 3000, 5432, 6379, 7233, 8000, or 8233.
+   ```
+
+4. **Set `.env` before building** (NEXT_PUBLIC_API_URL is baked at build time):
+   ```bash
+   NEXT_PUBLIC_API_URL=https://helix.example.com
+   CORS_ORIGINS=["https://helix.example.com"]
+   FRONTEND_URL=https://helix.example.com
+   PUBLIC_HOSTNAME=helix.example.com
+   CADDY_ADMIN_EMAIL=ops@example.com
+   ```
+
+5. **Run setup.sh:**
+   ```bash
+   ./setup.sh
+   ```
+
+6. **Bootstrap the first admin** (headless — no browser needed):
+   ```bash
+   pip install helix-cli
+   helix admin bootstrap \
+     --api https://helix.example.com \
+     --email ops@example.com \
+     --org-name "Acme Corp" \
+     --accept-tos
+   # prompts for password, exits 0 on success
+   ```
+
+### Caddy TLS (recommended reverse proxy)
+
+Caddy auto-obtains Let's Encrypt certs, handles SSE buffering automatically,
+and requires no extra config for `text/event-stream`. Add a `caddy` service to
+`docker-compose.yml` and create `deploy/caddy/Caddyfile`:
+
+```caddyfile
+{
+    email {$CADDY_ADMIN_EMAIL}
+}
+
+{$PUBLIC_HOSTNAME} {
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {http.request.remote.host}
+        }
+    }
+    handle /docs* { reverse_proxy backend:8000 }
+    handle /metrics { respond 403 }
+    handle /* {
+        reverse_proxy frontend:3000 {
+            header_up Host {http.request.host}
+        }
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}
+```
+
+Add to `docker-compose.yml` services:
+
+```yaml
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?required}
+      CADDY_ADMIN_EMAIL: ${CADDY_ADMIN_EMAIL:?required}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - helix_caddy_data:/data
+      - helix_caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+```
+
+Also change backend and frontend port bindings to loopback-only:
+
+```yaml
+# backend
+ports:
+  - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
+
+# frontend
+ports:
+  - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_HOST_PORT:-3000}:3000"
+```
+
+After adding Caddy, verify: `curl -I https://helix.example.com/api/v1/readyz`
+should return `200 OK` over HTTPS.
+
+### GCP Docker network MTU
+
+GCP VPC default MTU is 1460 (not 1500). Add to `docker-compose.yml` to prevent
+silent packet fragmentation on large LLM streaming responses:
+
+```yaml
+networks:
+  helix-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1460"
+```
 
 ---
 
