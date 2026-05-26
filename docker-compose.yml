@@ -12,7 +12,10 @@
 # Requires Docker Compose v2.13+ for `service_completed_successfully` condition.
 #
 # Memory limits are sized for a GCP e2-medium (2 vCPU / 4 GB RAM).
-# Bump mem_limit values if running on e2-standard-2+ (8 GB).
+# Total: 3450m leaves 550m headroom for kernel + Docker daemon on 4 GB VM.
+# For e2-standard-2+ (8 GB), scale up via env vars (recommended pattern below):
+#   export BACKEND_MEM=1200m WORKER_MEM=1200m POSTGRES_MEM=900m TEMPORAL_MEM=800m FRONTEND_MEM=500m
+#   docker compose up
 
 x-image-prefix: &image-prefix ${HELIX_IMAGE_PREFIX:-helix}
 x-image-tag: &image-tag ${HELIX_IMAGE_TAG:-latest}
@@ -46,7 +49,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 700m
+    mem_limit: 600m
     logging: *default-logging
 
   redis:
@@ -63,7 +66,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 200m
+    mem_limit: 150m
     logging: *default-logging
 
   temporal:
@@ -90,7 +93,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 600m
+    mem_limit: 500m
     logging: *default-logging
 
   temporal-ui:
@@ -137,7 +140,7 @@ services:
         condition: service_healthy
     networks:
       - helix-network
-    mem_limit: 400m
+    mem_limit: 300m
     logging: *default-logging
 
   backend:
@@ -171,7 +174,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 800m
+    mem_limit: 700m
     logging: *default-logging
 
   worker:
@@ -193,7 +196,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 800m
+    mem_limit: 700m
     logging: *default-logging
 
   frontend:
@@ -213,7 +216,7 @@ services:
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.
-    mem_limit: 400m
+    mem_limit: 300m
     logging: *default-logging
 
   caddy:
