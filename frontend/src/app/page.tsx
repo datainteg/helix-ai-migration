@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = { title: "Helix — AI-Powered Database Migration" };
 import {
   ArrowRight,
   Github,
