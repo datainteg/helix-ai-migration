@@ -41,7 +41,9 @@ rand_hex() {
 }
 
 rand_base64_urlsafe() {
-  # $1 = byte length (output = base64-url string)
+  # $1 = byte length (output = base64-url string, padding stripped)
+  # NOTE: Do NOT use this for ENCRYPTION_KEY — Fernet requires the '=' padding.
+  # Use rand_fernet_key() instead.
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -base64 "$1" | tr '/+' '_-' | tr -d '=\n'
   else
@@ -50,13 +52,30 @@ rand_base64_urlsafe() {
 }
 
 rand_fernet_key() {
-  # Fernet keys are 32 bytes, url-safe base64 encoded.
+  # Produce a valid 44-char Fernet key (32 bytes, url-safe base64 WITH '=' padding).
+  # Fernet requires exactly 44 chars — the trailing '=' MUST be kept.
+  # Priority: python3+cryptography > openssl > hard-fail.
   if command -v python3 >/dev/null 2>&1; then
-    python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null \
-      || rand_base64_urlsafe 32
-  else
-    rand_base64_urlsafe 32
+    local _out
+    if _out="$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null)"; then
+      printf '%s' "$_out"
+      return 0
+    fi
+    # python3 present but cryptography not installed — hard-fail with instructions.
+    echo "ERROR: ENCRYPTION_KEY generation needs openssl OR python3-cryptography." >&2
+    echo "Install: \`apt install -y python3-cryptography\` OR \`pip install cryptography\`." >&2
+    exit 1
   fi
+  if command -v openssl >/dev/null 2>&1; then
+    # openssl rand 32 emits 32 raw bytes; pipe through base64 then convert +/ to -_
+    # but DO NOT strip '=' — Fernet requires the trailing padding char.
+    printf '%s' "$(openssl rand 32 | base64 | tr '/+' '_-' | tr -d '\n')"
+    return 0
+  fi
+  # Neither python3 nor openssl available — hard-fail.
+  echo "ERROR: ENCRYPTION_KEY generation needs openssl OR python3-cryptography." >&2
+  echo "Install: \`apt install -y python3-cryptography\` OR \`pip install cryptography\`." >&2
+  exit 1
 }
 
 # ── Compose secret values ────────────────────────────────────────────

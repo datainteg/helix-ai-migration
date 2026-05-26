@@ -23,15 +23,55 @@ function RandHex([int]$ByteLength) {
 }
 
 function RandBase64UrlSafe([int]$ByteLength) {
+    # General-purpose url-safe base64 WITHOUT padding (for HMAC-style secrets).
+    # Do NOT use for ENCRYPTION_KEY — Fernet requires the '=' padding char.
     $bytes = New-Object byte[] $ByteLength
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('/', '_').Replace('+', '-')
 }
 
+function RandFernetKey {
+    # Produce a valid 44-char Fernet key (32 bytes, url-safe base64 WITH '=' padding).
+    # Fernet requires exactly 44 chars — do NOT call TrimEnd('=') here.
+    # Priority: python (any) + cryptography > openssl > hard-fail.
+
+    # Try python / python3 with cryptography installed.
+    $pythonCmds = @('python', 'python3')
+    foreach ($pyCmd in $pythonCmds) {
+        $pyPath = Get-Command $pyCmd -ErrorAction SilentlyContinue
+        if ($pyPath) {
+            try {
+                $out = & $pyCmd -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $out) {
+                    return $out.Trim()
+                }
+            } catch {}
+        }
+    }
+
+    # Try openssl (Git-for-Windows ships openssl).
+    $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($opensslPath) {
+        try {
+            # openssl rand 32 → 32 raw bytes → standard base64 (44 chars with one '=').
+            # Replace +/ with -_ for url-safe encoding; keep the trailing '='.
+            $b64 = & openssl rand -base64 32 2>$null
+            if ($LASTEXITCODE -eq 0 -and $b64) {
+                return $b64.Trim().Replace('/', '_').Replace('+', '-')
+            }
+        } catch {}
+    }
+
+    # Neither python+cryptography nor openssl available — hard-fail with instructions.
+    Write-Error ("ENCRYPTION_KEY generation needs openssl OR python3-cryptography. " +
+                 "Install: `pip install cryptography` OR ensure openssl is on PATH (e.g. Git-for-Windows).")
+    exit 1
+}
+
 $PostgresPassword     = RandHex 16
 $AppSecretKey         = RandHex 32
 $JwtSecretKey         = RandHex 32
-$EncryptionKey        = RandBase64UrlSafe 32
+$EncryptionKey        = RandFernetKey
 $AuditHmacKey         = RandHex 32
 $TemporalUiPassword   = RandHex 12
 
