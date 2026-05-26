@@ -80,6 +80,31 @@ def _execute(
 
 HEARTBEAT_INTERVAL_SEC = 10.0
 
+# Heartbeat strategy (shared across monolithic + per-node activities)
+# ─────────────────────────────────────────────────────────────────────
+# All BMAD activities — both per-node (defined here) and the monolithic
+# `execute_bmad_graph_activity` in bmad_activities.py — use _run_with_heartbeats
+# to emit a Temporal heartbeat every HEARTBEAT_INTERVAL_SEC (10 s).
+#
+# Why: LLM calls (Anthropic Opus, OpenAI) regularly exceed 60 s.  Temporal's
+# default activity heartbeat_timeout is 10 min, but a monolithic 13-node graph
+# can run 10-15 min.  Without periodic heartbeats Temporal marks the activity
+# dead and retries, wasting LLM quota and doubling latency.
+#
+# How: _run_with_heartbeats() submits the blocking work to a ThreadPoolExecutor
+# (max_workers=1) and polls future.result(timeout=HEARTBEAT_INTERVAL_SEC) in
+# the Temporal activity thread.  On each timeout it calls activity.heartbeat().
+# When the work finishes, future.result() returns immediately and the function
+# exits.  This approach is safe for sync (`def`) activities because Temporal
+# already runs them in its own thread pool — the inner ThreadPoolExecutor adds
+# one more hop so the activity thread can stay awake for heartbeats.
+#
+# Per-node activities: each @activity.defn here calls _run_with_heartbeats via
+# _execute(), which wraps execute_agent_skill (one BMAD agent + skill).
+#
+# Monolithic activity: bmad_activities.execute_bmad_graph_activity imports
+# _run_with_heartbeats directly and wraps run_bmad_graph() (entire LangGraph).
+
 
 def _run_with_heartbeats(fn, detail_prefix: str):
     """Execute `fn()` while heartbeating every HEARTBEAT_INTERVAL_SEC.
