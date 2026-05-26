@@ -11,6 +11,8 @@ templates add new entries to TEMPLATES and the catalog endpoint surfaces them.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -24,6 +26,36 @@ from app.services.project_service import create_project
 from app.models.validation import ValidationRule
 
 router = APIRouter(tags=["migration-templates"])
+
+
+class TemplateSummary(BaseModel):
+    """Catalog-view row — no agent_prompts (kept server-side until clone)."""
+
+    id: str
+    name: str
+    source: str
+    target: str
+    summary: str
+    risk_level: str
+    validation_rules: list[dict] = []
+    recon_threshold_pct: float | None = None
+
+
+class TemplateDetail(TemplateSummary):
+    """Detail view includes agent prompt overrides."""
+
+    agent_prompts: dict[str, str] = {}
+
+
+class CloneTemplateResponse(BaseModel):
+    project_id: str
+    # `project` mirrors the project_service.create_project return shape;
+    # kept as a flexible dict because the underlying service can evolve
+    # (ProjectResponse fields change with the data model).
+    project: dict[str, Any]
+    validation_rule_ids: list[str]
+    agent_prompts: dict[str, str] = {}
+    recon_threshold_pct: float | None = None
 
 
 # Each template:
@@ -133,25 +165,30 @@ class CloneTemplateRequest(BaseModel):
     project_description: str | None = Field(default=None, max_length=2048)
 
 
-@router.get("/migration-templates")
+@router.get("/migration-templates", response_model=list[TemplateSummary])
 def list_templates(user_id: str = Depends(get_current_user_id)):
     """Public catalog of available starter packs. Auth required to keep
-    template list off unauthenticated reconnaissance."""
+    template list off unauthenticated reconnaissance.
+
+    `agent_prompts` is intentionally stripped — that field is returned on
+    detail (`GET /migration-templates/{id}`) and on clone, but not in
+    bulk catalog browsing.
+    """
     return [
-        {k: v for k, v in t.items() if k != "agent_prompts"}
+        TemplateSummary(**{k: v for k, v in t.items() if k != "agent_prompts"})
         for t in TEMPLATES
     ]
 
 
-@router.get("/migration-templates/{template_id}")
+@router.get("/migration-templates/{template_id}", response_model=TemplateDetail)
 def get_template(template_id: str, user_id: str = Depends(get_current_user_id)):
     tpl = _TEMPLATES_BY_ID.get(template_id)
     if not tpl:
         raise HTTPException(status_code=404, detail=f"Template {template_id!r} not found")
-    return tpl
+    return TemplateDetail(**tpl)
 
 
-@router.post("/migration-templates/clone", status_code=201)
+@router.post("/migration-templates/clone", status_code=201, response_model=CloneTemplateResponse)
 def clone_template(
     data: CloneTemplateRequest,
     request: Request,
@@ -197,10 +234,13 @@ def clone_template(
                 meta={"template_id": data.template_id, "rules": len(rules_created)},
                 request=request)
 
-    return {
-        "project_id": project.id,
-        "project": project.model_dump() if hasattr(project, "model_dump") else dict(project),
-        "validation_rule_ids": rules_created,
-        "agent_prompts": tpl.get("agent_prompts", {}),
-        "recon_threshold_pct": tpl.get("recon_threshold_pct"),
-    }
+    project_dict = (
+        project.model_dump() if hasattr(project, "model_dump") else dict(project)  # type: ignore[arg-type]
+    )
+    return CloneTemplateResponse(
+        project_id=project.id,
+        project=project_dict,
+        validation_rule_ids=rules_created,
+        agent_prompts=tpl.get("agent_prompts", {}),
+        recon_threshold_pct=tpl.get("recon_threshold_pct"),
+    )

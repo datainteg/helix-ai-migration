@@ -17,6 +17,7 @@ import json
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agents import HelixBMAD
@@ -28,6 +29,19 @@ from app.models.artifacts import ArtifactReview, CodeArtifact, CodeArtifactVersi
 from app.services.auth_service import get_current_user
 
 router = APIRouter(tags=["code-reviews"])
+
+
+class CodeReviewSummary(BaseModel):
+    """Response shape for `GET /code-reviews/{review_id}`.
+
+    `findings` is the raw string the BMAD agent emitted (typically a
+    JSON-serialised object). Consumers should `JSON.parse(findings)` to
+    get structured findings — documented here so the SDK contract is clear.
+    """
+
+    id: str
+    summary: str | None = None
+    findings: str | None = None
 
 
 def _read_artifact_content(db: Session, org_id: str, artifact_id: str) -> tuple[str, str]:
@@ -157,7 +171,7 @@ def review_artifact(
     )
 
 
-@router.get("/code-reviews/{review_id}")
+@router.get("/code-reviews/{review_id}", response_model=CodeReviewSummary)
 def get_review(review_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     org_id = _resolve_org_id(db, user_id)
     review = (
@@ -169,4 +183,4 @@ def get_review(review_id: str, user_id: str = Depends(get_current_user_id), db: 
     )
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
-    return {"id": review.id, "summary": review.summary, "findings": review.findings}
+    return CodeReviewSummary(id=review.id, summary=review.summary, findings=review.findings)

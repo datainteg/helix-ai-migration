@@ -32,14 +32,31 @@ router = APIRouter(tags=["cdc"])
 class TailSyncTick(BaseModel):
     """Report a single CDC poll result. The connector layer (Debezium hook,
     polling job, or manual operator) computes these values + posts here."""
-    rows_seen: int = Field(ge=0)
-    rows_applied: int = Field(ge=0)
-    lag_seconds: float = Field(ge=0)
-    high_water_mark: str = Field(min_length=1, max_length=255, description="Vendor checkpoint (LSN, SCN, ISO timestamp, etc.)")
+    rows_seen: int = Field(ge=0, le=10**18)
+    rows_applied: int = Field(ge=0, le=10**18)
+    # Cap lag at 1 year (~31.5M seconds) so a malformed tick can't poison
+    # downstream graphs with `1e308 seconds` (REVIEW_API_CONTRACT cdc HIGH).
+    lag_seconds: float = Field(ge=0, le=60 * 60 * 24 * 365)
+    high_water_mark: str = Field(
+        min_length=1,
+        max_length=255,
+        description=(
+            "Vendor checkpoint. Expected forms: Postgres LSN (hex string "
+            "16/24 chars, e.g. '0/16B5380'), Oracle SCN (decimal int 10-20 "
+            "digits), or ISO-8601 timestamp (25 chars). Other vendors may "
+            "use shorter binary tokens — the column tolerates up to 255 chars."
+        ),
+    )
     notes: str | None = Field(default=None, max_length=2048)
 
 
-@router.post("/cutovers/{cutover_id}/tail-sync/tick")
+class TailSyncTickResponse(BaseModel):
+    cutover_id: str
+    state: str
+    last_tail_tick: dict
+
+
+@router.post("/cutovers/{cutover_id}/tail-sync/tick", response_model=TailSyncTickResponse)
 def record_tick(
     cutover_id: str,
     data: TailSyncTick,
@@ -73,4 +90,4 @@ def record_tick(
     write_audit(db, org_id=org_id, actor_id=user_id, action="cutover_tail_tick",
                 entity_type="cutover", entity_id=row.id,
                 meta=payload, request=request)
-    return {"cutover_id": row.id, "state": row.state, "last_tail_tick": payload}
+    return TailSyncTickResponse(cutover_id=row.id, state=row.state, last_tail_tick=payload)
