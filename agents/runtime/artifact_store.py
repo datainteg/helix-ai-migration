@@ -94,11 +94,115 @@ def _slug(value: str) -> str:
 _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
 
 
+# SEC-011 — denylist of keys whose values must never reach YAML frontmatter
+# (artifact files are surfaced via `/agent-workflows/{id}/artifact-content`
+# and re-embedded in compliance PDFs). Anything in this set is dropped before
+# `yaml.safe_dump` ever sees it. Also screened: any key starting with one of
+# `_SECRET_KEY_PREFIXES` and any string value that looks secret-shaped.
+_FRONTMATTER_DENYLIST: frozenset[str] = frozenset({
+    # LLM transport — these are the ones SEC-011 specifically called out
+    "api_key",
+    "base_url",
+    "endpoint",
+    "endpoint_url",
+    "azure_endpoint",
+    "Authorization",
+    "authorization",
+    "bearer",
+    "Bearer",
+    # Cloud / vendor long-lived credentials
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+    "service_account_json",
+    "gcp_service_account_json",
+    "client_secret",
+    "azure_client_secret",
+    "private_key",
+    "passphrase",
+    "password",
+    "credentials",
+    "credential",
+})
+
+_SECRET_KEY_PREFIXES: tuple[str, ...] = ("secret_", "password_", "token_", "apikey_")
+
+# Value-shape heuristics: drop strings that look like live credentials even
+# if the *key* slipped past the denylist (defence in depth — the LLM's own
+# output can put a secret in any key it likes).
+_SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),               # OpenAI / Anthropic
+    re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),           # Anthropic
+    re.compile(r"^xox[baprs]-[A-Za-z0-9-]{10,}$"),        # Slack
+    re.compile(r"^AKIA[0-9A-Z]{12,}$"),                   # AWS access key ID
+    re.compile(r"^ASIA[0-9A-Z]{12,}$"),                   # AWS STS key ID
+    re.compile(r"^ghp_[A-Za-z0-9]{30,}$"),                # GitHub PAT
+    re.compile(r"^gho_[A-Za-z0-9]{30,}$"),                # GitHub OAuth
+    re.compile(r"^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}$"),  # JWT
+    re.compile(r"^Bearer\s+[A-Za-z0-9._-]{20,}$", re.IGNORECASE),
+)
+
+_REDACTED_SENTINEL = "[REDACTED]"
+
+
+def _key_is_denied(key: str) -> bool:
+    if not isinstance(key, str):
+        return False
+    if key in _FRONTMATTER_DENYLIST:
+        return True
+    low = key.lower()
+    return any(low.startswith(p) for p in _SECRET_KEY_PREFIXES)
+
+
+def _value_looks_secret(value: Any) -> bool:
+    """True iff `value` is a string matching one of our secret-shape regexes."""
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if len(stripped) < 16:
+        return False
+    return any(pat.match(stripped) for pat in _SECRET_VALUE_PATTERNS)
+
+
+def _safe_frontmatter(value: Any) -> Any:
+    """SEC-011 — recursive scrubber for any dict-like frontmatter payload.
+
+    - Drops every key in `_FRONTMATTER_DENYLIST` or matching a sensitive prefix.
+    - Replaces any leaf string that matches a secret-shape regex with `[REDACTED]`.
+    - Recurses through nested dicts + lists.
+    - Returns a new structure; the input is not mutated.
+
+    Used by `write_artifact` (and re-used by `compliance.py`) so a single
+    filter governs every path that can leak a credential into an artifact
+    file or a downloadable PDF.
+    """
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if _key_is_denied(k):
+                continue
+            out[k] = _safe_frontmatter(v)
+        return out
+    if isinstance(value, list):
+        return [_safe_frontmatter(item) for item in value]
+    if _value_looks_secret(value):
+        return _REDACTED_SENTINEL
+    return value
+
+
 def _dump_frontmatter(frontmatter: dict[str, Any]) -> str:
     """Minimal YAML-like frontmatter serializer (JSON-safe, no external dep)."""
     import yaml
 
     return yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
+
+
+# Public alias — `compliance.py` and any future PDF/CSV exporter should call
+# this on artifact metadata BEFORE embedding it into customer-downloadable
+# bytes. Keeps the denylist + value-regex in one place.
+def safe_frontmatter(value: Any) -> Any:  # noqa: D401 — re-export wrapper
+    """Public alias for the secret-scrubbing helper (see `_safe_frontmatter`)."""
+    return _safe_frontmatter(value)
 
 
 def _parse_artifact(path: Path) -> tuple[dict[str, Any], str]:
@@ -153,7 +257,13 @@ def write_artifact(
     if frontmatter:
         merged_front.update(frontmatter)
 
-    text = f"---\n{_dump_frontmatter(merged_front)}\n---\n\n{body.strip()}\n"
+    # SEC-011 — strip secrets before YAML serialisation. Artifact files are
+    # surfaced via `/agent-workflows/{id}/artifact-content` and re-embedded
+    # in compliance PDFs; any LLM-supplied or provenance-supplied credential
+    # in here would leak verbatim. `_safe_frontmatter` is idempotent.
+    safe_front = _safe_frontmatter(merged_front)
+
+    text = f"---\n{_dump_frontmatter(safe_front)}\n---\n\n{body.strip()}\n"
 
     # Atomic write: temp file → rename
     fd, tmp_name = tempfile.mkstemp(prefix=".artifact-", dir=dir_path)
@@ -177,7 +287,10 @@ def write_artifact(
         skill=skill,
         project_id=project_id,
         filename=slug,
-        frontmatter=merged_front,
+        # SEC-011: hand the caller the same scrubbed dict that hit disk so
+        # downstream consumers (e.g. workflow_service that mirrors metadata
+        # into the WorkflowRun row) can't observe secrets either.
+        frontmatter=safe_front,
         body=body.strip(),
     )
     logger.info("Wrote BMAD artifact %s", full_path)

@@ -654,20 +654,30 @@ def _execute_agent_skill_inner(
         return AgentRunResult(success=False, artifact=None, parsed=None, raw_text=raw_text, mode=mode, errors=errors)
 
     front, body = _split_markdown(raw_text)
+    # SEC-011 — defence in depth: even if `_resolve_provider_for_org` ever
+    # returned a dict that leaked back into `front` (LLM-quoted), or if a
+    # future provenance field carried credentials, scrub before handing
+    # to `write_artifact`. The store ALSO scrubs (belt + braces), but doing
+    # it here keeps the in-memory `Artifact.frontmatter` clean too.
+    safe_front_dict: dict[str, Any] = {
+        **{k: v for k, v in front.items() if k not in {"api_key", "base_url", "Authorization", "authorization", "bearer"}},
+        "llm_mode": mode,
+        "pydantic_ai_available": pydantic_ai_available(),
+        "prompt_tokens_estimate": prompt_tokens_estimate,
+        "prompt_token_budget": _token_budget(),
+        "correlation_id": correlation_id,
+        # Provenance the operator legitimately wants for traceability —
+        # plain identifiers, never the credentials themselves.
+        "provider_type": (front.get("provider_type") if isinstance(front, dict) else None),
+        "model": (front.get("model") if isinstance(front, dict) else None),
+    }
     artifact = write_artifact(
         project_id=project_id,
         agent_code=agent_code,
         skill=skill_name,
         filename=artifact_filename or skill_name.replace("bmad-", ""),
         body=body,
-        frontmatter={
-            **front,
-            "llm_mode": mode,
-            "pydantic_ai_available": pydantic_ai_available(),
-            "prompt_tokens_estimate": prompt_tokens_estimate,
-            "prompt_token_budget": _token_budget(),
-            "correlation_id": correlation_id,
-        },
+        frontmatter=safe_front_dict,
     )
 
     metric_ctx.set_outcome(success=True, mode=mode, prompt_tokens=prompt_tokens_estimate)

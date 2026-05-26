@@ -33,6 +33,29 @@ from app.models.cutover import MigrationCutover
 from app.services.project_service import ensure_project_access
 from app.core.config import settings
 
+# SEC-011 — every free-text field that flows into the customer-downloadable
+# PDF must pass through this scrubber. Imported once at module-load.
+try:
+    from agents.runtime.artifact_store import safe_frontmatter as _safe_frontmatter
+except Exception:  # noqa: BLE001 — keep PDF route alive if agents pkg missing
+    def _safe_frontmatter(v):  # type: ignore[no-redef]
+        return v
+
+
+def _scrub_text(value: object) -> str:
+    """Render `value` as a string with secret-shaped substrings redacted.
+
+    Wraps the dict-oriented `_safe_frontmatter` so it also works on plain
+    strings (audit metadata blobs, artifact filenames). Strings with embedded
+    secret-shaped tokens get the whole leaf replaced with `[REDACTED]` by
+    `_safe_frontmatter`; everything else round-trips unchanged.
+    """
+    if value is None:
+        return ""
+    cleaned = _safe_frontmatter(value)
+    return str(cleaned)
+
+
 router = APIRouter(tags=["compliance"])
 
 
@@ -126,11 +149,14 @@ def compliance_bundle(
     else:
         data = [["Timestamp (UTC)", "Action", "Actor", "Entity", "Hash (sha256, head)"]]
         for a in audit_all:
+            # SEC-011: every per-row string passes through the scrubber so a
+            # secret-shaped token in any user-controlled column (action label,
+            # entity_id, custom audit metadata) becomes `[REDACTED]`.
             data.append([
                 str(a.created_at)[:19],
-                a.action or "",
-                (a.actor_id or "")[:16],
-                f"{a.entity_type or ''}:{(a.entity_id or '')[:18]}",
+                _scrub_text(a.action or ""),
+                _scrub_text((a.actor_id or "")[:16]),
+                _scrub_text(f"{a.entity_type or ''}:{(a.entity_id or '')[:18]}"),
                 (a.entry_hash or "")[:16] + "…",
             ])
         tbl = Table(data, repeatRows=1, hAlign="LEFT")
@@ -171,8 +197,9 @@ def compliance_bundle(
         for c in cutovers[:50]:
             data.append([
                 c.id[:18],
-                f"{(c.source_ref or '')[:20]} → {(c.target_ref or '')[:20]}",
-                c.state,
+                # SEC-011: source_ref/target_ref can be operator-supplied DSN strings
+                _scrub_text(f"{(c.source_ref or '')[:20]} → {(c.target_ref or '')[:20]}"),
+                _scrub_text(c.state),
                 str(c.flip_started_at)[:19] if c.flip_started_at else "—",
                 str(c.done_at)[:19] if c.done_at else "—",
             ])
@@ -187,10 +214,12 @@ def compliance_bundle(
     else:
         data = [["Filename", "Type", "Status", "Rollback?", "Created (UTC)"]]
         for a in artifacts[:200]:
+            # SEC-011: filename is operator-supplied — a hostile uploader could
+            # name an artifact "sk-test-…sql". Scrub before embed.
             data.append([
-                a.filename[:40],
-                a.file_type or "",
-                a.status or "",
+                _scrub_text(a.filename[:40]),
+                _scrub_text(a.file_type or ""),
+                _scrub_text(a.status or ""),
                 "Yes" if a.rollback_artifact_id else "—",
                 str(a.created_at)[:19],
             ])
