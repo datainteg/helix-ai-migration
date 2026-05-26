@@ -157,6 +157,23 @@ def decrypt_for_org(db: Session, org_id: str, ciphertext: str) -> str:
     return Fernet(dek).decrypt(ciphertext.encode()).decode()
 
 
+#: Default per-org DEK ciphertext columns to walk on `rotate_dek`.
+#:
+#: IMPORTANT (DI-C1 follow-up): this list MUST only contain columns
+#: that were sealed with `encrypt_for_org` (per-org DEK), NOT with
+#: `secret_service.encrypt_value` (flat-KEK MultiFernet). Mixing the
+#: two causes `InvalidToken` on every row and rotation silently
+#: rewraps nothing.
+#:
+#: As of 2026-05-26, NO production column uses `encrypt_for_org` yet —
+#: `LLMProviderSecret.encrypted_api_key` is sealed via the flat-KEK
+#: path (`secret_service.encrypt_value`) and must be rotated via the
+#: KEK-rotation runbook in `docs/MIGRATION_NOTES.md`, not via this
+#: function. When a new column starts using the per-org DEK, register
+#: it here.
+_DEFAULT_PER_ORG_DEK_TARGETS: list[tuple[type, str]] = []
+
+
 def re_encrypt_all_secrets(
     db: Session,
     org_id: str,
@@ -165,45 +182,38 @@ def re_encrypt_all_secrets(
     *,
     targets: Sequence[tuple[type, str]] | None = None,
 ) -> dict[str, int]:
-    """Decrypt-with-old/encrypt-with-new for every ciphertext column.
+    """Decrypt-with-old/encrypt-with-new for every per-org DEK column.
 
-    `targets` is an explicit list of (Model, column_name) pairs the caller
-    knows are encrypted with the per-org DEK. We do NOT auto-discover;
-    a future addition that forgets to register here is a silent data-loss
-    risk, so the explicit list is the audit point.
+    `targets` is an explicit list of (Model, column_name) pairs the
+    caller knows are encrypted with the **per-org DEK** (i.e. via
+    `encrypt_for_org`). Auto-discovery is intentionally avoided so a
+    forgotten registration is caught in code review rather than at
+    rotation time.
 
-    Default targets cover the columns currently using `encrypt_for_org`:
-    `LLMProviderSecret.encrypted_api_key` (via secret_service shim).
+    Default targets: empty. The flat-KEK column
+    `LLMProviderSecret.encrypted_api_key` is NOT included — it is
+    sealed via `secret_service.encrypt_value` (MultiFernet over the
+    master KEK), so passing it here would raise `InvalidToken` on
+    every row and silently rewrap nothing. Rotate that column via the
+    KEK runbook (see `docs/MIGRATION_NOTES.md`).
 
     Returns: {table_name: rows_rewrapped}
     """
-    from app.models.llm import LLMProviderSecret, LLMProvider
-
-    if targets is None:
-        targets = [
-            # (Model, column_name, org_join_attr_or_None)
-            # LLMProviderSecret joins via LLMProvider.organization_id; handled below.
-            (LLMProviderSecret, "encrypted_api_key"),
-        ]
+    effective_targets: Sequence[tuple[type, str]] = (
+        list(_DEFAULT_PER_ORG_DEK_TARGETS) if targets is None else targets
+    )
 
     old_f = Fernet(old_dek)
     new_f = Fernet(new_dek)
     counts: dict[str, int] = {}
 
-    for Model, col in targets:
-        # Filter rows by org. LLMProviderSecret -> join via LLMProvider.
-        if Model is LLMProviderSecret:
-            rows = (
-                db.query(LLMProviderSecret)
-                .join(LLMProvider, LLMProviderSecret.provider_id == LLMProvider.id)
-                .filter(LLMProvider.organization_id == org_id)
-                .all()
-            )
-        elif hasattr(Model, "organization_id"):
+    for Model, col in effective_targets:
+        if hasattr(Model, "organization_id"):
             rows = db.query(Model).filter(Model.organization_id == org_id).all()
         else:
             logger.warning(
-                "re_encrypt_all_secrets: no org filter path for %s; skipping",
+                "re_encrypt_all_secrets: no organization_id on %s; "
+                "register a join path before adding to targets. Skipping.",
                 Model.__name__,
             )
             continue
@@ -216,10 +226,10 @@ def re_encrypt_all_secrets(
             try:
                 pt = old_f.decrypt(ct.encode())
             except InvalidToken:
-                # Already encrypted with new DEK (idempotent re-run) or
-                # never encrypted with the per-org DEK at all (the
-                # secret_service flat-KEK path). Skip — caller must
-                # handle flat-KEK migration separately.
+                # Already encrypted with new DEK (idempotent re-run)
+                # or registered in error against a column NOT sealed
+                # with the per-org DEK. Skip — caller must handle
+                # the flat-KEK path separately via rotate_kek_secrets.
                 continue
             setattr(row, col, new_f.encrypt(pt).decode())
             rewrapped += 1
@@ -227,6 +237,49 @@ def re_encrypt_all_secrets(
         counts[Model.__tablename__] = rewrapped
 
     db.flush()
+    return counts
+
+
+def rotate_kek_secrets(db: Session) -> dict[str, int]:
+    """Rewrap every flat-KEK ciphertext column from the legacy KEK to the direct KEK.
+
+    Walks the columns that are sealed with `secret_service.encrypt_value`
+    (MultiFernet over the master KEK) and opportunistically rewraps any
+    row whose ciphertext is still using the legacy sha256-derived key.
+
+    Separate from `re_encrypt_all_secrets` (the per-org DEK rotator)
+    because:
+      - The KEK is global, not per-org.
+      - Rotation here is "promote legacy ciphertext to the direct key"
+        rather than "re-key with a brand-new key".
+      - Mixing the two paths produces silent `InvalidToken` skips and
+        is the bug DI-C1 was reopened for.
+
+    Returns: {table_name: rows_rewrapped}
+    """
+    from app.models.llm import LLMProviderSecret
+    from app.services.secret_service import rewrap_if_legacy
+
+    # (Model, column_name) — every column sealed via flat-KEK encrypt_value.
+    flat_kek_targets: list[tuple[type, str]] = [
+        (LLMProviderSecret, "encrypted_api_key"),
+    ]
+
+    counts: dict[str, int] = {}
+    for Model, col in flat_kek_targets:
+        rows = db.query(Model).all()
+        rewrapped = 0
+        for row in rows:
+            ct = getattr(row, col, None)
+            new_ct = rewrap_if_legacy(ct)
+            if new_ct is None:
+                continue
+            setattr(row, col, new_ct)
+            rewrapped += 1
+        counts[Model.__tablename__] = rewrapped
+
+    db.commit()
+    logger.info("kek_secrets_rewrapped counts=%s", counts)
     return counts
 
 
@@ -288,18 +341,15 @@ def rotate_dek(
         key_version=new_version,
         is_active=True,
     )
-    # We must temporarily allow two active rows; the unique constraint is
-    # on organization_id (one-row-per-org). To stay legal we flip the old
-    # row in the same flush. We do that AFTER re-encryption succeeds.
-    # The unique index requires us to flip the old one first (or drop the
-    # constraint); per the schema, `organization_id` is unique on this
-    # table. So flip old to inactive BEFORE inserting new, then re-encrypt
-    # using the in-memory `old_plain`/`new_plain` (DB rows are not needed
-    # mid-rotation for that step). On failure, rollback restores both.
+    # Partial unique index `uq_org_dek_active_per_org` (migration
+    # 2af2b45b4051) permits unlimited historical rows per org but only
+    # one active row. We flip the old row to inactive BEFORE inserting
+    # the new active one and flush both together so the unique-active
+    # invariant holds at commit. On failure, rollback restores both.
     old.is_active = False
     old.rotated_at = datetime.now(timezone.utc)
     db.add(new_record)
-    db.flush()  # commit the active-flip and new insert within the txn
+    db.flush()  # apply the active-flip + new insert atomically within the txn
 
     try:
         if old_plain is None:
