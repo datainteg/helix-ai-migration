@@ -433,24 +433,39 @@ else
 fi
 export NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL_VAL"
 
+# CORS_ORIGINS must match the frontend's origin or browser preflight rejects
+# every API call. Derive from NEXT_PUBLIC_API_URL — drop the path component.
+FRONTEND_ORIGIN_VAL="$NEXT_PUBLIC_API_URL_VAL"
+if [ -n "$DOMAIN" ]; then
+  # TLS deploy: include both apex and www to be safe.
+  CORS_ORIGINS_VAL="[\"https://${DOMAIN}\"]"
+else
+  # Dev/local: include localhost variants to cover ssh-tunnel and direct cases.
+  CORS_ORIGINS_VAL="[\"${FRONTEND_ORIGIN_VAL}\",\"http://localhost:3000\",\"http://127.0.0.1:3000\"]"
+fi
+if grep -q '^CORS_ORIGINS=' .env; then
+  sed -i.bak "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${CORS_ORIGINS_VAL}|" .env && rm -f .env.bak
+else
+  printf '\nCORS_ORIGINS=%s\n' "$CORS_ORIGINS_VAL" >> .env
+fi
+log "CORS_ORIGINS=${CORS_ORIGINS_VAL}"
+
 # ── 2c. Pre-seed first-admin credentials (consumed by wave-3 bootstrap CLI)
 if [ -n "$ADMIN_EMAIL" ] || [ -n "$ADMIN_PASSWORD" ]; then
   if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASSWORD" ]; then
     err "Both --admin-email and --admin-password must be supplied together."
     exit 1
   fi
-  mkdir -p .helix
+  # CLI reads .helix-bootstrap (key=value lines). Match exactly.
   umask 077
-  cat > .helix/first-admin.json <<EOF
-{
-  "email": "${ADMIN_EMAIL}",
-  "password": "${ADMIN_PASSWORD}",
-  "created_by": "setup.sh",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
+  cat > .helix-bootstrap <<EOF
+EMAIL=${ADMIN_EMAIL}
+PASSWORD=${ADMIN_PASSWORD}
+ORG_NAME=Helix
+ACCEPT_TOS=1
 EOF
-  chmod 600 .helix/first-admin.json
-  ok "First-admin credentials staged at .helix/first-admin.json (wave-3 'helix admin bootstrap' will consume)."
+  chmod 600 .helix-bootstrap
+  ok "First-admin credentials staged at .helix-bootstrap (consumed below by curl OR by 'helix admin bootstrap')."
 fi
 
 # ── 3. Build images ──────────────────────────────────────────────────
@@ -500,6 +515,34 @@ if ! $ready; then
   exit 1
 fi
 ok "Backend ready."
+
+# ── 5b. Auto-bootstrap first-admin if creds were staged ─────────────
+if [ -f .helix-bootstrap ]; then
+  log "Bootstrapping first-admin via POST /api/v1/auth/first-admin…"
+  # shellcheck disable=SC1091
+  set -a; . ./.helix-bootstrap; set +a
+  bootstrap_body=$(printf '{"email":"%s","password":"%s","display_name":"%s","organization_name":"%s","accept_tos":true}' \
+    "${EMAIL}" "${PASSWORD}" "${EMAIL%%@*}" "${ORG_NAME:-Helix}")
+  bs_status=$(curl -s -o /tmp/helix_bs_resp -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d "${bootstrap_body}" \
+    "http://localhost:${BACKEND_HOST_PORT:-8000}/api/v1/auth/first-admin" 2>/dev/null || echo "000")
+  case "$bs_status" in
+    200|201) ok "First-admin created (${EMAIL}).";;
+    400)
+      if grep -qiE 'already|exists' /tmp/helix_bs_resp 2>/dev/null; then
+        ok "First-admin already exists — skipping bootstrap."
+      else
+        err "First-admin bootstrap returned 400: $(cat /tmp/helix_bs_resp 2>/dev/null)"
+      fi
+      ;;
+    *)
+      err "First-admin bootstrap returned HTTP $bs_status: $(cat /tmp/helix_bs_resp 2>/dev/null || true)"
+      err "Stack is up; you can retry via 'helix admin bootstrap --accept-tos' OR via the /setup/first-admin wizard in the browser."
+      ;;
+  esac
+  rm -f /tmp/helix_bs_resp .helix-bootstrap
+fi
 
 # ── 6. Friendly summary ──────────────────────────────────────────────
 frontend_port="${FRONTEND_HOST_PORT:-3000}"
