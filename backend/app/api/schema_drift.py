@@ -17,6 +17,7 @@ snapshot endpoint nightly and emits a webhook event when drift is found.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,6 +32,74 @@ from app.models.schema_snapshot import SourceSchemaSnapshot
 from app.services.project_service import ensure_project_access
 
 router = APIRouter(tags=["schema-drift"])
+
+# ---------------------------------------------------------------------------
+# SEC-018 — JSON snapshot DoS guards
+# ---------------------------------------------------------------------------
+_SNAPSHOT_MAX_BYTES: int = int(os.getenv("HELIX_SCHEMA_SNAPSHOT_MAX_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+_SNAPSHOT_MAX_DEPTH: int = 64
+_SNAPSHOT_MAX_NODES: int = 100_000
+
+
+def _check_depth(obj: object, depth: int = 0) -> int:
+    """Recursively measure the maximum nesting depth of a parsed JSON value.
+
+    Returns the deepest level found.  Raises HTTPException(422) if the limit
+    is exceeded so callers don't pay the full O(N) cost of an adversarial tree.
+    """
+    if depth > _SNAPSHOT_MAX_DEPTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Snapshot JSON nesting depth exceeds maximum of {_SNAPSHOT_MAX_DEPTH}.",
+        )
+    if isinstance(obj, dict):
+        if not obj:
+            return depth
+        return max(_check_depth(v, depth + 1) for v in obj.values())
+    if isinstance(obj, list):
+        if not obj:
+            return depth
+        return max(_check_depth(v, depth + 1) for v in obj)
+    return depth
+
+
+def _count_nodes(obj: object, count: list[int]) -> None:
+    """Walk every object/array node in the parsed JSON; accumulate into count[0].
+
+    Uses a mutable list so the inner recursion doesn't allocate a new int on
+    every frame.  Raises HTTPException(422) as soon as the cap is hit.
+    """
+    count[0] += 1
+    if count[0] > _SNAPSHOT_MAX_NODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Snapshot JSON node count exceeds maximum of {_SNAPSHOT_MAX_NODES}.",
+        )
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _count_nodes(v, count)
+    elif isinstance(obj, list):
+        for v in obj:
+            _count_nodes(v, count)
+
+
+def _validate_snapshot_json(raw: str) -> dict:
+    """Parse and validate a stored snapshot payload.
+
+    Raises HTTPException(413) for oversized input, HTTPException(422) for
+    excessive nesting or node count.
+    """
+    byte_len = len(raw.encode("utf-8"))
+    if byte_len > _SNAPSHOT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Snapshot payload is {byte_len} bytes; maximum is {_SNAPSHOT_MAX_BYTES} bytes.",
+        )
+    parsed = json.loads(raw)
+    _check_depth(parsed)
+    node_count: list[int] = [0]
+    _count_nodes(parsed, node_count)
+    return parsed
 
 
 class SnapshotPayload(BaseModel):
@@ -55,7 +124,20 @@ def take_snapshot(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, project_id)
+
+    # SEC-018 — enforce ingest-time size + depth + node-count caps so an
+    # oversized payload is rejected before it ever reaches persistent storage.
     payload = json.dumps(data.model_dump())
+    byte_len = len(payload.encode("utf-8"))
+    if byte_len > _SNAPSHOT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Snapshot payload is {byte_len} bytes; maximum is {_SNAPSHOT_MAX_BYTES} bytes.",
+        )
+    _check_depth(data.model_dump())
+    node_count: list[int] = [0]
+    _count_nodes(data.model_dump(), node_count)
+
     row = SourceSchemaSnapshot(
         organization_id=org_id,
         project_id=project_id,
@@ -130,8 +212,11 @@ def compute_drift(
             "note": "Need at least two snapshots to compute drift.",
         }
 
-    baseline = json.loads(snaps[0].payload)
-    latest = json.loads(snaps[-1].payload)
+    # SEC-018 — validate stored payloads through the same size/depth/node caps
+    # before loading into memory; guards against snapshots stored before the
+    # cap was introduced (or injected directly into the DB).
+    baseline = _validate_snapshot_json(snaps[0].payload)
+    latest = _validate_snapshot_json(snaps[-1].payload)
     base_idx = {(t["schema_name"], t["table_name"]): t for t in baseline.get("tables", [])}
     latest_idx = {(t["schema_name"], t["table_name"]): t for t in latest.get("tables", [])}
 
