@@ -2,16 +2,28 @@
 #
 # All services share the `helix-network` bridge. Internal services (Postgres,
 # Redis, Temporal) are NOT published to the host — frontend and backend are the
-# only externally reachable endpoints. Temporal UI is exposed for operator
-# debugging; protect it with the basic-auth bundled into the temporal-ui
-# image OR put it behind a firewall.
+# only externally reachable endpoints via the Caddy reverse proxy on 80/443.
+# Temporal UI is opt-in (profile=debug); access via SSH tunnel only.
 #
 # Image names are env-driven so the same compose file works for:
 #   - Local build:  docker compose -f docker-compose.yml -f docker-compose.build.yml up
 #   - Pull pre-built: set HELIX_IMAGE_PREFIX=ghcr.io/your-org and run `docker compose pull`
+#
+# Requires Docker Compose v2.13+ for `service_completed_successfully` condition.
+#
+# Memory limits are sized for a GCP e2-medium (2 vCPU / 4 GB RAM).
+# Bump mem_limit values if running on e2-standard-2+ (8 GB).
 
 x-image-prefix: &image-prefix ${HELIX_IMAGE_PREFIX:-helix}
 x-image-tag: &image-tag ${HELIX_IMAGE_TAG:-latest}
+
+# Log rotation anchor — applied to every service to prevent disk exhaustion.
+# Caps log storage at ~30 MB per service (270 MB total across 9 services).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   postgres:
@@ -30,12 +42,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    stop_grace_period: 60s
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 700m
+    logging: *default-logging
 
   redis:
     image: redis:7.4-alpine
@@ -50,10 +62,9 @@ services:
       retries: 5
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 256M
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 200m
+    logging: *default-logging
 
   temporal:
     image: temporalio/auto-setup:1.25.0
@@ -70,17 +81,17 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "tctl --address temporal:7233 cluster health 2>/dev/null || temporal operator cluster health --address temporal:7233 2>/dev/null || true"]
+      test: ["CMD-SHELL", "tctl --address temporal:7233 cluster health 2>/dev/null || temporal operator cluster health --address temporal:7233"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
+    stop_grace_period: 30s
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 600m
+    logging: *default-logging
 
   temporal-ui:
     # Opt-in only. Defaults to NOT exposing a public port. Operators who need
@@ -99,7 +110,9 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       # Temporal UI v2.31+ supports HTTP basic auth via these env vars.
-      - TEMPORAL_AUTH_ENABLED=${TEMPORAL_AUTH_ENABLED:-false}
+      # Operators MUST set TEMPORAL_AUTH_ENABLED and TEMPORAL_UI_PASSWORD explicitly.
+      # Leaving auth disabled on a publicly reachable UI is a security risk.
+      - TEMPORAL_AUTH_ENABLED=${TEMPORAL_AUTH_ENABLED}
       - TEMPORAL_AUTH_PROVIDER_URL=
       - TEMPORAL_UI_PUBLIC_PATH=/
     depends_on:
@@ -107,26 +120,46 @@ services:
         condition: service_started
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 256M
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 100m
+    logging: *default-logging
 
-  backend:
+  backend-init:
+    # One-shot service: runs Alembic migrations and exits.
+    # Requires Docker Compose v2.13+ for `service_completed_successfully`.
     image: ${HELIX_IMAGE_PREFIX:-helix}/backend:${HELIX_IMAGE_TAG:-latest}
-    container_name: helix-backend
-    restart: unless-stopped
-    ports:
-      - "${BACKEND_HOST_PORT:-8000}:8000"
+    container_name: helix-backend-init
+    command: ["alembic", "upgrade", "head"]
     env_file:
       - .env
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - helix-network
+    mem_limit: 400m
+    logging: *default-logging
+
+  backend:
+    image: ${HELIX_IMAGE_PREFIX:-helix}/backend:${HELIX_IMAGE_TAG:-latest}
+    container_name: helix-backend
+    restart: unless-stopped
+    # Loopback bind — Caddy on the same host proxies /api/* here.
+    # Set BACKEND_BIND=0.0.0.0 only for local development without Caddy.
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
+    env_file:
+      - .env
+    init: true
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - helix_artifacts:/app/data/artifacts
     healthcheck:
@@ -137,53 +170,89 @@ services:
       retries: 3
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 800m
+    logging: *default-logging
 
   worker:
     image: ${HELIX_IMAGE_PREFIX:-helix}/worker:${HELIX_IMAGE_TAG:-latest}
     container_name: helix-worker
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     depends_on:
       backend:
         condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
     volumes:
-      - helix_artifacts:/app/data/artifacts
+      # W-002: BMAD config writes artifacts to /app/_bmad-output/planning-artifacts.
+      # Volume MUST be at /app/_bmad-output so artifacts persist across restarts.
+      - helix_artifacts:/app/_bmad-output
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 1G
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 800m
+    logging: *default-logging
 
   frontend:
     image: ${HELIX_IMAGE_PREFIX:-helix}/frontend:${HELIX_IMAGE_TAG:-latest}
     container_name: helix-frontend
     restart: unless-stopped
+    # Loopback bind — Caddy on the same host proxies / here.
+    # Set FRONTEND_BIND=0.0.0.0 only for local development without Caddy.
     ports:
-      - "${FRONTEND_HOST_PORT:-3000}:3000"
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_HOST_PORT:-3000}:3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    init: true
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - helix-network
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 400m
+    logging: *default-logging
+
+  caddy:
+    # Reverse proxy + automatic TLS (Let's Encrypt) via Caddy 2.
+    # Terminates HTTPS on 443, proxies /api/* to backend and /* to frontend.
+    # HELIX_PUBLIC_DOMAIN must point at this VM's external IP before first start
+    # (Caddy performs an ACME HTTP-01 challenge on port 80).
+    image: caddy:2-alpine
+    container_name: helix-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    environment:
+      HELIX_PUBLIC_DOMAIN: ${HELIX_PUBLIC_DOMAIN:?HELIX_PUBLIC_DOMAIN is required — set to your domain (e.g. helix.example.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - helix-network
+    # Sized for 4 GB VM; bump if running e2-standard-2+.
+    mem_limit: 100m
+    logging: *default-logging
 
 volumes:
   helix_postgres_data:
     driver: local
   helix_artifacts:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 networks:

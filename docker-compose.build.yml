@@ -4,9 +4,12 @@
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml build
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 #
-# Or pre-build and push:
-#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
-#   docker push <prefix>/backend:<tag>   (etc.)
+# Or build the frontend with a specific public API URL (required for production):
+#   NEXT_PUBLIC_API_URL=https://helix.example.com \
+#     docker compose -f docker-compose.yml -f docker-compose.build.yml build frontend
+#
+# NEXT_PUBLIC_API_URL is baked into the Next.js bundle at build time and cannot
+# be changed at runtime. Always set it to your public domain before building.
 
 services:
   backend:
@@ -24,4 +27,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
+        # NEXT_PUBLIC_API_URL is baked into the JS bundle at build time.
+        # Set via env var before building for production, e.g.:
+        #   NEXT_PUBLIC_API_URL=https://helix.example.com docker compose \
+        #     -f docker-compose.yml -f docker-compose.build.yml build frontend
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}

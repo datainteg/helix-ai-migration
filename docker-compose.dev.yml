@@ -1,9 +1,13 @@
-# Development overlay — hot reload, source-mounted volumes, dev-only DB creds.
+# ─────────────────────────────────────────────────────────────────────────────
+# DEV OVERLAY — hot reload, source-mounted volumes, exposed DB ports.
 #
-# All credentials come from .env. Use scripts/generate-secrets.sh first.
+# DO NOT use this overlay in production — disables CORS validator, opens DB
+# ports, and sets APP_ENV=development (relaxes JWT validation, enables debug
+# endpoints, accepts placeholder secrets).
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml up
+# ─────────────────────────────────────────────────────────────────────────────
 
 services:
   backend:
@@ -24,34 +28,39 @@ services:
       - ./agents:/app/agents
       - ./_bmad:/app/_bmad
       - ./backend:/app/backend
-      - helix_artifacts:/app/data/artifacts
+      # W-002: mirror the prod volume path so BMAD artifacts persist in dev.
+      - helix_artifacts:/app/_bmad-output
     environment:
       APP_ENV: development
 
   frontend:
     container_name: helix-frontend-dev
     ports:
-      - "${FRONTEND_DEV_HOST_PORT:-8080}:3000"
+      - "127.0.0.1:${FRONTEND_DEV_HOST_PORT:-8080}:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
 
   postgres:
     container_name: helix-postgres-dev
-    # Expose Postgres on host for local dev tooling (DBeaver / psql).
-    # Remove or change `ports:` if you don't want it on your host network.
+    # Expose Postgres on loopback only for local dev tooling (DBeaver / psql).
+    # Uses 127.0.0.1 bind to prevent accidental exposure if this overlay is
+    # mistakenly passed on a VM with an open firewall.
     ports:
-      - "${POSTGRES_DEV_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_DEV_HOST_PORT:-5432}:5432"
 
   redis:
     container_name: helix-redis-dev
     ports:
-      - "${REDIS_DEV_HOST_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_DEV_HOST_PORT:-6379}:6379"
 
   temporal:
     container_name: helix-temporal-dev
     ports:
-      - "${TEMPORAL_DEV_HOST_PORT:-7233}:7233"
+      - "127.0.0.1:${TEMPORAL_DEV_HOST_PORT:-7233}:7233"
 
   temporal-ui:
     container_name: helix-temporal-ui-dev
+    profiles: []   # remove profile gate in dev so temporal-ui starts automatically
+    ports:
+      - "127.0.0.1:${TEMPORAL_UI_HOST_PORT:-8233}:8080"

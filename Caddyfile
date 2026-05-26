@@ -1,0 +1,77 @@
+# Helix Migration — Caddyfile
+#
+# Caddy 2 reverse proxy with automatic Let's Encrypt TLS.
+# HELIX_PUBLIC_DOMAIN must be set in the environment (docker-compose.yml
+# passes it from the HELIX_PUBLIC_DOMAIN env var).
+#
+# GCP firewall: open 80 (ACME challenge) and 443 (HTTPS) only.
+# Do NOT open 8000 or 3000 to the public internet.
+
+{
+    # Global options — Caddy logs to stdout; Docker's json-file driver captures it.
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
+    # Uncomment during initial setup to avoid Let's Encrypt rate limits:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$HELIX_PUBLIC_DOMAIN} {
+
+    # ── Logging ─────────────────────────────────────────────────────────────
+    log {
+        output stdout
+        format json
+    }
+
+    # ── Security headers ─────────────────────────────────────────────────────
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        # WEBSITE-003 round-2: suppress indexing of demo console pages.
+        /helix-console-demo* X-Robots-Tag "noindex"
+    }
+
+    # ── Block Prometheus metrics from public access ──────────────────────────
+    handle /metrics {
+        respond 403
+    }
+
+    # ── SSE paths: disable proxy buffering explicitly ────────────────────────
+    # Caddy already disables buffering for text/event-stream responses
+    # automatically. These matchers make the no-buffer intent explicit and
+    # add flush_interval for older clients that need it.
+    @sse_paths {
+        path /api/v1/sse/*
+        path /api/v1/agent-workflows/*/stream
+    }
+    handle @sse_paths {
+        reverse_proxy backend:8000 {
+            flush_interval -1
+            header_up Host {http.request.host}
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {http.request.remote.host}
+        }
+    }
+
+    # ── Backend API ──────────────────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {http.request.remote.host}
+        }
+    }
+
+    # ── Frontend (Next.js) — catch-all ───────────────────────────────────────
+    handle {
+        reverse_proxy frontend:3000 {
+            header_up Host {http.request.host}
+        }
+    }
+}
