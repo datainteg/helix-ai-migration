@@ -25,12 +25,13 @@ export default function ProjectCompliancePage() {
   const [error, setError] = useState("");
 
   const download = async () => {
-    if (!token || !id) return;
+    if (!id) return;
     setDownloading(true);
     setError("");
     try {
+      // SC-010: auth via the HttpOnly cookie (credentials:"include").
       const res = await fetch(`${API_BASE}/api/v1/projects/${id}/compliance-bundle`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({ detail: res.statusText }));

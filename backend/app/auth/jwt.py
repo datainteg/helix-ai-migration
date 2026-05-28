@@ -11,7 +11,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.config import settings
 
-security = HTTPBearer()
+# SC-010: the JWT can now arrive via EITHER the `Authorization: Bearer` header
+# (SDK / CLI / programmatic callers — unchanged) OR an HttpOnly `helix_token`
+# cookie (browser, post-migration). `auto_error=False` makes the header
+# optional so a cookie-only browser request is not rejected with a 403 before
+# we ever look at the cookie; `extract_token` below resolves the precedence.
+security = HTTPBearer(auto_error=False)
+
+# Name of the HttpOnly auth cookie set by the /auth/* endpoints.
+AUTH_COOKIE_NAME = "helix_token"
 
 _REVOKED_PREFIX = "revoked_token:"
 # SEC-003: per-bearer set of SSE ticket hashes minted from that bearer.
@@ -351,11 +359,37 @@ async def decode_access_token_async(token: str) -> dict:
     return payload
 
 
+def extract_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str:
+    """SC-010: resolve the JWT from the bearer header OR the HttpOnly cookie.
+
+    Precedence: the `Authorization: Bearer` header always wins so SDK / CLI /
+    programmatic callers are completely unaffected by the cookie migration. The
+    `helix_token` cookie is only consulted when no usable bearer header was
+    sent (the browser case, where JS cannot set the header because the cookie
+    is HttpOnly). Raises 401 when neither source carries a token — this matches
+    the prior `HTTPBearer()` rejection so unauthenticated callers still fail.
+    """
+    if credentials is not None and credentials.credentials:
+        return credentials.credentials
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def get_current_user_id(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> str:
-    payload = decode_access_token(credentials.credentials)
+    token = extract_token(request, credentials)
+    payload = decode_access_token(token)
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

@@ -114,15 +114,49 @@ def _token_budget() -> int:
     return value
 
 
-def _estimate_tokens(text: str) -> int:
-    """Char-based token estimate. Fast, deterministic, no tokenizer dep.
+# L-008: cache the tiktoken encoding. ``None`` means "not yet resolved";
+# ``False`` means "resolution failed — use the char heuristic" so we don't
+# retry the (potentially slow / network-touching) import + load on every call.
+_TIKTOKEN_ENCODING: Any = None
 
-    L-008: a real tokenizer (``tiktoken``) would be more accurate, but it is
-    NOT an installed dependency (verified against worker/requirements.txt and
-    the agents deps) and the review forbids adding one. The len//4 heuristic
-    deliberately under-counts so the budget allocator truncates conservatively;
-    when ``tiktoken`` is added in the future, swap this body to use it.
+
+def _get_tiktoken_encoding():
+    """Return a tiktoken encoding, or ``None`` if tiktoken is unavailable.
+
+    L-008: lazy-imported and cached. tiktoken is NOT imported at module load,
+    so a missing wheel (or an encoding it can't download offline) never breaks
+    importing this module — callers fall back to the char heuristic.
     """
+    global _TIKTOKEN_ENCODING
+    if _TIKTOKEN_ENCODING is not None:
+        return _TIKTOKEN_ENCODING or None
+    try:
+        import tiktoken
+
+        # cl100k_base covers GPT-4/3.5 + is a reasonable cross-vendor proxy.
+        _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+    except Exception as exc:  # noqa: BLE001 — ImportError or offline encoding load
+        logger.debug("tiktoken unavailable, using char heuristic for token counts: %s", exc)
+        _TIKTOKEN_ENCODING = False
+    return _TIKTOKEN_ENCODING or None
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count, preferring tiktoken when available.
+
+    L-008: use ``tiktoken`` (accurate BPE count) when it imports and an
+    encoding loads; otherwise fall back to the deterministic, dependency-free
+    ``len // _CHARS_PER_TOKEN`` heuristic, which under-counts so the budget
+    allocator truncates conservatively.
+    """
+    if not text:
+        return 1
+    encoding = _get_tiktoken_encoding()
+    if encoding is not None:
+        try:
+            return max(1, len(encoding.encode(text)))
+        except Exception as exc:  # noqa: BLE001 — never let counting break a run
+            logger.debug("tiktoken encode failed, falling back to char heuristic: %s", exc)
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 

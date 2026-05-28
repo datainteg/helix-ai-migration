@@ -46,13 +46,13 @@ export default function MarketplacePage() {
   const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/marketplace`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/marketplace`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((data: Entry[]) => setItems(data))
       .catch((e: unknown) => { setItems([]); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load marketplace"); })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const filtered = filter === "all" ? items : items.filter((e) => e.kind === filter);
 

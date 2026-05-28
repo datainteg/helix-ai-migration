@@ -24,12 +24,12 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/audit-logs`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/audit-logs`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setLogs)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const actionLabel = (action: string) =>
     action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

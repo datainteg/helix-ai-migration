@@ -46,20 +46,21 @@ export default function CodeReviewPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token || !id) return;
-    fetch(`${API}/api/v1/artifacts/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); gate on id only.
+    if (!id) return;
+    fetch(`${API}/api/v1/artifacts/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then(setArtifact);
   }, [id, token]);
 
   const runReview = async () => {
-    if (!id || !token) return;
+    if (!id) return;
     setError("");
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/v1/artifacts/${id}/review`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) {
         const err = await res.json();

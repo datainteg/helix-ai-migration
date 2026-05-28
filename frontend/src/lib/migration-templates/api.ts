@@ -22,11 +22,13 @@ export interface TemplateCloneResponse {
   recon_threshold_pct: number | null;
 }
 
-async function req<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function req<T>(path: string, _token: string | null, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
@@ -38,12 +40,12 @@ async function req<T>(path: string, token: string, init: RequestInit = {}): Prom
   return res.json() as Promise<T>;
 }
 
-export function listMigrationTemplates(token: string): Promise<TemplateSummary[]> {
+export function listMigrationTemplates(token: string | null): Promise<TemplateSummary[]> {
   return req<TemplateSummary[]>("/api/v1/migration-templates", token);
 }
 
 export function cloneMigrationTemplate(
-  token: string,
+  token: string | null,
   template_id: string,
   project_name: string,
   project_description?: string,

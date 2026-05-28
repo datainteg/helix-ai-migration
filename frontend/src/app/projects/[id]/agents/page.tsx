@@ -51,7 +51,8 @@ export default function ProjectAgentsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token || !id) return;
+    // SC-010: auth via the HttpOnly cookie; gate on id only.
+    if (!id) return;
     let cancelled = false;
     setLoading(true);
     listProjectWorkflowRuns(token, String(id), 20)
@@ -75,7 +76,7 @@ export default function ProjectAgentsPage() {
   // Live SSE — append-on-step. Only subscribes when the active run is not yet
   // terminal so we don't reopen connections to completed workflows.
   useEffect(() => {
-    if (!token || !active) return;
+    if (!active) return;
     if (["completed", "approved", "rejected", "failed", "expired"].includes(active.status)) return;
     let es: EventSource | null = null;
     let cancelled = false;

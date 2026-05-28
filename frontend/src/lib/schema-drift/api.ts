@@ -41,11 +41,13 @@ export interface SnapshotPayload {
   }[];
 }
 
-async function req<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function req<T>(path: string, _token: string | null, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
@@ -57,14 +59,14 @@ async function req<T>(path: string, token: string, init: RequestInit = {}): Prom
   return res.json() as Promise<T>;
 }
 
-export function listSnapshots(token: string, projectId: string, sourceRef: string): Promise<SchemaSnapshot[]> {
+export function listSnapshots(token: string | null, projectId: string, sourceRef: string): Promise<SchemaSnapshot[]> {
   return req<SchemaSnapshot[]>(
     `/api/v1/projects/${projectId}/sources/${encodeURIComponent(sourceRef)}/schema-snapshots`,
     token,
   );
 }
 
-export function takeSnapshot(token: string, projectId: string, sourceRef: string, data: SnapshotPayload): Promise<SchemaSnapshot> {
+export function takeSnapshot(token: string | null, projectId: string, sourceRef: string, data: SnapshotPayload): Promise<SchemaSnapshot> {
   return req<SchemaSnapshot>(
     `/api/v1/projects/${projectId}/sources/${encodeURIComponent(sourceRef)}/schema-snapshots`,
     token,
@@ -72,7 +74,7 @@ export function takeSnapshot(token: string, projectId: string, sourceRef: string
   );
 }
 
-export function computeDrift(token: string, projectId: string, sourceRef: string): Promise<SchemaDrift> {
+export function computeDrift(token: string | null, projectId: string, sourceRef: string): Promise<SchemaDrift> {
   return req<SchemaDrift>(
     `/api/v1/projects/${projectId}/sources/${encodeURIComponent(sourceRef)}/drift`,
     token,

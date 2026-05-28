@@ -21,20 +21,20 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-function authHeader(token: string | null): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
+// SC-010: auth now rides on the HttpOnly `helix_token` cookie (sent via
+// `credentials: "include"`), not an Authorization header. The `token` params
+// below are retained for call-site compatibility but are no longer used to
+// build a header.
 async function req<T>(
   path: string,
-  token: string | null,
+  _token: string | null,
   init: RequestInit = {},
 ): Promise<T> {
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...authHeader(token),
       ...(init.headers ?? {}),
     },
   });
@@ -431,22 +431,25 @@ export async function createTask(
  * and proxy logs, we trade the bearer for a 60-second scope=sse ticket from
  * POST /auth/sse-ticket and use that ticket only.
  *
- * Returns a promise that resolves to the EventSource handle (or null if no
- * token). Caller is responsible for `.close()`.
+ * Returns a promise that resolves to the EventSource handle (or null on a
+ * ticket-mint failure). Caller is responsible for `.close()`.
+ *
+ * SC-010: the SSE-ticket mint authenticates via the HttpOnly cookie
+ * (`credentials: "include"`) instead of a bearer header; it still returns the
+ * short-TTL ticket in the body for the EventSource URL. The `_token` param is
+ * retained for call-site compatibility but unused.
  */
 export async function subscribeToExecutions(
-  token: string | null,
+  _token: string | null,
   projectId: string,
   onSnapshot: (rows: AgentExecution[]) => void,
   onError?: (e: Event) => void,
 ): Promise<EventSource | null> {
-  if (!token) return null;
-
   let ticket: string;
   try {
     const res = await fetch(`${API_BASE}/api/v1/auth/sse-ticket`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     });
     if (!res.ok) {
       onError?.(new Event("ticket_failed"));

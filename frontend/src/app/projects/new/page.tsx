@@ -95,9 +95,9 @@ export default function NewProjectPage() {
     try {
       const res = await fetch(`${API_BASE}/api/v1/projects`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name,

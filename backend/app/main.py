@@ -247,13 +247,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
-    # SC-035: the API is bearer-only (JWT in the Authorization header); it sets
-    # no cookies and reads none. `allow_credentials=True` only enables
-    # cookie/credentialed cross-origin requests, which we never make — and it
-    # combined with the dev origin regex to let any localhost:<port> page read
-    # responses. Dropping it closes that CSRF/origin-spoofing surface with zero
-    # functional impact on bearer auth.
-    allow_credentials=False,
+    # SC-010 (supersedes SC-035): the API now ALSO authenticates the browser via
+    # an HttpOnly `helix_token` cookie. A credentialed cross-origin request that
+    # carries that cookie REQUIRES `allow_credentials=True` for the browser to
+    # send the cookie and read the response — and the CORS spec forbids pairing
+    # `allow_credentials=True` with a wildcard origin, so `allow_origins` /
+    # `allow_origin_regex` must stay an EXACT allowlist (never `*`). They are:
+    # `settings.CORS_ORIGINS` (production = settings.FRONTEND_URL; config.py
+    # rejects `*` and any regex when APP_ENV=production) plus the dev-only
+    # localhost regex. SC-035 dropped credentials because the API was then
+    # bearer-only; with HttpOnly cookies in use that reasoning no longer holds.
+    # The CSRF surface SC-035 worried about is now closed by the cookie's
+    # SameSite=Strict attribute, which stops the browser attaching it to any
+    # cross-site request.
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     # `Idempotency-Key` lets browsers + SDK consumers opt into POST
     # de-duplication on retries (API-C4). `X-Active-Org-Id` is read by

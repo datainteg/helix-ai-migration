@@ -33,8 +33,10 @@ interface StatsWire {
 interface ProjectWire { id: string; status?: string }
 interface WorkflowWire { workflow_id: string; status: string }
 
-async function fetchJson<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function fetchJson<T>(path: string, _token: string | null): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -59,7 +61,7 @@ function unwrapItems<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
 }
 
-async function fallbackStats(token: string): Promise<DashboardStats> {
+async function fallbackStats(token: string | null): Promise<DashboardStats> {
   const [rawProjects, rawWorkflows] = await Promise.all([
     fetchJson<unknown>("/api/v1/projects?include_archived=true&limit=200", token),
     fetchJson<unknown>("/api/v1/agent-workflows?limit=200", token),
@@ -94,7 +96,7 @@ async function fallbackStats(token: string): Promise<DashboardStats> {
   };
 }
 
-export async function fetchDashboardStats(token: string): Promise<DashboardStats> {
+export async function fetchDashboardStats(token: string | null): Promise<DashboardStats> {
   try {
     const wire = await fetchJson<StatsWire>("/api/v1/dashboard/stats", token);
     return fromWire(wire);

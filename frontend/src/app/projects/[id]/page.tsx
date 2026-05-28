@@ -145,14 +145,14 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token) return;
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     fetch(`${API_BASE}/api/v1/projects/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setProject(data ?? null))
       .catch(() => setProject(null));
-  }, [id, token]);
+  }, [id]);
 
   const displayName = project?.name || "Untitled project";
   const shortId = String(id).slice(0, 8);

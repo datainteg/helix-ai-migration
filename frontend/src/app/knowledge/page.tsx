@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useId, useState } from "react";
-import { BookOpen, Trash2, Plus, Search } from "lucide-react";
+import { BookOpen, Trash2, Plus } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import {
@@ -20,6 +20,7 @@ import {
   ErrorBanner,
   LoadingState,
   Modal,
+  SearchInput,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
@@ -55,10 +56,10 @@ export default function KnowledgePage() {
   const searchInputId = useId();
 
   const refresh = async () => {
-    if (!token) return;
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/knowledge/docs?limit=200`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/v1/knowledge/docs?limit=200`, { credentials: "include" });
       if (!res.ok) throw new Error(`Failed to load (${res.status})`);
       setDocs(await res.json());
       setError("");
@@ -72,10 +73,10 @@ export default function KnowledgePage() {
   useEffect(() => { void refresh(); }, [token]);
 
   const search = async () => {
-    if (!token || q.trim().length < 2) { setHits(null); return; }
+    if (q.trim().length < 2) { setHits(null); return; }
     try {
       const res = await fetch(`${API_BASE}/api/v1/knowledge/search?q=${encodeURIComponent(q)}&limit=10`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error(`Search failed (${res.status})`);
       setHits(await res.json());
@@ -85,11 +86,11 @@ export default function KnowledgePage() {
   };
 
   const confirmDelete = async () => {
-    if (!token || !pendingDelete) return;
+    if (!pendingDelete) return;
     setDeleting(true);
     try {
       const res = await fetch(`${API_BASE}/api/v1/knowledge/docs/${pendingDelete.id}`, {
-        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+        method: "DELETE", credentials: "include",
       });
       if (!res.ok) throw new Error(`Delete failed (${res.status})`);
       setPendingDelete(null);
@@ -113,15 +114,15 @@ export default function KnowledgePage() {
 
       <Card padding="sm" className="mb-4">
         <div className="flex items-center gap-2">
-          <label htmlFor={searchInputId} className="sr-only">Search uploaded docs</label>
-          <Search className="h-3.5 w-3.5 text-ink-4" aria-hidden />
-          <input
+          {/* UI-026: shared SearchInput primitive (carries its own icon + aria-label). */}
+          <SearchInput
             id={searchInputId}
+            ariaLabel="Search uploaded docs"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void search(); }}
             placeholder="Search uploaded docs…"
-            className="flex-1 h-8 px-2 text-[13px] bg-transparent focus-ring"
+            wrapperClassName="flex-1"
           />
           <Button size="sm" onClick={() => void search()}>Search</Button>
         </div>
@@ -232,7 +233,6 @@ function UploadDocModal({ open, onClose, onCreated }: { open: boolean; onClose: 
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
     if (!title.trim() || !content.trim()) {
       setErr("Title and content are required.");
       return;
@@ -242,7 +242,8 @@ function UploadDocModal({ open, onClose, onCreated }: { open: boolean; onClose: 
     try {
       const res = await fetch(`${API_BASE}/api/v1/knowledge/docs`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include", // SC-010: auth via HttpOnly cookie
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
           content,

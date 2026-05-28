@@ -114,9 +114,9 @@ export default function ValidationPage() {
   const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
-    if (!token) return;
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/projects?limit=1`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/v1/projects?limit=1`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: unknown[]) => { if (!cancelled) setHasProjects(rows.length > 0); })
       .catch((e: unknown) => { if (!cancelled) { setHasProjects(false); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load projects"); } });

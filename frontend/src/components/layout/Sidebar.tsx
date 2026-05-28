@@ -161,9 +161,9 @@ function SystemStatus() {
   const [state, setState] = useState<"unknown" | "ok" | "degraded">("unknown");
 
   useEffect(() => {
-    if (!token) { setState("unknown"); return; }
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/system/health`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled) return;

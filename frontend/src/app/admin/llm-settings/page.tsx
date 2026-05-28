@@ -76,12 +76,15 @@ export default function LLMSettingsPage() {
   const uid = useId();
   const fieldId = (name: string) => `${uid}-${name}`;
 
-  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  // SC-010: auth now rides on the HttpOnly cookie (credentials:"include"); the
+  // Authorization header is no longer used. `authHeader` is kept as an empty
+  // object so the existing `...authHeader` spreads remain harmless no-ops.
+  const authHeader: Record<string, string> = {};
 
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, { headers: authHeader });
+      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, { credentials: "include", headers: authHeader });
       if (res.ok) setProviders(await res.json());
     } catch { /* ignore */ }
     setLoading(false);
@@ -90,7 +93,7 @@ export default function LLMSettingsPage() {
 
   useEffect(() => {
     fetchProviders();
-    fetch(`${API_BASE}/api/v1/llm-providers/catalogue`, { headers: authHeader })
+    fetch(`${API_BASE}/api/v1/llm-providers/catalogue`, { credentials: "include", headers: authHeader })
       .then((r) => (r.ok ? r.json() : []))
       .then((entries: CatalogueEntry[]) => {
         const map: Record<string, CatalogueEntry> = {};
@@ -145,6 +148,7 @@ export default function LLMSettingsPage() {
     const payload = { ...form, extra_config: cleanedExtraConfig(form.extra_config) };
     const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeader },
       body: JSON.stringify(payload),
     });
@@ -164,6 +168,7 @@ export default function LLMSettingsPage() {
     };
     const res = await fetch(`${API_BASE}/api/v1/llm-providers/${id}`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeader },
       body: JSON.stringify(patchBody),
     });
@@ -174,6 +179,7 @@ export default function LLMSettingsPage() {
     if (form.api_key.trim() !== "") {
       const rotateRes = await fetch(`${API_BASE}/api/v1/llm-providers/${id}/rotate-key`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ new_api_key: form.api_key }),
       });
@@ -205,6 +211,7 @@ export default function LLMSettingsPage() {
     try {
       const res = await fetch(`${API_BASE}/api/v1/llm-providers/${id}/test`, {
         method: "POST",
+        credentials: "include",
         headers: authHeader,
       });
       if (!res.ok) throw new Error("Connection test failed");

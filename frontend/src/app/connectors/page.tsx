@@ -995,10 +995,10 @@ export default function ConnectorsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    // SC-010: auth via the HttpOnly cookie (credentials:"include").
     setLoading(true);
     setLoadError("");
-    fetch(`${API_BASE}/api/v1/connectors/registry`, { headers })
+    fetch(`${API_BASE}/api/v1/connectors/registry`, { credentials: "include" })
       .then((r) => {
         if (!r.ok) throw new Error(`Couldn't reach the connector registry (HTTP ${r.status})`);
         return r.json() as Promise<RegistryEntry[]>;

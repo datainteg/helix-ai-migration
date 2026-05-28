@@ -367,6 +367,9 @@ export default function FirstAdminSetupPage() {
   const persistStep0 = async () => {
     const res = await fetch(`${API_BASE}/api/v1/auth/first-admin`, {
       method: "POST",
+      // SC-010: receive the HttpOnly cookie the backend sets on success so the
+      // subsequent wizard steps authenticate via the cookie.
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         // SC-011: the backend requires an out-of-band setup token (printed to
@@ -407,9 +410,9 @@ export default function FirstAdminSetupPage() {
       }
       const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           provider_type: p.key,
@@ -458,9 +461,9 @@ export default function FirstAdminSetupPage() {
     }
     const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, {
       method: "PUT",
+      credentials: "include", // SC-010: auth via HttpOnly cookie
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
     });
@@ -480,9 +483,9 @@ export default function FirstAdminSetupPage() {
     if (!projectId) {
       const res = await fetch(`${API_BASE}/api/v1/projects`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: data.project.name,
@@ -512,9 +515,9 @@ export default function FirstAdminSetupPage() {
 
       const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/sources`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: c.name,

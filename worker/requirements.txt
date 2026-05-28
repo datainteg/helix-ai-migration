@@ -8,6 +8,10 @@ psycopg2-binary>=2.9.9
 cryptography>=42.0.0
 PyYAML>=6.0
 prometheus-client>=0.20.0
+# L-008: accurate token counts for the BMAD prompt budget (lazy-imported in
+# agents/runtime/bmad_executor.py; falls back to a char heuristic if missing).
+# Already pulled transitively by pydantic-ai-slim; pinned here as a direct dep.
+tiktoken>=0.7.0
 
 # LLM provider SDKs — lazy-imported by agents/runtime/providers/*.
 # Listed here so the worker image ships with cloud-vendor support

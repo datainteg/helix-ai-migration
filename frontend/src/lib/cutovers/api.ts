@@ -64,11 +64,13 @@ export interface CutoverDiffInput {
   sample_hash?: string;
 }
 
-async function req<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function req<T>(path: string, _token: string | null, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(init.headers || {}),
     },
@@ -80,26 +82,26 @@ async function req<T>(path: string, token: string, init: RequestInit = {}): Prom
   return res.json() as Promise<T>;
 }
 
-export async function listCutovers(token: string, projectId: string): Promise<Cutover[]> {
+export async function listCutovers(token: string | null, projectId: string): Promise<Cutover[]> {
   const data = await req<unknown>(`/api/v1/projects/${projectId}/cutovers`, token);
   return Array.isArray(data) ? data : ((data as any).items ?? []);
 }
 
-export function createCutover(token: string, projectId: string, data: CutoverCreateInput): Promise<Cutover> {
+export function createCutover(token: string | null, projectId: string, data: CutoverCreateInput): Promise<Cutover> {
   return req<Cutover>(`/api/v1/projects/${projectId}/cutovers`, token, {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export function transitionCutover(token: string, cutoverId: string, targetState: CutoverState, notes?: string): Promise<Cutover> {
+export function transitionCutover(token: string | null, cutoverId: string, targetState: CutoverState, notes?: string): Promise<Cutover> {
   return req<Cutover>(`/api/v1/cutovers/${cutoverId}/transition`, token, {
     method: "POST",
     body: JSON.stringify({ target_state: targetState, notes }),
   });
 }
 
-export function recordDiff(token: string, cutoverId: string, data: CutoverDiffInput): Promise<Cutover> {
+export function recordDiff(token: string | null, cutoverId: string, data: CutoverDiffInput): Promise<Cutover> {
   return req<Cutover>(`/api/v1/cutovers/${cutoverId}/diff`, token, {
     method: "POST",
     body: JSON.stringify(data),

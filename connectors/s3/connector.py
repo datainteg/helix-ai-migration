@@ -149,10 +149,54 @@ class S3Connector(BaseConnector):
                                column_name=c, data_type="string", is_nullable=True, ordinal_position=i + 1)
                     for i, c in enumerate(cols) if c
                 ]
+            if key.endswith(".parquet"):
+                # M-008: read ONLY the parquet schema (footer + metadata), not
+                # the column data. pyarrow.parquet.read_schema seeks the footer
+                # via the file-like's range reads, so this stays a small,
+                # bounded download even for multi-GB files.
+                return self._infer_parquet_columns(client, schema_name, table_name, key)
             return [ColumnInfo(schema_name=schema_name, table_name=table_name,
                                column_name="data", data_type="string", is_nullable=True, ordinal_position=1)]
+        except DiscoveryError:
+            raise
         except Exception as exc:
             raise DiscoveryError(f"Column inference failed: {exc}", "s3") from exc
+
+    def _infer_parquet_columns(
+        self, client, bucket: str, key: str, table_name: str
+    ) -> list[ColumnInfo]:
+        """List columns of a parquet object by reading JUST its schema.
+
+        M-008: replaces the placeholder ``"data"`` column with the real
+        parquet field names + types. ``pyarrow.parquet.read_schema`` is given a
+        seekable, S3-backed file-like (`_S3RangeFile`) so it fetches only the
+        footer/metadata via ranged GETs — never the whole object, which can be
+        many GB. ``pyarrow`` is lazy-imported so the rest of the connector
+        still imports (and CSV/JSON inference still works) when pyarrow is
+        absent — a clear DiscoveryError is raised instead.
+        """
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as exc:
+            raise DiscoveryError(
+                "pyarrow not installed — parquet column inference is unavailable. "
+                "Add pyarrow to backend/requirements.txt to enable it.",
+                "s3",
+            ) from exc
+
+        fileobj = _S3RangeFile(client, bucket, key)
+        schema = pq.read_schema(fileobj)
+        return [
+            ColumnInfo(
+                schema_name=bucket,
+                table_name=table_name,
+                column_name=field.name,
+                data_type=str(field.type),
+                is_nullable=bool(field.nullable),
+                ordinal_position=i + 1,
+            )
+            for i, field in enumerate(schema)
+        ]
 
     # M-008: cap a single header read at 1 MiB so a CSV whose first line is the
     # whole file (no trailing newline) cannot force an unbounded GET.
@@ -192,3 +236,82 @@ class S3Connector(BaseConnector):
 
     async def get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         return RowCountResult(schema_name=schema_name, table_name=table_name, row_count=0)
+
+
+class _S3RangeFile:
+    """A minimal seekable, read-only file-like backed by S3 ranged GETs.
+
+    M-008: lets ``pyarrow.parquet.read_schema`` read a remote parquet object's
+    footer/metadata without downloading the whole file. pyarrow seeks to the
+    end for the 4-byte magic + footer length, then back to read the footer, so
+    only a few small ranges are ever fetched. The object size is resolved once
+    via a HEAD (``content_length``) and ranged GETs (``Range: bytes=start-end``)
+    satisfy each read.
+    """
+
+    def __init__(self, client, bucket: str, key: str):
+        self._client = client
+        self._bucket = bucket
+        self._key = key
+        self._pos = 0
+        self._size: int | None = None
+
+    # ── sizing ───────────────────────────────────────────────────────
+    @property
+    def size(self) -> int:
+        if self._size is None:
+            head = self._client.head_object(Bucket=self._bucket, Key=self._key)
+            self._size = int(head["ContentLength"])
+        return self._size
+
+    # ── file-like protocol pyarrow relies on ─────────────────────────
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == 0:      # SEEK_SET
+            self._pos = offset
+        elif whence == 1:    # SEEK_CUR
+            self._pos += offset
+        elif whence == 2:    # SEEK_END
+            self._pos = self.size + offset
+        else:
+            raise ValueError(f"invalid whence: {whence}")
+        if self._pos < 0:
+            self._pos = 0
+        return self._pos
+
+    def read(self, length: int = -1) -> bytes:
+        size = self.size
+        if self._pos >= size:
+            return b""
+        if length is None or length < 0:
+            end = size - 1
+        else:
+            end = min(self._pos + length, size) - 1
+        if end < self._pos:
+            return b""
+        obj = self._client.get_object(
+            Bucket=self._bucket,
+            Key=self._key,
+            Range=f"bytes={self._pos}-{end}",
+        )
+        data = obj["Body"].read()
+        self._pos += len(data)
+        return data
+
+    def close(self) -> None:  # pyarrow may call close() on wrap-up
+        pass
+
+    @property
+    def closed(self) -> bool:
+        return False

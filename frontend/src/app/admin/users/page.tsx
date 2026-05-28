@@ -25,13 +25,13 @@ export default function UsersPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/admin/users`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setUsers)
       .catch(() => setError("Failed to load users"))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   return (
     <AdminShell

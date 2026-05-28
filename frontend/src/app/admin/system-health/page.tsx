@@ -22,12 +22,12 @@ export default function SystemHealthPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/system/health`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (data?.components) setComponents(data.components); })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const data: ComponentStatus[] = components;
 

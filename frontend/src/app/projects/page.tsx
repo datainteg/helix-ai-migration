@@ -65,12 +65,9 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     fetch(`${API_BASE}/api/v1/projects`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: unknown) => {
