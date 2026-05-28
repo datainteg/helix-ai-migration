@@ -78,7 +78,31 @@ async def run_row_count_recon(
             "passed": passed,
         }
     except Exception as exc:
+        # H-002: do NOT re-raise. The empty recon_run row was already
+        # committed at the top; persist the failure status + message and
+        # return a structured failure dict so the caller can map it to a
+        # 422 with detail instead of an opaque 500. Persist a diagnostic
+        # ReconResult row too so the recon list shows *why* it failed.
+        logger.warning(
+            "recon_failed run_id=%s project=%s err=%s",
+            recon_run.id, project_id, exc,
+        )
         recon_run.status = "failed"
-        recon_run.error_message = str(exc)
+        recon_run.error_message = str(exc)[:2000]
+        try:
+            import json
+            db.add(ReconResult(
+                run_id=recon_run.id,
+                result_type="row_count",
+                summary=json.dumps({"status": "failed", "error": str(exc)[:1000]}),
+                mismatch_count=0,
+            ))
+        except Exception:  # noqa: BLE001 — best-effort forensics row
+            pass
         db.commit()
-        raise
+        return {
+            "recon_run_id": recon_run.id,
+            "status": "failed",
+            "passed": False,
+            "error_message": str(exc)[:1000],
+        }

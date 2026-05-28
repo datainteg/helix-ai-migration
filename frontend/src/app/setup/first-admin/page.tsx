@@ -160,6 +160,7 @@ interface WizardData {
   name: string;
   email: string;
   password: string;
+  setup_token: string;
   region: string;
   env: string;
   // step 1
@@ -225,6 +226,7 @@ export default function FirstAdminSetupPage() {
     name: "",
     email: "",
     password: "",
+    setup_token: "",
     region: "us-east-1",
     env: "development",
     providers: [],
@@ -235,6 +237,54 @@ export default function FirstAdminSetupPage() {
 
   const update = <K extends keyof WizardData>(field: K, value: WizardData[K]) =>
     setData((d) => ({ ...d, [field]: value }));
+
+  // UI-024 — persist the wizard step + non-secret draft to sessionStorage so an
+  // accidental reload mid-flow doesn't drop the operator back to step 0. We
+  // deliberately strip secrets (admin password, setup token, connection
+  // password) from the draft — those are re-entered after a reload rather than
+  // sitting in sessionStorage in plaintext.
+  const DRAFT_KEY = "helix.first-admin.draft.v1";
+  const [draftRestored, setDraftRestored] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { step?: number; data?: Partial<WizardData> };
+        if (saved.data) {
+          setData((d) => ({
+            ...d,
+            ...saved.data,
+            // never trust persisted secrets
+            password: "",
+            setup_token: "",
+            connection: { ...d.connection, ...(saved.data?.connection ?? {}), password: "" },
+            project: { ...d.project, ...(saved.data?.project ?? {}) },
+          }));
+        }
+        if (typeof saved.step === "number") setStep(saved.step);
+      }
+    } catch {
+      /* corrupt draft — ignore and start fresh */
+    }
+    setDraftRestored(true);
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!draftRestored) return; // don't clobber the saved draft before restore
+    try {
+      const { password: _pw, setup_token: _st, connection, ...rest } = data;
+      const safeConnection = { ...connection, password: "" };
+      sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ step, data: { ...rest, connection: safeConnection } })
+      );
+    } catch {
+      /* storage full / unavailable — non-fatal */
+    }
+  }, [step, data, draftRestored]);
 
   const onOrgNameChange = (e: ChangeEvent<HTMLInputElement>) => {
     const next = e.target.value;
@@ -292,7 +342,10 @@ export default function FirstAdminSetupPage() {
     data.organization_slug.trim().length > 0 &&
     data.name.trim().length > 0 &&
     /^\S+@\S+\.\S+$/.test(data.email) &&
-    data.password.length >= 8;
+    // SC-002: backend password policy requires min 12 chars + complexity.
+    data.password.length >= 12 &&
+    // SC-011: setup token is mandatory for the first-admin bootstrap.
+    data.setup_token.trim().length > 0;
 
   const step1Valid =
     data.providers.length > 0 &&
@@ -314,7 +367,15 @@ export default function FirstAdminSetupPage() {
   const persistStep0 = async () => {
     const res = await fetch(`${API_BASE}/api/v1/auth/first-admin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // SC-010: receive the HttpOnly cookie the backend sets on success so the
+      // subsequent wizard steps authenticate via the cookie.
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        // SC-011: the backend requires an out-of-band setup token (printed to
+        // the backend logs on first boot) to defeat the bootstrap race.
+        "X-Setup-Token": data.setup_token.trim(),
+      },
       body: JSON.stringify({
         email: data.email,
         name: data.name,
@@ -349,9 +410,9 @@ export default function FirstAdminSetupPage() {
       }
       const res = await fetch(`${API_BASE}/api/v1/llm-providers`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           provider_type: p.key,
@@ -400,9 +461,9 @@ export default function FirstAdminSetupPage() {
     }
     const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, {
       method: "PUT",
+      credentials: "include", // SC-010: auth via HttpOnly cookie
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
     });
@@ -422,9 +483,9 @@ export default function FirstAdminSetupPage() {
     if (!projectId) {
       const res = await fetch(`${API_BASE}/api/v1/projects`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: data.project.name,
@@ -454,9 +515,9 @@ export default function FirstAdminSetupPage() {
 
       const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/sources`, {
         method: "POST",
+        credentials: "include", // SC-010: auth via HttpOnly cookie
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: c.name,
@@ -481,6 +542,8 @@ export default function FirstAdminSetupPage() {
   const onPrimary = async () => {
     setError("");
     if (step === SETUP_STEPS.length - 1) {
+      // Setup finished — drop the saved draft so a future visit starts clean (UI-024).
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       router.push("/dashboard");
       return;
     }
@@ -764,12 +827,28 @@ function StepWorkspace({
           required
         />
       </FormRow>
-      <FormRow label="Password" span={2} hint="Minimum 8 characters. Stored as a bcrypt hash.">
+      <FormRow
+        label="Password"
+        span={2}
+        hint="Minimum 12 characters with upper + lower case, a digit, and a symbol. Stored as a bcrypt hash."
+      >
         <Input
           type="password"
-          placeholder="••••••••"
+          placeholder="••••••••••••"
           value={data.password}
           onChange={(e) => update("password", e.target.value)}
+          required
+        />
+      </FormRow>
+      <FormRow
+        label="Setup token"
+        span={2}
+        hint="Printed to the backend logs on first boot (SETUP_TOKEN). Required to provision the first admin."
+      >
+        <Input
+          placeholder="paste the X-Setup-Token value from the backend logs"
+          value={data.setup_token}
+          onChange={(e) => update("setup_token", e.target.value)}
           required
         />
       </FormRow>
@@ -1192,7 +1271,7 @@ function StepProject({
             placeholder="Migrate the GL_LEDGER, GL_TRANS, GL_RECON tables from Oracle production to Snowflake. Preserve audit columns. Run nightly delta until cutover."
             value={p.brief}
             onChange={(e) => patch({ brief: e.target.value })}
-            className="w-full px-3 py-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] font-mono text-ink outline-none resize-y focus-ring"
+            className="w-full px-3 py-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] font-mono text-ink resize-y focus-ring"
           />
         </FormRow>
       </div>
@@ -1346,7 +1425,7 @@ function Input({ className, ...rest }: InputProps) {
     <input
       {...rest}
       className={
-        "w-full h-9 px-3 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink outline-none focus-ring disabled:bg-app-2 disabled:text-ink-4 " +
+        "w-full h-9 px-3 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink focus-ring disabled:bg-app-2 disabled:text-ink-4 " +
         (className ?? "")
       }
     />
@@ -1365,7 +1444,7 @@ function Select({ options, className, ...rest }: SelectProps) {
     <select
       {...rest}
       className={
-        "w-full h-9 px-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink outline-none focus-ring " +
+        "w-full h-9 px-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink focus-ring " +
         (className ?? "")
       }
     >

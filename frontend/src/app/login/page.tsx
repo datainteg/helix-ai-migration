@@ -76,13 +76,12 @@ export default function LoginPage() {
               />
             </div>
             <div>
+              {/* UI-036 — the password-reset flow has no page yet, so we drop the
+                  dead "Forgot?" link rather than advertise an href="#" no-op. */}
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor="password" className="block text-[12.5px] font-medium text-ink-2">
                   Password
                 </label>
-                <Link href="#" className="text-[12px] text-helix-600 hover:underline">
-                  Forgot?
-                </Link>
               </div>
               <input
                 id="password"

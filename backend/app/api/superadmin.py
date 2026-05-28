@@ -1,6 +1,6 @@
 """Super-admin endpoints: manage all orgs, impersonate, global stats."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -19,16 +19,24 @@ from app.api.audit import write_audit
 # asserts the full path is reachable so accidental removal will fail CI.
 router = APIRouter(tags=["superadmin"])
 
+# SC-032: dedicated sentinel org id for the platform-level (super-admin) audit
+# chain. The previous string literal "platform" could collide with a tenant
+# org whose id was the string "platform" (org ids are UUID-typed in the model
+# but several call sites stringify them). A fixed all-zero UUID can never be
+# minted as a real org id, so the super-admin chain is isolated.
+_PLATFORM_AUDIT_ORG_ID = "00000000-0000-0000-0000-000000000000"
+
 
 def _audit_super(db: Session, admin: User, action: str, entity_type: str = "", entity_id: str = "", meta: dict | None = None, request: Request | None = None) -> None:
     """Write an audit log row for every super-admin action.
 
-    Super-admin actions cross org boundaries, so we record them against the
-    sentinel `platform` org bucket. Audit chain integrity is preserved
-    per-bucket so platform-level actions form a separate chain.
+    Super-admin actions cross org boundaries, so we record them against a
+    reserved sentinel org bucket (the all-zero UUID — SC-032). Audit chain
+    integrity is preserved per-bucket so platform-level actions form a
+    separate chain that no tenant can ever share.
     """
     try:
-        write_audit(db, org_id="platform", actor_id=admin.id, action=action,
+        write_audit(db, org_id=_PLATFORM_AUDIT_ORG_ID, actor_id=admin.id, action=action,
                     entity_type=entity_type, entity_id=entity_id, meta=meta, request=request)
     except Exception:
         # Audit must never block the action; failures get logged elsewhere.
@@ -43,10 +51,28 @@ def _require_super_admin(user_id: str = Depends(get_current_user_id), db: Sessio
 
 
 @router.get("/organizations")
-def list_all_orgs(request: Request, admin: User = Depends(_require_super_admin), db: Session = Depends(get_db)):
-    """List all organizations across the platform."""
+def list_all_orgs(
+    request: Request,
+    admin: User = Depends(_require_super_admin),
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List organizations across the platform.
+
+    SC-053: paginated (default 100, max 500) — the prior unbounded `.all()`
+    returned every row (30+ MB / multi-second serialisation at 100k orgs),
+    a DoS-shaped foot-gun. Response stays a bare array (additive change: new
+    `limit`/`offset` query params with backward-compatible defaults).
+    """
     _audit_super(db, admin, "super_list_orgs", request=request)
-    orgs = db.query(Organization).all()
+    orgs = (
+        db.query(Organization)
+        .order_by(Organization.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     # `.isoformat()` produces ISO-8601 ("2026-05-26T14:33:21+00:00"); the
     # previous `str(datetime)` repr lacked the "T" separator and broke
     # Safari's `Date` parser (API-C3).
@@ -104,10 +130,26 @@ def set_org_status(
 
 
 @router.get("/users")
-def list_all_users(request: Request, admin: User = Depends(_require_super_admin), db: Session = Depends(get_db)):
-    """List all users across the platform."""
+def list_all_users(
+    request: Request,
+    admin: User = Depends(_require_super_admin),
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List users across the platform.
+
+    SC-053: paginated (default 100, max 500). Bare-array response preserved;
+    `limit`/`offset` are additive query params with safe defaults.
+    """
     _audit_super(db, admin, "super_list_users", request=request)
-    users = db.query(User).all()
+    users = (
+        db.query(User)
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return [
         {
             "id": u.id,

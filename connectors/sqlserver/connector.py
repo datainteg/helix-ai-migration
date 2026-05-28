@@ -48,8 +48,20 @@ class SQLServerConnector(BaseConnector):
         self._engine = None
 
     def _build_connection_url(self) -> str:
+        """Build the pyodbc/ODBC URL.
+
+        SC-015: when the admission layer pinned a pre-resolved, validated public
+        IP into ``host_ip``, connect to that IP directly so the ODBC driver does
+        not re-resolve the hostname (closing the DNS-rebind window between
+        admission and connect). The real hostname is preserved for TLS cert
+        verification via the ODBC ``HostNameInCertificate`` keyword so
+        ``Encrypt=yes`` (without TrustServerCertificate) still validates the
+        certificate name.
+        """
         cfg = self.config
-        host = cfg.get("host", "localhost")
+        real_host = cfg.get("host", "localhost")
+        pinned_ip = cfg.get("host_ip") or cfg.get("hostaddr")
+        host = pinned_ip or real_host
         port = cfg.get("port", 1433)
         database = cfg.get("database", "master")
         username = cfg.get("username", "sa")
@@ -58,6 +70,9 @@ class SQLServerConnector(BaseConnector):
         encrypt = "yes" if cfg.get("encrypt", True) else "no"
         trust_cert = "yes" if cfg.get("trust_server_certificate", False) else "no"
         params = f"driver={quote_plus(driver)};Encrypt={encrypt};TrustServerCertificate={trust_cert}"
+        if pinned_ip and real_host and real_host != pinned_ip and trust_cert == "no":
+            # Match the cert against the DNS name even though we dialed the IP.
+            params += f";HostNameInCertificate={quote_plus(real_host)}"
         return f"mssql+pyodbc://{quote_plus(username)}:{quote_plus(password)}@{host}:{port}/{database}?{params}"
 
     def _get_engine(self):

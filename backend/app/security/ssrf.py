@@ -37,6 +37,10 @@ _DEV_ALLOWED_SCHEMES = ("http", "https")
 
 
 def _is_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # SC-017: IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) must be checked
+    # against the embedded v4 address — the v6 wrapper itself is "global".
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
     return (
         ip.is_loopback
         or ip.is_link_local
@@ -45,6 +49,36 @@ def _is_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_unspecified
         or ip.is_reserved
     )
+
+
+def _parse_literal_ip(host: str):
+    """SC-017: return an ip_address if `host` is a literal IP in any form.
+
+    Handles:
+      * dotted-quad / standard IPv6  (ipaddress.ip_address handles directly)
+      * decimal-encoded IPv4         (e.g. "2852039166" → 169.254.169.254)
+      * IPv6 with surrounding brackets — urlparse already strips them, but be
+        defensive in case a raw value is passed through.
+
+    Returns None when `host` is a DNS name (to be resolved by the caller).
+    """
+    if not host:
+        return None
+    candidate = host
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    # Try the standard textual form first (covers dotted-quad + IPv6).
+    try:
+        return ipaddress.ip_address(candidate)
+    except ValueError:
+        pass
+    # Purely-numeric host → treat as a 32-bit (or larger) integer IP.
+    if candidate.isdigit():
+        try:
+            return ipaddress.ip_address(int(candidate))
+        except (ValueError, ipaddress.AddressValueError):
+            return None
+    return None
 
 
 def validate_external_url(url: str) -> None:
@@ -66,6 +100,19 @@ def validate_external_url(url: str) -> None:
         raise SSRFViolation("URL must include a host")
     if host in _FORBIDDEN_HOSTS:
         raise SSRFViolation(f"Host {host!r} is on the SSRF denylist")
+
+    # SC-017: handle literal IPs BEFORE the DNS path. urlparse(...).hostname
+    # returns the raw literal for `http://2852039166/` (decimal IMDS) and for
+    # `http://[::1]/` (IPv6 brackets stripped to `::1`). getaddrinfo may or
+    # may not normalise these, so we check them directly with no DNS step.
+    literal_ip = _parse_literal_ip(host)
+    if literal_ip is not None:
+        if _is_forbidden_ip(literal_ip):
+            raise SSRFViolation(
+                f"Host {host!r} is a literal address in a forbidden range ({literal_ip})"
+            )
+        # Public literal IP — no hostname to resolve, admission passes.
+        return
 
     # Resolve every A/AAAA record. Reject if any address is private/loopback.
     try:

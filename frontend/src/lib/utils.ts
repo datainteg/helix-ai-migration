@@ -24,6 +24,27 @@ export const formatTime = (iso: string): string => {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 };
 
+/**
+ * Centralised relative-time formatting (UI-040 / UI-044). Returns a compact
+ * English string like "just now", "5m ago", "3h ago", "2d ago", falling back
+ * to an absolute date for anything older than a week. Pages previously rolled
+ * their own inline variants (e.g. projects/page.tsx) — use this instead.
+ */
+export const formatRelative = (iso: string): string => {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return formatDate(iso);
+};
+
 export const initials = (name: string): string => {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();

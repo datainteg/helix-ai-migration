@@ -24,12 +24,12 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/audit-logs`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/audit-logs`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setLogs)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const actionLabel = (action: string) =>
     action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -82,7 +82,7 @@ export default function AuditLogsPage() {
                   <td className="px-4 py-3 font-mono text-[12px] text-ink-3">{formatDate(log.created_at)} · {formatTime(log.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <Avatar name={log.actor || "System"} size="sm" />
+                      <Avatar name={log.actor || "System"} size={20} />
                       <span className="text-ink-2">{log.actor || "System"}</span>
                     </div>
                   </td>

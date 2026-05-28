@@ -152,10 +152,10 @@ class TestExcelConnector:
 class TestConnectorAPIClient:
     def test_registry_endpoint_returns_connectors(self, client):
         client.post("/api/v1/auth/first-admin", json={
-            "email": "conn@t.com", "name": "C", "password": "Test123!",
+            "email": "conn@t.com", "name": "C", "password": "TestPass123!",
             "organization_name": "O", "organization_slug": "o",
         })
-        login = client.post("/api/v1/auth/login", json={"email": "conn@t.com", "password": "Test123!"})
+        login = client.post("/api/v1/auth/login", json={"email": "conn@t.com", "password": "TestPass123!"})
         token = login.json()["access_token"]
         h = {"Authorization": f"Bearer {token}"}
 
@@ -166,10 +166,10 @@ class TestConnectorAPIClient:
 
     def test_test_connection_endpoint(self, client):
         client.post("/api/v1/auth/first-admin", json={
-            "email": "tc@t.com", "name": "T", "password": "Test123!",
+            "email": "tc@t.com", "name": "T", "password": "TestPass123!",
             "organization_name": "O", "organization_slug": "o",
         })
-        login = client.post("/api/v1/auth/login", json={"email": "tc@t.com", "password": "Test123!"})
+        login = client.post("/api/v1/auth/login", json={"email": "tc@t.com", "password": "TestPass123!"})
         token = login.json()["access_token"]
         h = {"Authorization": f"Bearer {token}"}
 

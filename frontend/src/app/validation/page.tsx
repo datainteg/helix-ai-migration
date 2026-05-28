@@ -29,6 +29,7 @@ import {
   Button,
   Card,
   Chip,
+  EmptyState,
   StatusBadge,
   Tabs,
   DemoBanner,
@@ -113,9 +114,9 @@ export default function ValidationPage() {
   const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
-    if (!token) return;
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/projects?limit=1`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/v1/projects?limit=1`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: unknown[]) => { if (!cancelled) setHasProjects(rows.length > 0); })
       .catch((e: unknown) => { if (!cancelled) { setHasProjects(false); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load projects"); } });
@@ -181,11 +182,13 @@ export default function ValidationPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
           <Card padding="lg">
             <div className="eyebrow">{showRealHero ? "OVERALL PASS RATE" : "OVERALL PASS RATE · SAMPLE"}</div>
-            <div className="flex items-baseline gap-3 mt-2">
-              <span className="font-mono tabular-nums text-[56px] font-medium tracking-[-0.03em] leading-none">
+            <div className="flex items-baseline gap-3 mt-2 min-w-0">
+              {/* UI-031 — step the hero number down on narrow viewports so it
+                  doesn't overflow its squeezed 1fr column in the grid. */}
+              <span className="font-mono tabular-nums text-[40px] sm:text-[48px] lg:text-[56px] font-medium tracking-[-0.03em] leading-none truncate">
                 {showRealHero ? (realPassRate ?? 0).toFixed(1) : "92.4"}
               </span>
-              <span className="text-[28px] text-ink-3 font-normal">%</span>
+              <span className="text-[24px] sm:text-[28px] text-ink-3 font-normal">%</span>
               {showRealHero ? (
                 <span className="ml-auto text-[12px] font-mono text-ink-3">org-wide</span>
               ) : (
@@ -215,6 +218,13 @@ export default function ValidationPage() {
             eyebrow="LAST RUN WINDOW"
             description="Pass / fail / warning breakdown per validation category"
           >
+            {hasProjects === true ? (
+              <EmptyState
+                title="No category data yet"
+                description="Run a validation rule to populate the per-category breakdown."
+              />
+            ) : (
+            <>
             <div className="flex flex-col gap-[9px] py-1">
               {TYPE_BREAKDOWN.map((row) => {
                 const tot = row.p + row.w + row.f;
@@ -248,6 +258,8 @@ export default function ValidationPage() {
                 <span className="w-2 h-2 rounded-sm" style={{ background: "var(--con-err)" }} /> Failed
               </span>
             </div>
+            </>
+            )}
           </Card>
         </div>
 
@@ -292,6 +304,17 @@ export default function ValidationPage() {
               ]}
             />
           </div>
+          {hasProjects === true ? (
+            <EmptyState
+              title="No validation rules yet"
+              description="Once you attach validation rules to a project, runs and their pass/fail results will land here."
+              action={
+                <Button variant="primary">
+                  <Plus className="h-3.5 w-3.5" /> Create rule
+                </Button>
+              }
+            />
+          ) : (
           <table className="w-full border-collapse text-[12.5px]">
             <thead>
               <tr className="bg-surface-hi">
@@ -369,6 +392,7 @@ export default function ValidationPage() {
               })}
             </tbody>
           </table>
+          )}
         </Card>
 
         {/* Score trend */}

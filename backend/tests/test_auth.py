@@ -30,7 +30,7 @@ def test_auth_flow(client):
     resp = client.post("/api/v1/auth/first-admin", json={
         "email": "admin@helix.datainteg.io",
         "name": "Admin User",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
         "organization_name": "Acme Corp",
         "organization_slug": "acme-corp",
     })
@@ -43,7 +43,7 @@ def test_auth_flow(client):
     resp = client.post("/api/v1/auth/first-admin", json={
         "email": "admin2@helix.datainteg.io",
         "name": "Admin 2",
-        "password": "Secure456!",
+        "password": "SecurePass456!",
         "organization_name": "Another Org",
         "organization_slug": "another-org",
     })
@@ -53,7 +53,7 @@ def test_auth_flow(client):
     # 3. Login with correct password
     resp = client.post("/api/v1/auth/login", json={
         "email": "admin@helix.datainteg.io",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
     })
     assert resp.status_code == 200
     token = resp.json()["access_token"]
@@ -81,13 +81,13 @@ def test_cross_organization_access_is_denied(client, db_session):
     client.post("/api/v1/auth/first-admin", json={
         "email": "org1@helix.datainteg.io",
         "name": "Org One Admin",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
         "organization_name": "Org One",
         "organization_slug": "org-one",
     })
     login = client.post("/api/v1/auth/login", json={
         "email": "org1@helix.datainteg.io",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
     })
     org1_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -134,6 +134,62 @@ def test_cross_organization_access_is_denied(client, db_session):
         "model": "gpt-4.1",
     }, headers=org2_headers)
     assert resp.status_code == 404
+
+
+def test_login_sets_httponly_cookie_and_cookie_auth_works(client):
+    """SC-010: login issues the HttpOnly `helix_token` cookie AND still returns
+    the token in the body; a subsequent request authenticates via the cookie
+    alone (no Authorization header)."""
+    client.post("/api/v1/auth/first-admin", json={
+        "email": "cookie@helix.datainteg.io",
+        "name": "Cookie Admin",
+        "password": "SecurePass123!",
+        "organization_name": "Cookie Org",
+        "organization_slug": "cookie-org",
+    })
+
+    resp = client.post("/api/v1/auth/login", json={
+        "email": "cookie@helix.datainteg.io",
+        "password": "SecurePass123!",
+    })
+    assert resp.status_code == 200
+    # Body still carries the token for SDK/CLI consumers.
+    assert "access_token" in resp.json()
+    assert resp.json()["token_type"] == "bearer"
+
+    # Cookie was set, HttpOnly, with path=/.
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "helix_token=" in set_cookie
+    assert "httponly" in set_cookie.lower()
+    assert "samesite=strict" in set_cookie.lower()
+
+    # The TestClient persists the cookie on its jar; a request with NO
+    # Authorization header must now authenticate via that cookie.
+    assert "helix_token" in client.cookies
+    me = client.get("/api/v1/auth/me")  # no Authorization header
+    assert me.status_code == 200
+    assert me.json()["email"] == "cookie@helix.datainteg.io"
+
+
+def test_logout_clears_cookie(client):
+    """SC-010: logout deletes the HttpOnly cookie (and revokes the token)."""
+    client.post("/api/v1/auth/first-admin", json={
+        "email": "logout@helix.datainteg.io",
+        "name": "Logout Admin",
+        "password": "SecurePass123!",
+        "organization_name": "Logout Org",
+        "organization_slug": "logout-org",
+    })
+    client.post("/api/v1/auth/login", json={
+        "email": "logout@helix.datainteg.io",
+        "password": "SecurePass123!",
+    })
+    assert "helix_token" in client.cookies
+
+    resp = client.post("/api/v1/auth/logout")  # authenticates via cookie
+    assert resp.status_code == 200
+    # delete_cookie emits a Set-Cookie that expires the cookie.
+    assert "helix_token=" in resp.headers.get("set-cookie", "")
 
 
 def test_basic_rbac_denies_viewer_admin_actions(client, db_session):

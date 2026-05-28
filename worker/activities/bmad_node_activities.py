@@ -24,13 +24,61 @@ Workflow-side concerns:
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 from typing import Any
 
 from temporalio import activity
 
 logger = logging.getLogger(__name__)
+
+
+# M-019: a single module-level ThreadPoolExecutor shared across all activity
+# invocations instead of constructing (and tearing down) a fresh one-worker
+# pool inside every _run_with_heartbeats call. Under load — N concurrent
+# activities each spawning + joining their own pool — the per-call pattern
+# churned threads and added scheduling latency on every BMAD step. The shared
+# pool is sized to the worker's activity concurrency (default 5, matching
+# main.py's WORKER_MAX_CONCURRENT_ACTIVITIES) so every in-flight activity
+# still gets its own worker thread to run the blocking BMAD work in while the
+# activity thread stays awake to heartbeat. A small headroom (+2) covers the
+# brief overlap between an activity completing and the next being scheduled.
+def _pool_max_workers() -> int:
+    try:
+        concurrent = int(os.getenv("WORKER_MAX_CONCURRENT_ACTIVITIES", "5"))
+    except ValueError:
+        concurrent = 5
+    return max(concurrent, 1) + 2
+
+
+_HEARTBEAT_POOL: ThreadPoolExecutor | None = None
+_HEARTBEAT_POOL_LOCK = threading.Lock()
+
+
+def _heartbeat_pool() -> ThreadPoolExecutor:
+    """Lazily build + return the shared heartbeat ThreadPoolExecutor."""
+    global _HEARTBEAT_POOL
+    if _HEARTBEAT_POOL is None:
+        with _HEARTBEAT_POOL_LOCK:
+            if _HEARTBEAT_POOL is None:
+                _HEARTBEAT_POOL = ThreadPoolExecutor(
+                    max_workers=_pool_max_workers(),
+                    thread_name_prefix="helix-act",
+                )
+    return _HEARTBEAT_POOL
+
+
+@atexit.register
+def _shutdown_heartbeat_pool() -> None:
+    """Best-effort drain of the shared pool on interpreter exit."""
+    global _HEARTBEAT_POOL
+    if _HEARTBEAT_POOL is not None:
+        _HEARTBEAT_POOL.shutdown(wait=False)
+        _HEARTBEAT_POOL = None
 
 
 def _execute(
@@ -114,23 +162,22 @@ def _run_with_heartbeats(fn, detail_prefix: str):
     wakes up every interval to emit a heartbeat. Without this an LLM call
     that takes >60s exceeds Temporal's default activity heartbeat_timeout
     and the entire workflow step fails + retries.
-    """
-    import threading
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 
+    M-019: submits to the module-level shared `_HEARTBEAT_POOL` rather than
+    spinning up + tearing down a one-worker pool on every call.
+    """
     if not activity.in_activity():
         # Outside Temporal (unit tests, manual run) — just call directly.
         return fn()
 
     seq = 0
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="helix-act") as pool:
-        future = pool.submit(fn)
-        while True:
-            try:
-                return future.result(timeout=HEARTBEAT_INTERVAL_SEC)
-            except FutTimeout:
-                seq += 1
-                _safe_heartbeat(f"{detail_prefix}#{seq}")
+    future = _heartbeat_pool().submit(fn)
+    while True:
+        try:
+            return future.result(timeout=HEARTBEAT_INTERVAL_SEC)
+        except FutTimeout:
+            seq += 1
+            _safe_heartbeat(f"{detail_prefix}#{seq}")
 
 
 def _safe_heartbeat(detail: str) -> None:
@@ -413,5 +460,82 @@ def persist_workflow_step_activity(step_data: dict[str, Any]) -> None:
                 error_message=error_message,
             ))
         db.commit()
+    finally:
+        db.close()
+
+
+@activity.defn
+def persist_workflow_terminal_state_activity(state_data: dict[str, Any]) -> None:
+    """Reconcile the WorkflowRun row's terminal status (C-002).
+
+    Closes the gap where `_persist_started_workflow` writes ``status="started"``
+    and nothing ever flips that row to ``completed/failed/rejected/expired``
+    once Temporal finishes. The SSE stream in agent_workflows.py polls for
+    these terminal statuses; without this activity the stream just times out
+    at 120s on every successful run and cost rollups by status are wrong.
+
+    Called from BMADPerNodeWorkflow.run at every exit point (normal end,
+    approval rejection, approval timeout, unhandled exception).
+
+    ``state_data`` keys:
+      - ``workflow_id`` (str, required): the Temporal workflow_id (matches
+        WorkflowRun.workflow_id, which has a unique index).
+      - ``status`` (str, required): one of ``completed`` / ``failed`` /
+        ``rejected`` / ``expired``.
+      - ``summary`` (dict | None): optional error context (e.g.
+        ``{"error": "<exception repr>"}``) — not persisted today but kept
+        in the signature so a future column add is non-breaking.
+
+    Failure mode: this activity logs and swallows DB errors. Re-raising would
+    cause Temporal to retry the activity indefinitely on a permanent DB
+    failure, which would mask the underlying workflow status. Operators see
+    the orphaned ``started`` row + an ERROR log line and can reconcile
+    manually.
+    """
+    from worker.db.session import SessionLocal
+    from app.models.workflow import WorkflowRun
+
+    workflow_id = state_data.get("workflow_id")
+    status = state_data.get("status")
+    if not workflow_id or not status:
+        logger.error(
+            "persist_workflow_terminal_state_activity called with missing fields: %s",
+            state_data,
+        )
+        return
+
+    db = SessionLocal()
+    try:
+        run = (
+            db.query(WorkflowRun)
+            .filter(WorkflowRun.workflow_id == workflow_id)
+            .first()
+        )
+        if not run:
+            logger.warning(
+                "Terminal-state reconcile skipped — no WorkflowRun row for workflow_id=%s",
+                workflow_id,
+            )
+            return
+        run.status = status
+        db.commit()
+        logger.info(
+            "WorkflowRun %s reconciled to status=%s (summary=%s)",
+            workflow_id,
+            status,
+            state_data.get("summary"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Swallow + log — see docstring "Failure mode" note above.
+        logger.exception(
+            "Failed to reconcile WorkflowRun %s to %s: %s",
+            workflow_id,
+            status,
+            exc,
+        )
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
     finally:
         db.close()

@@ -113,14 +113,16 @@ function ProfileSection({
   const dirty = name.trim() !== "" && name.trim() !== (user?.name ?? "");
 
   const save = async () => {
-    if (!token || !dirty) return;
+    if (!dirty) return;
     setSaving(true);
     setErr("");
     setSavedAt(null);
     try {
+      // SC-010: auth via the HttpOnly cookie (credentials:"include").
       const res = await fetch(`${API_BASE}/api/v1/users/me`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
       });
       if (!res.ok) {

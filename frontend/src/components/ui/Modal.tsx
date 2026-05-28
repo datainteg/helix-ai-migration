@@ -79,7 +79,7 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={descId}
         tabIndex={-1}
-        className={`w-full ${WIDTH_CLASS[width]} bg-surface border border-hx rounded-[10px] shadow-xl outline-none`}
+        className={`w-full ${WIDTH_CLASS[width]} max-h-[85vh] overflow-y-auto bg-surface border border-hx rounded-[10px] shadow-xl outline-none`}
       >
         {(title || description) && (
           <div className="px-5 pt-4 pb-3 border-b border-hx">

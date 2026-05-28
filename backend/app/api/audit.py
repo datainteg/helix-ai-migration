@@ -21,19 +21,49 @@ logger = logging.getLogger(__name__)
 _NON_PG_WARNED = False  # one-shot warning when running on non-Postgres backends
 
 
+def _strip_control_chars(value: str | None) -> str | None:
+    """SC-031: drop CR / LF / NUL from any string written to an AuditLog
+    column. A project member submitting ``notes="\\n2025-01-01 ADMIN
+    admin_login\\n"`` could otherwise forge fake timeline rows in the CSV /
+    PDF export. We strip the injection characters at write time so the stored
+    value can never carry a line break or NUL into a downstream renderer.
+    Other characters round-trip unchanged.
+    """
+    if value is None:
+        return None
+    return value.replace("\r", "").replace("\n", "").replace("\x00", "")
+
+
 def _compute_entry_hash(log: AuditLog, prev_hash: str | None) -> str:
     """HMAC-SHA256 over canonical entry fields chained to previous hash.
 
     Uses AUDIT_HMAC_KEY (independent from JWT_SECRET_KEY) so JWT rotation does
     not invalidate historical chain verification.
+
+    SC-012: ``impersonator_id`` is included in the canonical payload so
+    impersonation attribution is HMAC-protected. Older rows written
+    before the column existed hash with ``"impersonator": None``; the
+    column defaults to NULL on existing rows so re-verification still
+    matches.
+
+    SC-031: ``event_metadata`` is now covered by the chain via
+    ``sha256(event_metadata)``. Previously the HMAC excluded it, so an
+    attacker could tamper with the (attacker-controlled) JSON blob without
+    breaking the chain. Rows with no metadata hash ``"meta": None`` so
+    historical re-verification still matches.
     """
+    meta_digest = None
+    if log.event_metadata is not None:
+        meta_digest = hashlib.sha256(log.event_metadata.encode("utf-8")).hexdigest()
     payload = json.dumps({
         "id": log.id,
         "org": log.organization_id,
         "actor": log.actor_id,
+        "impersonator": getattr(log, "impersonator_id", None),
         "action": log.action,
         "entity_type": log.entity_type,
         "entity_id": log.entity_id,
+        "meta": meta_digest,
         "prev": prev_hash or "GENESIS",
     }, sort_keys=True)
     return hmac.new(settings.AUDIT_HMAC_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
@@ -54,8 +84,16 @@ def write_audit(
     entity_id: str = "",
     meta: dict = None,
     request: Request = None,
+    impersonator_id: str | None = None,
 ):
     """Append an audit row chained off the org's last entry_hash.
+
+    SC-012: when called from inside an impersonation session, pass
+    ``impersonator_id`` so the row records both the target user (as
+    ``actor_id``) and the super-admin who issued the impersonation
+    token. Callers that don't pass it explicitly inherit it from
+    ``request.state.impersonator_id`` which the auth middleware sets
+    when the JWT carries an ``imp_by`` claim.
 
     Concurrency model:
       1. Acquire pg_advisory_xact_lock keyed by sha256(org_id) BEFORE
@@ -100,14 +138,36 @@ def write_audit(
     )
     prev_hash = last.entry_hash if last else None
 
+    # SC-012: fall back to request.state.impersonator_id when the caller
+    # didn't pass it explicitly. The auth dependency sets that attribute
+    # whenever the bearer's `imp_by` claim is present so every audit row
+    # written during an impersonation session is automatically attributed.
+    eff_impersonator = impersonator_id
+    if eff_impersonator is None and request is not None:
+        try:
+            eff_impersonator = getattr(request.state, "impersonator_id", None)
+        except Exception:
+            eff_impersonator = None
+
+    # SC-051: record the real client IP (rightmost-trusted X-Forwarded-For
+    # entry when behind a configured proxy) instead of the proxy loopback.
+    ip_address = None
+    if request is not None:
+        try:
+            from app.utils.client_ip import get_client_ip
+            ip_address = get_client_ip(request)
+        except Exception:  # noqa: BLE001 — never block an audit write on this
+            ip_address = request.client.host if request.client else None
+
     log = AuditLog(
         organization_id=org_id,
-        actor_id=actor_id,
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
+        actor_id=_strip_control_chars(actor_id),
+        impersonator_id=_strip_control_chars(eff_impersonator),
+        action=_strip_control_chars(action),
+        entity_type=_strip_control_chars(entity_type),
+        entity_id=_strip_control_chars(entity_id),
         event_metadata=json.dumps(meta) if meta else None,
-        ip_address=request.client.host if request and request.client else None,
+        ip_address=ip_address,
     )
     db.add(log)
     db.flush()

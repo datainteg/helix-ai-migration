@@ -27,7 +27,11 @@ const SYNC_DEBOUNCE_MS = 500;
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const state = useTweaks();
-  const { token } = useAuth();
+  // SC-010: the token now lives in an HttpOnly cookie JS can't read; use the
+  // server-derived `user` as the "is authenticated" signal and send the cookie
+  // via credentials:"include" on the preference fetches.
+  const { user } = useAuth();
+  const authed = !!user;
   const hydratedRef = useRef(false);
   const lastSyncedRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,10 +56,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // One-shot hydrate from server on first authenticated render.
   useEffect(() => {
-    if (!token || hydratedRef.current) return;
+    if (!authed || hydratedRef.current) return;
     hydratedRef.current = true;
     fetch(`${API_BASE}/api/v1/users/me/preferences`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((prefs: Partial<TweaksSnapshot> | null) => {
@@ -66,11 +70,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => {});
-  }, [token]);
+  }, [authed]);
 
   // Debounced sync of local changes to the server.
   useEffect(() => {
-    if (!token || !hydratedRef.current) return;
+    if (!authed || !hydratedRef.current) return;
     const snap = snapshotTweaks(state);
     const serialized = JSON.stringify(snap);
     if (serialized === lastSyncedRef.current) return;
@@ -80,9 +84,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       lastSyncedRef.current = serialized;
       fetch(`${API_BASE}/api/v1/users/me/preferences`, {
         method: "PATCH",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ preferences: snap }),
       }).catch(() => {});
@@ -91,15 +95,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [state, token]);
+  }, [state, authed]);
 
   // Reset hydration flag on logout so re-login re-hydrates.
   useEffect(() => {
-    if (!token) {
+    if (!authed) {
       hydratedRef.current = false;
       lastSyncedRef.current = "";
     }
-  }, [token]);
+  }, [authed]);
 
   return <>{children}</>;
 }

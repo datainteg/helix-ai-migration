@@ -33,7 +33,7 @@ def _admin_token(client):
     res = client.post("/api/v1/auth/first-admin", json={
         "email": "iso@example.com",
         "name": "ISO Admin",
-        "password": "IsoTest123!",
+        "password": "IsoTestPass123!",
         "organization_name": "ISO Org",
         "organization_slug": f"iso-{uuid.uuid4().hex[:8]}",
     })

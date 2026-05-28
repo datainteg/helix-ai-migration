@@ -87,13 +87,20 @@ _SENSITIVE_KEYS = {
 
 
 def _mask_value(key: str, value) -> str:
-    """Return masked representation of a config value for safe display."""
+    """Return masked representation of a config value for safe display.
+
+    SC-039: sensitive keys are masked to a fixed ``"***"`` regardless of
+    length. The previous ``f"***{value[-4:]}"`` leaked the last 4 characters
+    of every stored password / API key through the ``config_masked`` field,
+    which is returned by ``GET /projects/{id}/sources`` to anyone with
+    ``project:read`` (i.e. every role). Four trailing characters of a short
+    or low-entropy secret materially shrink the brute-force space, so we no
+    longer reveal them.
+    """
     if not isinstance(value, str):
         return str(value)
     if key.lower() in _SENSITIVE_KEYS or any(s in key.lower() for s in _SENSITIVE_KEYS):
-        if len(value) <= 4:
-            return "***"
-        return f"***{value[-4:]}"
+        return "***"
     return value
 
 

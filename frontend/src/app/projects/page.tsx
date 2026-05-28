@@ -15,7 +15,6 @@ import {
   Filter,
   MoreHorizontal,
   Plus,
-  Search,
   ArrowUpRight,
   ArrowRight,
 } from "lucide-react";
@@ -26,14 +25,16 @@ import {
   Button,
   Card,
   EmptyState,
-  LoadingState,
   MetricCell,
   ProgressBar,
+  SearchInput,
+  SkeletonTable,
   StatusBadge,
   Tabs,
 } from "@/components/ui";
 import { AppIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
+import { formatRelative as formatRelativeUtil } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -64,12 +65,9 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     fetch(`${API_BASE}/api/v1/projects`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: unknown) => {
@@ -129,7 +127,7 @@ export default function ProjectsPage() {
     >
       <div className="flex flex-col gap-4">
         {/* Summary cells */}
-        <div className="grid grid-cols-6 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell label="TOTAL"     value={counts.all}       hint="All time" />
           <MetricCell label="RUNNING"   value={counts.running}   hint="In progress"     accent="var(--con-info)" />
           <MetricCell label="AWAITING"  value={counts.awaiting}  hint="Human review"    accent="var(--con-warn)" />
@@ -138,40 +136,43 @@ export default function ProjectsPage() {
           <MetricCell label="DRAFT"     value={counts.draft}     hint="Not started"     accent="var(--con-ink-3)" />
         </div>
 
-        {/* Filter bar */}
-        <div className="flex items-center gap-3 px-3.5 py-2 bg-surface border border-hx rounded-[10px]">
-          <label className="relative max-w-[400px] flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-ink-4" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects, owners, or IDs…"
-              className="w-full h-8 rounded-[7px] border border-hx bg-surface pl-8 pr-3 text-[12.5px] focus-ring"
-            />
-          </label>
-          <Tabs
-            value={filter}
-            onChange={(v) => setFilter(v as Filter)}
-            tabs={[
-              { id: "all",       label: "All",       count: counts.all },
-              { id: "running",   label: "Running",   count: counts.running },
-              { id: "awaiting",  label: "Awaiting",  count: counts.awaiting },
-              { id: "completed", label: "Completed", count: counts.completed },
-              { id: "failed",    label: "Failed",    count: counts.failed },
-              { id: "draft",     label: "Draft",     count: counts.draft },
-            ]}
+        {/* Filter bar — wraps below ~900px so controls never clip (UI-028); the
+            6-tab strip scrolls horizontally rather than overflowing. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2 bg-surface border border-hx rounded-[10px]">
+          <SearchInput
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects, owners, or IDs…"
+            ariaLabel="Search projects"
+            wrapperClassName="max-w-[400px] flex-1 min-w-[180px]"
           />
+          <div className="max-w-full overflow-x-auto">
+            <Tabs
+              value={filter}
+              onChange={(v) => setFilter(v as Filter)}
+              tabs={[
+                { id: "all",       label: "All",       count: counts.all },
+                { id: "running",   label: "Running",   count: counts.running },
+                { id: "awaiting",  label: "Awaiting",  count: counts.awaiting },
+                { id: "completed", label: "Completed", count: counts.completed },
+                { id: "failed",    label: "Failed",    count: counts.failed },
+                { id: "draft",     label: "Draft",     count: counts.draft },
+              ]}
+            />
+          </div>
           <div className="flex-1" />
           <Button variant="outline" size="sm">
             <Filter className="h-3.5 w-3.5" /> Filters
           </Button>
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" aria-label="More actions">
             <MoreHorizontal className="h-3.5 w-3.5" />
           </Button>
         </div>
 
         {loading ? (
-          <LoadingState />
+          // UI-046 — shaped skeleton rows reserve the list's footprint on first
+          // paint instead of a centered spinner, cutting layout shift.
+          <SkeletonTable rows={8} />
         ) : filtered.length === 0 ? (
           <EmptyState
             title={projects.length === 0 ? "No projects yet" : "No matches"}
@@ -248,7 +249,7 @@ export default function ProjectsPage() {
                           <Link href={`/projects/${p.id}`} className="block max-w-[240px]">
                             <div className="flex flex-col gap-0.5">
                               <span className="font-medium text-ink truncate">{p.name}</span>
-                              <span className="font-mono text-[10.5px] text-ink-4">
+                              <span className="font-mono text-[11px] text-ink-3">
                                 {p.id.slice(0, 8)} · {envs}
                               </span>
                             </div>
@@ -287,7 +288,11 @@ export default function ProjectsPage() {
                           <StatusBadge status={p.status} />
                         </td>
                         <td className="px-3 py-3">
-                          <Link href={`/projects/${p.id}`} className="text-ink-4 hover:text-ink-2">
+                          <Link
+                            href={`/projects/${p.id}`}
+                            aria-label={`Open ${p.name}`}
+                            className="inline-flex items-center justify-center h-9 w-9 -my-2 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring"
+                          >
                             <ArrowUpRight className="h-3.5 w-3.5" />
                           </Link>
                         </td>
@@ -341,17 +346,9 @@ function SourceTarget({ source, target }: { source?: string; target?: string }) 
   );
 }
 
+// UI-044 — delegate to the centralised formatter in lib/utils; keep only the
+// undefined→em-dash guard this table needs.
 function formatRelative(iso?: string): string {
   if (!iso) return "—";
-  const d = new Date(iso).getTime();
-  if (Number.isNaN(d)) return "—";
-  const diff = Date.now() - d;
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const days = Math.floor(h / 24);
-  return `${days}d ago`;
+  return formatRelativeUtil(iso) || "—";
 }

@@ -87,6 +87,12 @@ def api_list_org_artifacts(
 
 @router.post("/projects/{project_id}/artifacts/upload")
 async def upload_artifact(request: Request, project_id: str, file: UploadFile = File(...), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    # SC-041: the signature accepts exactly ONE `file` (a single UploadFile, not
+    # `list[UploadFile]`), so a multipart body with thousands of small files
+    # cannot fan out into thousands of DB rows / storage writes here — FastAPI
+    # binds only the first matching part. The total-body cap in main.py's
+    # enforce_body_size middleware bounds the request size on top of that. If a
+    # batch-upload endpoint is ever added, cap its file count explicitly.
     org_id = resolve_active_org_id(db, user_id)
     ensure_project_access(db, org_id, project_id)
 

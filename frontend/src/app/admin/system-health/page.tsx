@@ -22,12 +22,12 @@ export default function SystemHealthPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/system/health`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (data?.components) setComponents(data.components); })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const data: ComponentStatus[] = components;
 
@@ -51,6 +51,7 @@ export default function SystemHealthPage() {
         <LoadingState label="Checking system health…" />
       ) : (
         <Card bodyClassName="p-0">
+          <div className="overflow-x-auto table-scroll">
           <table className="w-full text-[13px] border-t border-hx">
             <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
               <tr>
@@ -76,6 +77,7 @@ export default function SystemHealthPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
     </AdminShell>

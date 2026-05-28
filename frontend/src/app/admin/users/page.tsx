@@ -25,13 +25,13 @@ export default function UsersPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    fetch(`${API_BASE}/api/v1/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    fetch(`${API_BASE}/api/v1/admin/users`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setUsers)
       .catch(() => setError("Failed to load users"))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   return (
     <AdminShell
@@ -46,6 +46,7 @@ export default function UsersPage() {
         <EmptyState title="No users yet" description="Invite teammates to start collaborating on migrations." />
       ) : (
         <Card bodyClassName="p-0">
+          <div className="overflow-x-auto table-scroll">
           <table className="w-full text-[13px] border-t border-hx">
             <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
               <tr>
@@ -61,7 +62,7 @@ export default function UsersPage() {
                 <tr key={u.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <Avatar name={u.name || u.email} size="md" />
+                      <Avatar name={u.name || u.email} size={24} />
                       <div>
                         <p className="font-medium text-ink">{u.name || u.email}</p>
                         <p className="text-[11.5px] text-ink-3 flex items-center gap-1 font-mono"><Mail className="h-3 w-3" />{u.email}</p>
@@ -78,6 +79,7 @@ export default function UsersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
     </AdminShell>

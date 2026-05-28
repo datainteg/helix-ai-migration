@@ -55,8 +55,16 @@ class MySQLConnector(BaseConnector):
         self._engine = None
 
     def _build_connection_url(self) -> str:
+        """Build the PyMySQL URL.
+
+        SC-015: when the admission layer pre-resolved + validated a public IP
+        into ``host_ip``, connect to that IP directly (so libmysqlclient does
+        NOT perform a second DNS lookup that a rebind attacker could swing to a
+        private address). The original hostname is preserved for TLS SNI +
+        certificate name matching via ``_connect_args``.
+        """
         cfg = self.config
-        host = cfg.get("host", "localhost")
+        host = cfg.get("host_ip") or cfg.get("hostaddr") or cfg.get("host", "localhost")
         port = cfg.get("port", 3306)
         database = cfg.get("database", "")
         username = cfg.get("username", "root")
@@ -67,12 +75,32 @@ class MySQLConnector(BaseConnector):
             url += "?ssl_disabled=false"
         return url
 
+    def _connect_args(self) -> dict:
+        """PyMySQL connect args. Pins TLS verification to the real hostname.
+
+        SC-015: when we connected by pre-resolved IP (see _build_connection_url)
+        the URL host is the IP, so TLS cert verification would otherwise match
+        against the IP. Re-point the TLS server name at the original hostname so
+        ``verify-identity`` still validates the certificate's CN/SAN.
+        """
+        args: dict = {"connect_timeout": 10}
+        cfg = self.config
+        pinned_ip = cfg.get("host_ip") or cfg.get("hostaddr")
+        real_host = cfg.get("host")
+        if pinned_ip and real_host and not cfg.get("ssl_disabled", False):
+            # PyMySQL accepts an `ssl` dict; server_hostname drives SNI + the
+            # name checked against the cert when verification is enabled.
+            ssl_opts = dict(cfg.get("ssl") or {})
+            ssl_opts.setdefault("server_hostname", real_host)
+            args["ssl"] = ssl_opts
+        return args
+
     def _get_engine(self):
         from sqlalchemy import create_engine
         if self._engine is None:
             self._engine = create_engine(
                 self._build_connection_url(),
-                connect_args={"connect_timeout": 10},
+                connect_args=self._connect_args(),
                 pool_pre_ping=True,
             )
         return self._engine

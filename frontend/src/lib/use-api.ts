@@ -15,10 +15,12 @@ interface ApiClient {
  * Automatically includes JWT token from AuthContext.
  */
 export function useApi(): ApiClient {
-  const { token } = useAuth();
+  // SC-010: auth now rides on the HttpOnly `helix_token` cookie sent via
+  // `credentials: "include"`, not an Authorization header. We no longer read a
+  // token from the context (JS cannot read the cookie).
+  useAuth(); // keep the provider dependency / re-render on auth change
 
   const authHeaders = (extra?: Record<string, string>) => ({
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   });
 
@@ -27,16 +29,22 @@ export function useApi(): ApiClient {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
+    // 204 No Content (e.g. DELETE) has an empty body — calling .json() would
+    // throw "Unexpected end of JSON input". Return undefined for empty bodies.
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
     return res.json();
   };
 
   return {
     get: <T>(path: string) =>
-      fetch(`${API_BASE}${path}`, { headers: authHeaders() }).then(handleResponse<T>),
+      fetch(`${API_BASE}${path}`, { credentials: "include", headers: authHeaders() }).then(handleResponse<T>),
 
     post: <T>(path: string, body?: unknown) =>
       fetch(`${API_BASE}${path}`, {
         method: "POST",
+        credentials: "include",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: body ? JSON.stringify(body) : undefined,
       }).then(handleResponse<T>),
@@ -44,6 +52,7 @@ export function useApi(): ApiClient {
     upload: <T>(path: string, formData: FormData) =>
       fetch(`${API_BASE}${path}`, {
         method: "POST",
+        credentials: "include",
         headers: authHeaders(),
         body: formData,
       }).then(handleResponse<T>),

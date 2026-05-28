@@ -112,6 +112,24 @@ def _iso(value) -> Optional[str]:
     return value.isoformat() if value else None
 
 
+def _load_diff_summary(raw) -> Optional[dict]:
+    """C-004: tolerant read of the Text `diff_summary` column.
+
+    Canonical storage is a JSON string (column type is Text). Returns a dict
+    or None — never raises on a malformed/legacy row, so a single bad row
+    can't 500 the list endpoint.
+    """
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, dict):  # JSONB or direct-dict writer
+        return raw
+    try:
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 def _serialize(c: MigrationCutover) -> CutoverResponse:
     """Build the typed CutoverResponse used by every cutover endpoint."""
     return CutoverResponse(
@@ -122,7 +140,7 @@ def _serialize(c: MigrationCutover) -> CutoverResponse:
         target_ref=c.target_ref,
         state=c.state,
         notes=c.notes,
-        diff_summary=json.loads(c.diff_summary) if c.diff_summary else None,
+        diff_summary=_load_diff_summary(c.diff_summary),
         timestamps=CutoverTimestamps(
             bulk=_iso(c.bulk_started_at),
             tail=_iso(c.tail_started_at),

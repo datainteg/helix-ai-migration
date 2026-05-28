@@ -24,6 +24,7 @@ bodies. Persistent-fact globs are resolved against the project root.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -38,6 +39,64 @@ logger = logging.getLogger(__name__)
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_DEFAULT = _THIS_FILE.parents[2]  # agents/runtime/bmad_loader.py -> repo root
+
+# SC-052 — pinned sha256 manifest of the vendored BMAD installer scripts we
+# execute via subprocess. Computed from the scripts at vendoring time. Before
+# running a script we re-hash the on-disk bytes and refuse to execute on
+# mismatch (or for any script not in this manifest), falling back to the
+# in-process tomllib path. This stops a planted/tampered `resolve_config.py`
+# in the BMAD dir from running arbitrary code with the worker's privileges.
+# Override the policy with HELIX_BMAD_SCRIPT_HASH_ENFORCE=warn (log + run) or
+# =off (skip the check) — default is fail-closed (fall back to tomllib).
+# To re-pin after a legitimate BMAD upgrade, recompute:
+#   python -c "import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('_bmad/scripts/resolve_config.py').read_bytes()).hexdigest())"
+_BMAD_SCRIPT_HASHES: dict[str, str] = {
+    "resolve_config.py": "8e326149d9170477ecc21aa2aa2389d8fbaa5d1cd95db2de2ad33029ce8ae528",
+    "resolve_customization.py": "6dbf36a2fea13392426fdbaf4f074b6d9b93488a964d2d1bff2a5c1c3a1d506e",
+}
+
+
+def _script_checksum_ok(script_name: str, script_path: Path) -> bool:
+    """SC-052 — verify a vendored BMAD script matches its pinned sha256.
+
+    Returns True when the script is safe to execute. On mismatch / unknown
+    script the caller should fall back to the in-process tomllib path (we
+    return False) unless the operator relaxed the policy via
+    ``HELIX_BMAD_SCRIPT_HASH_ENFORCE``:
+      - ``off``  → skip the check entirely (return True)
+      - ``warn`` → log a warning on mismatch but still allow execution
+      - default  → fail-closed (return False → fall back to tomllib)
+    """
+    policy = os.getenv("HELIX_BMAD_SCRIPT_HASH_ENFORCE", "").strip().lower()
+    if policy == "off":
+        return True
+
+    expected = _BMAD_SCRIPT_HASHES.get(script_name)
+    if expected is None:
+        logger.warning(
+            "BMAD script %s is not in the pinned-hash manifest — refusing to "
+            "execute it; using on-disk defaults instead.",
+            script_name,
+        )
+        return policy == "warn"
+
+    try:
+        actual = hashlib.sha256(script_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        logger.warning("Could not read BMAD script %s for checksum: %s", script_path, exc)
+        return False
+
+    if actual != expected:
+        logger.warning(
+            "BMAD script %s sha256 mismatch (expected %s, got %s) — %s",
+            script_name,
+            expected,
+            actual,
+            "running anyway (enforce=warn)" if policy == "warn"
+            else "refusing to execute; using on-disk defaults instead",
+        )
+        return policy == "warn"
+    return True
 
 
 def project_root() -> Path:
@@ -171,6 +230,11 @@ def _run_bmad_script(script_name: str, args: list[str]) -> dict[str, Any]:
     script = bmad_install_dir() / "scripts" / script_name
     if not script.is_file():
         logger.warning("BMAD script not found at %s — using on-disk defaults only.", script)
+        return {}
+
+    # SC-052 — verify the script against its pinned sha256 before executing it.
+    # On mismatch fall back to the caller's in-process tomllib path.
+    if not _script_checksum_ok(script_name, script):
         return {}
 
     import sys

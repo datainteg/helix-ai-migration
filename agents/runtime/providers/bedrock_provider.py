@@ -86,12 +86,39 @@ def _build_body(ctx: CallContext) -> dict:
             "messages": [{"role": "user", "content": ctx.user_prompt}],
         }
 
-    if mid.startswith("meta.") or mid.startswith("mistral."):
-        # Both use a plain prompt + max_gen_len/temperature.
+    if mid.startswith("meta."):
+        # H-006: Llama 3+ (meta.llama3-*, meta.llama4-*) use the chat
+        # template tokens, NOT the Llama 2 [INST] format. Wrapping a Llama 3
+        # prompt in <s>[INST]...[/INST]</s> causes the tokens to be parsed
+        # as literal text and the model emits garbage.
+        # Legacy meta.llama2-* still expects [INST]...[/INST].
+        if mid.startswith("meta.llama3-") or mid.startswith("meta.llama4-"):
+            combined = (
+                f"{ctx.system_prompt}\n\n{ctx.user_prompt}"
+                if ctx.system_prompt
+                else ctx.user_prompt
+            )
+            prompt = (
+                "<|begin_of_text|>"
+                "<|start_header_id|>user<|end_header_id|>\n\n"
+                f"{combined}<|eot_id|>"
+                "<|start_header_id|>assistant<|end_header_id|>\n\n"
+            )
+        else:
+            prompt = f"<s>[INST]{ctx.system_prompt}\n\n{ctx.user_prompt}[/INST]"
         return {
-            "prompt": f"<s>[INST]{ctx.system_prompt}\n\n{ctx.user_prompt}[/INST]",
+            "prompt": prompt,
             "temperature": ctx.temperature,
-            "max_gen_len" if mid.startswith("meta.") else "max_tokens": ctx.max_tokens,
+            "max_gen_len": ctx.max_tokens,
+        }
+
+    if mid.startswith("mistral."):
+        # Mistral on Bedrock expects [INST]...[/INST] but NOT a surrounding
+        # <s> token — the Bedrock wrapper adds the BOS itself.
+        return {
+            "prompt": f"[INST]{ctx.system_prompt}\n\n{ctx.user_prompt}[/INST]",
+            "temperature": ctx.temperature,
+            "max_tokens": ctx.max_tokens,
         }
 
     if mid.startswith("cohere."):

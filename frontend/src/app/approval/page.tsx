@@ -4,7 +4,7 @@ import React from "react";
 import { Check, X, Info } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, DemoBanner } from "@/components/ui";
 
 // TODO: hydrate from API
 const APPROVAL_CONTEXT = {
@@ -579,6 +579,9 @@ export default function ApprovalPage() {
       description="Three patterns for the human-approval node in the BMAD pipeline. The right answer depends on how disruptive an approval ought to be — and how often it'll trigger across your team."
     >
       <div className="flex flex-col gap-4">
+        {/* UI-035 — make explicit that everything below is a non-functional
+            design mockup, not a live approval awaiting the operator. */}
+        <DemoBanner message="Design exploration only. The variants below are static mockups of approval-gate UX — no real approval is pending and the buttons do nothing." />
         <VariantCard
           variant="A"
           eyebrow="INLINE SIDE PANEL · CURRENT PATTERN"

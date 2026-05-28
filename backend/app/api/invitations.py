@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.db.session import get_db
+from app.security.password_policy import validate_password
 from app.auth.jwt import get_current_user_id
 from app.auth.dependencies import (
     require_permission,
@@ -47,6 +48,11 @@ class AcceptInviteRequest(BaseModel):
     token: str
     name: str
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:  # SC-002
+        return validate_password(v)
 
 
 class InvitationCreated(BaseModel):

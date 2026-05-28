@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.db.session import get_db
 from app.auth.dependencies import require_permission, resolve_active_org_id
@@ -42,6 +42,22 @@ class WebhookUpdate(BaseModel):
     secret: str | None = Field(default=None, max_length=512)
     events: str | None = Field(default=None, max_length=512)
     description: str | None = Field(default=None, max_length=512)
+
+    @field_validator("events")
+    @classmethod
+    def _events_non_empty(cls, v: str | None) -> str | None:
+        # H-014: PATCHing events to "" / "," / whitespace previously left the
+        # endpoint with an events string that split() to [""], silently
+        # matching NOTHING — the webhook stopped firing with no error. Reject
+        # an empty/blank events list at the schema layer when provided.
+        if v is None:
+            return v
+        tokens = [t.strip() for t in v.split(",") if t.strip()]
+        if not tokens:
+            raise ValueError(
+                "events must contain at least one event name (or '*' for all)"
+            )
+        return ",".join(tokens)
 
 
 @router.get("/webhooks")
@@ -150,9 +166,18 @@ def list_deliveries(
     if not endpoint:
         raise HTTPException(status_code=404, detail="Webhook not found")
 
+    # SC-038: defence-in-depth — join deliveries to their endpoint and filter
+    # on the caller's org so a delivery row with a mismatched endpoint_id (data
+    # corruption / a future bug) can never surface cross-org. The endpoint
+    # ownership check above already gates access; this is a belt-and-braces
+    # filter at the row level.
     deliveries = (
         db.query(WebhookDelivery)
-        .filter(WebhookDelivery.endpoint_id == webhook_id)
+        .join(WebhookEndpoint, WebhookDelivery.endpoint_id == WebhookEndpoint.id)
+        .filter(
+            WebhookDelivery.endpoint_id == webhook_id,
+            WebhookEndpoint.organization_id == org_id,
+        )
         .order_by(WebhookDelivery.created_at.desc())
         .limit(50)
         .all()

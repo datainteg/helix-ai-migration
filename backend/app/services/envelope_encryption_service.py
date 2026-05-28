@@ -55,8 +55,27 @@ def _kek_legacy() -> Fernet:
 
 
 def _kek() -> MultiFernet:
-    """Encryption uses the direct key; decryption falls back to legacy."""
-    return MultiFernet([_kek_direct(), _kek_legacy()])
+    """Encryption uses the direct key; decryption falls back to legacy.
+
+    H-005: an operator whose ENCRYPTION_KEY is still the pre-fix
+    sha256-derived value (or otherwise not a valid 44-char Fernet key)
+    would make `Fernet(...)` raise ValueError at construction, which used
+    to take the WHOLE encrypt/decrypt path down (the legacy key never made
+    it into the MultiFernet either). Instead, degrade to a legacy-only
+    MultiFernet and log critically so the operator can rotate ASAP. Legacy
+    reads keep working; new writes go through the legacy key until the
+    envvar is fixed.
+    """
+    try:
+        direct = _kek_direct()
+    except ValueError:
+        logger.critical(
+            "Invalid ENCRYPTION_KEY shape — degrading to legacy KEK only; "
+            "rotate ASAP. The direct Fernet key could not be constructed, so "
+            "encryption falls back to the sha256-derived legacy key."
+        )
+        return MultiFernet([_kek_legacy()])
+    return MultiFernet([direct, _kek_legacy()])
 
 
 def _get_active_dek_record(db: Session, org_id: str) -> OrgDataEncryptionKey | None:
@@ -105,11 +124,19 @@ def _get_or_create_dek(db: Session, org_id: str) -> bytes:
     return plaintext_dek
 
 
-def _get_dek_for_decrypt(db: Session, org_id: str, ciphertext: str) -> bytes:
+def _get_dek_for_decrypt(db: Session, org_id: str, ciphertext: str) -> tuple[bytes, bytes]:
     """Find a DEK that can decrypt the given ciphertext.
 
     Tries the active DEK first (fast path), then walks historical DEKs
     in reverse version order. Raises InvalidToken if none match.
+
+    C-003: returns BOTH the DEK and the plaintext bytes the probe already
+    produced. The previous version probed with `Fernet(dek).decrypt(ct)`,
+    threw the plaintext away, and let `decrypt_for_org` decrypt the same
+    ciphertext a SECOND time — doubling CPU on a hot DEK and, worse, racing
+    with a concurrent rotation that could re-key the ciphertext between the
+    probe and the re-decrypt (causing a spurious InvalidToken). Returning
+    the plaintext eliminates the second decrypt entirely.
 
     This is what makes rotation safe: during the (re-encrypt → flip
     is_active) transition, reads can still find data sealed with the
@@ -130,8 +157,8 @@ def _get_dek_for_decrypt(db: Session, org_id: str, ciphertext: str) -> bytes:
     for rec in ordered:
         try:
             dek = kek.decrypt(rec.encrypted_dek.encode())
-            Fernet(dek).decrypt(ct_bytes)  # probe
-            return dek
+            plaintext = Fernet(dek).decrypt(ct_bytes)  # decrypt once, keep result
+            return dek, plaintext
         except InvalidToken as exc:
             last_err = exc
             continue
@@ -152,9 +179,12 @@ def decrypt_for_org(db: Session, org_id: str, ciphertext: str) -> str:
 
     Falls back through inactive DEKs so a half-rotated org still serves
     reads without data loss.
+
+    C-003: uses the plaintext returned by the probe instead of decrypting
+    the ciphertext a second time.
     """
-    dek = _get_dek_for_decrypt(db, org_id, ciphertext)
-    return Fernet(dek).decrypt(ciphertext.encode()).decode()
+    _dek, plaintext = _get_dek_for_decrypt(db, org_id, ciphertext)
+    return plaintext.decode()
 
 
 #: Default per-org DEK ciphertext columns to walk on `rotate_dek`.

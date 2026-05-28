@@ -12,6 +12,8 @@ trust boundary explicit).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -20,10 +22,20 @@ from app.auth.jwt import get_current_user_id
 router = APIRouter(tags=["marketplace"])
 
 
+# Kind values are constrained to the union below so a typo
+# (`?kind=Connecter`) returns 422 instead of silently `[]`. Defined here
+# (before MarketplaceEntry) so the model field itself can use it — H-009.
+MarketplaceKind = Literal["connector", "agent", "validator", "recipe"]
+
+
 class MarketplaceEntry(BaseModel):
     id: str
     name: str
-    kind: str  # "connector" | "agent" | "validator" | "recipe"
+    # H-009: was `kind: str`, which accepted any string — a typo in the
+    # hand-written CATALOG below (e.g. "recipes") would silently never
+    # surface under a `?kind=recipe` filter. Pydantic now rejects the
+    # whole catalog at import time if an entry's kind isn't in the union.
+    kind: MarketplaceKind
     source_type: str | None = None
     target_type: str | None = None
     description: str
@@ -127,13 +139,6 @@ CATALOG: list[MarketplaceEntry] = [
 ]
 
 _BY_ID = {e.id: e for e in CATALOG}
-
-
-from typing import Literal
-
-# Kind values are constrained to the union below so a typo
-# (`?kind=Connecter`) returns 422 instead of silently `[]`.
-MarketplaceKind = Literal["connector", "agent", "validator", "recipe"]
 
 
 @router.get("/marketplace", response_model=list[MarketplaceEntry])

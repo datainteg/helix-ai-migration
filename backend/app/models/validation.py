@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, ForeignKey, Text, Integer, DateTime
+from sqlalchemy import Column, String, Float, ForeignKey, Text, Integer, BigInteger, DateTime
 from app.models.base import BaseModel
 
 
@@ -43,5 +43,8 @@ class ReconResult(BaseModel):
     run_id = Column(String(36), ForeignKey("recon_runs.id"), nullable=False)
     result_type = Column(String(50), nullable=False)
     summary = Column(Text, nullable=True)
-    mismatch_count = Column(Integer, nullable=True)
+    # M-015: BigInteger — two large row counts (>= 2^31) overflow a plain
+    # Integer column on insert. Row counts on real migrations routinely exceed
+    # 2.1 billion, so the diff (`abs(source - target)`) must use 64-bit.
+    mismatch_count = Column(BigInteger, nullable=True)
     details_ref = Column(String(500), nullable=True)

@@ -31,8 +31,10 @@ export interface WorkflowDetail extends WorkflowRun {
   steps: WorkflowStep[];
 }
 
-async function get<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function get<T>(path: string, _token: string | null): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -42,17 +44,17 @@ function unwrapItems<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
 }
 
-export async function listOrgWorkflowRuns(token: string, limit = 50): Promise<WorkflowRun[]> {
+export async function listOrgWorkflowRuns(token: string | null, limit = 50): Promise<WorkflowRun[]> {
   const data = await get<unknown>(`/api/v1/agent-workflows?limit=${limit}`, token);
   return unwrapItems<WorkflowRun>(data);
 }
 
-export async function listProjectWorkflowRuns(token: string, projectId: string, limit = 50): Promise<WorkflowRun[]> {
+export async function listProjectWorkflowRuns(token: string | null, projectId: string, limit = 50): Promise<WorkflowRun[]> {
   const data = await get<unknown>(`/api/v1/projects/${projectId}/agent-workflows?limit=${limit}`, token);
   return unwrapItems<WorkflowRun>(data);
 }
 
-export function getWorkflowDetail(token: string, workflowId: string): Promise<WorkflowDetail> {
+export function getWorkflowDetail(token: string | null, workflowId: string): Promise<WorkflowDetail> {
   return get<WorkflowDetail>(`/api/v1/agent-workflows/${workflowId}`, token);
 }
 
@@ -71,18 +73,18 @@ type SseFrame = SseStepFrame | SseDoneFrame | SseTimeoutFrame;
  * the caller can .close() on unmount.
  */
 export async function subscribeToWorkflow(
-  token: string,
+  _token: string | null,
   workflowId: string,
   onStep: (step: WorkflowStep) => void,
   onDone?: (status: string) => void,
   onError?: (e: Event) => void,
 ): Promise<EventSource | null> {
-  if (!token) return null;
+  // SC-010: mint the SSE ticket via the HttpOnly cookie (credentials:"include").
   let ticket: string;
   try {
     const res = await fetch(`${API_BASE}/api/v1/auth/sse-ticket`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     });
     if (!res.ok) {
       onError?.(new Event("ticket_failed"));

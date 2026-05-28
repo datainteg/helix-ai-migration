@@ -172,22 +172,36 @@ def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:
     """
     from sqlalchemy import cast, Date
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    now = datetime.now(timezone.utc)
+    # H-004: snap `since` to midnight UTC of the FIRST day in the window so
+    # the SQL filter and the zero-fill loop cover exactly the same N days.
+    # Previously `since = now - timedelta(days=days)` crossed day boundaries
+    # (e.g. a 09:00 request excluded a usage row written at 08:30 on the
+    # trailing day, while the loop still zero-filled that date) — costs near
+    # the window edge appeared to vanish.
+    since = (now - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    # L-003: GROUP BY / ORDER BY the cast expression directly rather than the
+    # "d" label. Postgres accepts a SELECT-list alias in GROUP BY, but SQLite
+    # (used by the test suite) does not resolve the label in GROUP BY the same
+    # way — grouping by the expression is portable across both backends.
+    day_expr = cast(LLMUsageRecord.created_at, Date)
     rows = (
         db.query(
-            cast(LLMUsageRecord.created_at, Date).label("d"),
+            day_expr.label("d"),
             func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
         )
         .filter(LLMUsageRecord.organization_id == organization_id)
         .filter(LLMUsageRecord.created_at >= since)
-        .group_by("d")
-        .order_by("d")
+        .group_by(day_expr)
+        .order_by(day_expr)
         .all()
     )
     by_date = {str(r[0]): float(r[1] or 0.0) for r in rows}
     out: list[dict] = []
-    cursor = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
-    today = datetime.now(timezone.utc).date()
+    cursor = since.date()
+    today = now.date()
     while cursor <= today:
         key = cursor.isoformat()
         out.append({"date": key, "cost_usd": round(by_date.get(key, 0.0), 4)})

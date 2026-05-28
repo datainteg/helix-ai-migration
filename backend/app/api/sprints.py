@@ -133,8 +133,9 @@ async def api_executions_stream(
     `await request.is_disconnected()` so a closed browser tab tears
     the loop down immediately rather than running to the 5-min cap.
     """
-    from app.auth.jwt import decode_access_token_async
+    from app.auth.jwt import decode_access_token_async, sse_ticket_binding_ok
     from app.auth.dependencies import resolve_active_org_id
+    from app.utils.client_ip import get_client_ip
     from app.db.session import SessionLocal
 
     # ── Auth + access check on a short-lived session ────────────────
@@ -150,6 +151,13 @@ async def api_executions_stream(
             # short-TTL ticket.
             if payload.get("scope") != "sse":
                 raise ValueError("token is not an sse ticket")
+            # SC-013: bind-check the ticket to the consuming client (forwarded
+            # IP + UA hash). A ticket leaked via proxy/Referer log can't be
+            # replayed from another client even inside its 60s TTL.
+            if not sse_ticket_binding_ok(
+                token, get_client_ip(request), request.headers.get("user-agent")
+            ):
+                raise ValueError("sse ticket client mismatch")
             org_id = resolve_active_org_id(auth_db, user_id)
         except Exception:
             from fastapi import HTTPException
@@ -159,14 +167,33 @@ async def api_executions_stream(
     finally:
         auth_db.close()
 
+    # H-003: capture token expiry so the stream self-terminates when the
+    # JWT lapses mid-stream rather than streaming for the full 5 minutes
+    # on an expired credential.
+    token_exp = payload.get("exp")
+
     async def event_generator():
+        import time as _time
         seen_ids: set[str] = set()
         # ~150 iterations * 2s = 5 minutes max
         try:
-            for _ in range(150):
+            for tick in range(150):
                 # Tear down immediately when the client goes away.
                 if await request.is_disconnected():
                     return
+
+                # H-003: re-validate the token. exp check every cycle; a full
+                # re-decode every 5 ticks (~10s) also catches revocation. On
+                # failure emit `auth_expired` and close cleanly.
+                if token_exp is not None and _time.time() >= float(token_exp):
+                    yield f"data: {json.dumps({'type': 'auth_expired'})}\n\n"
+                    return
+                if tick and tick % 5 == 0:
+                    try:
+                        await decode_access_token_async(token)
+                    except Exception:  # noqa: BLE001
+                        yield f"data: {json.dumps({'type': 'auth_expired'})}\n\n"
+                        return
 
                 # Open a fresh DB session per tick so we never hold a
                 # pooled connection across `asyncio.sleep`. Always

@@ -54,7 +54,8 @@ class PairReviewResponse(BaseModel):
 
 
 class ReplayRequest(BaseModel):
-    requirement_text: str | None = None
+    # SC-019: requirement_text lands verbatim in the LLM prompt; cap at 10 KB.
+    requirement_text: str | None = Field(default=None, max_length=10_000)
     agent_prompt_overrides: dict[str, str] = Field(default_factory=dict)
     model_override: str | None = Field(default=None, description="Force a specific model id for this replay")
 

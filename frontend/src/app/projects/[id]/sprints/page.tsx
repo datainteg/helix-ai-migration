@@ -220,7 +220,7 @@ export default function SprintDashboardPage() {
       )}
 
       {/* ── Top metric strip ────────────────────────────────────── */}
-      <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-hx mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-hx mb-6">
         <MetricCell
           big
           label="Sprint completion"

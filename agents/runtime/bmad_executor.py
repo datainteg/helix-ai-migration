@@ -59,23 +59,104 @@ _DEFAULT_TRANSPORT_ORDER = ("pydantic_ai", "httpx", "mock")
 # Override via HELIX_PROMPT_TOKEN_BUDGET env var.
 _DEFAULT_TOKEN_BUDGET = 6000
 
+# M-013: budget guardrails. Below the hard floor the persona + output contract
+# + a single upstream artifact no longer fit, so we clamp up to the floor and
+# log loudly. Between the floor and the soft floor the prompt fits but upstream
+# context gets truncated so aggressively that BMAD handoffs degrade — warn so
+# operators know to raise the budget.
+_MIN_TOKEN_BUDGET = 4000   # hard floor — values below this are clamped up
+_WARN_TOKEN_BUDGET = 6000  # soft floor — below this we warn but honour it
+
 # Rough char→token ratio. English ≈ 4 chars/token; mono-spaced markdown
 # averages closer to 3.5. Pick 4 to under-estimate (truncate aggressively).
 _CHARS_PER_TOKEN = 4
 
 
 def _token_budget() -> int:
+    """Resolve the per-call prompt token budget with M-013 guardrails.
+
+    - Unset / unparseable → conservative default.
+    - Below ``_MIN_TOKEN_BUDGET`` (4000) → clamp UP to the floor + error-log,
+      because a smaller budget cannot hold the non-truncatable persona +
+      output contract.
+    - Below ``_WARN_TOKEN_BUDGET`` (6000) → honoured but warn, since upstream
+      artifact context will be heavily truncated.
+    """
     raw = os.getenv("HELIX_PROMPT_TOKEN_BUDGET", "")
     if not raw:
         return _DEFAULT_TOKEN_BUDGET
     try:
-        return max(int(raw), 1000)
+        value = int(raw)
     except ValueError:
+        logger.warning(
+            "HELIX_PROMPT_TOKEN_BUDGET=%r is not an integer — using default %d.",
+            raw,
+            _DEFAULT_TOKEN_BUDGET,
+        )
         return _DEFAULT_TOKEN_BUDGET
+
+    if value < _MIN_TOKEN_BUDGET:
+        logger.error(
+            "HELIX_PROMPT_TOKEN_BUDGET=%d is below the minimum %d — clamping up. "
+            "Prompts smaller than this cannot hold the persona + output contract.",
+            value,
+            _MIN_TOKEN_BUDGET,
+        )
+        return _MIN_TOKEN_BUDGET
+    if value < _WARN_TOKEN_BUDGET:
+        logger.warning(
+            "HELIX_PROMPT_TOKEN_BUDGET=%d is below the recommended %d — upstream "
+            "artifact context will be heavily truncated; raise it if BMAD "
+            "handoffs degrade.",
+            value,
+            _WARN_TOKEN_BUDGET,
+        )
+    return value
+
+
+# L-008: cache the tiktoken encoding. ``None`` means "not yet resolved";
+# ``False`` means "resolution failed — use the char heuristic" so we don't
+# retry the (potentially slow / network-touching) import + load on every call.
+_TIKTOKEN_ENCODING: Any = None
+
+
+def _get_tiktoken_encoding():
+    """Return a tiktoken encoding, or ``None`` if tiktoken is unavailable.
+
+    L-008: lazy-imported and cached. tiktoken is NOT imported at module load,
+    so a missing wheel (or an encoding it can't download offline) never breaks
+    importing this module — callers fall back to the char heuristic.
+    """
+    global _TIKTOKEN_ENCODING
+    if _TIKTOKEN_ENCODING is not None:
+        return _TIKTOKEN_ENCODING or None
+    try:
+        import tiktoken
+
+        # cl100k_base covers GPT-4/3.5 + is a reasonable cross-vendor proxy.
+        _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+    except Exception as exc:  # noqa: BLE001 — ImportError or offline encoding load
+        logger.debug("tiktoken unavailable, using char heuristic for token counts: %s", exc)
+        _TIKTOKEN_ENCODING = False
+    return _TIKTOKEN_ENCODING or None
 
 
 def _estimate_tokens(text: str) -> int:
-    """Char-based token estimate. Fast, deterministic, no tokenizer dep."""
+    """Estimate token count, preferring tiktoken when available.
+
+    L-008: use ``tiktoken`` (accurate BPE count) when it imports and an
+    encoding loads; otherwise fall back to the deterministic, dependency-free
+    ``len // _CHARS_PER_TOKEN`` heuristic, which under-counts so the budget
+    allocator truncates conservatively.
+    """
+    if not text:
+        return 1
+    encoding = _get_tiktoken_encoding()
+    if encoding is not None:
+        try:
+            return max(1, len(encoding.encode(text)))
+        except Exception as exc:  # noqa: BLE001 — never let counting break a run
+            logger.debug("tiktoken encode failed, falling back to char heuristic: %s", exc)
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
@@ -136,10 +217,18 @@ def _build_system_prompt(
             label=f"BMAD skill body for {skill.name}",
         )
 
-    fields_block = json.dumps(
-        {name: str(field.annotation) for name, field in output_model.model_fields.items()},
-        indent=2,
-    )
+    # L-001: emit the real JSON Schema (types, enums, defaults, descriptions,
+    # required/optional) instead of Python's ``str(annotation)`` reprs like
+    # "typing.Optional[list[str]]" which the LLM cannot reliably map to JSON.
+    try:
+        schema = output_model.model_json_schema()
+        properties = schema.get("properties", schema)
+        fields_block = json.dumps(properties, indent=2)
+    except Exception:  # noqa: BLE001 — never let schema gen break prompt building
+        fields_block = json.dumps(
+            {name: str(field.annotation) for name, field in output_model.model_fields.items()},
+            indent=2,
+        )
 
     return (
         f"{persona}\n\n"
@@ -343,11 +432,20 @@ def _transport_order() -> tuple[str, ...]:
     return tuple(x.strip() for x in override.split(",") if x.strip())
 
 
-def _resolve_provider_for_org(org_id: str | None) -> dict[str, Any] | None:
+def _resolve_provider_for_org(
+    org_id: str | None,
+    agent_code: str = "bmad-agent",
+) -> dict[str, Any] | None:
     """Return decrypted provider details for an org, or None if unavailable.
 
     Used by the PydanticAI transport. Reads the same LLMProvider table the
     httpx transport uses, so behaviour is consistent across paths.
+
+    H-012 fix: ``agent_code`` is forwarded to ``resolve_routing`` so per-agent
+    LLM mappings configured in the admin UI (e.g.
+    ``bmad-agent-architect`` → Claude Opus) are honoured by PydanticAI too,
+    not just the httpx transport. The default ``"bmad-agent"`` preserves
+    legacy behaviour for any caller that still doesn't supply an agent_code.
     """
     if not org_id:
         return None
@@ -388,7 +486,7 @@ def _resolve_provider_for_org(org_id: str | None) -> dict[str, Any] | None:
             .all()
         )
         pid, model, temp, max_tokens = resolve_routing(
-            "bmad-agent",
+            agent_code,
             provider.id,
             provider.default_model,
             mappings,
@@ -421,11 +519,17 @@ def _try_pydantic_ai(
     output_model: type[BaseModel],
     org_id: str | None,
 ) -> tuple[BaseModel | None, str | None]:
-    """Try PydanticAI transport. Returns (parsed_model, raw_markdown) or (None, None)."""
+    """Try PydanticAI transport. Returns (parsed_model, raw_markdown) or (None, None).
+
+    H-012: ``agent.code`` is forwarded into provider resolution so per-agent
+    LLM routing (admin-configured ``bmad-agent-architect`` → Opus etc.) is
+    consulted on this path. Previously the literal string ``"bmad-agent"``
+    was used and every PydanticAI call silently used the org default.
+    """
     if not pydantic_ai_available():
         return None, None
 
-    provider_info = _resolve_provider_for_org(org_id)
+    provider_info = _resolve_provider_for_org(org_id, agent_code=agent.code)
     if not provider_info:
         return None, None
 

@@ -49,15 +49,27 @@ def search(db: Session, organization_id: str, q: str, *, limit: int = 5) -> list
     return _keyword_search(db, organization_id, q, limit=limit)
 
 
+def _escape_like(value: str) -> str:
+    """SC-016: escape ILIKE wildcards so user input matches literally.
+
+    Without this, a query of `100%` would be treated as "starts with 100"
+    (and `%%%%…` triggers a backtracking full-table scan / DoS). Escape the
+    backslash first so we don't double-escape the escapes we add.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _keyword_search(db: Session, organization_id: str, q: str, *, limit: int) -> list[dict]:
-    needle = f"%{q}%"
+    # SC-016: escape LIKE metacharacters and declare the escape char so the
+    # pattern matches the user's text verbatim instead of as wildcards.
+    needle = f"%{_escape_like(q)}%"
     rows = (
         db.query(KnowledgeDoc)
         .filter(KnowledgeDoc.organization_id == organization_id)
         .filter(or_(
-            KnowledgeDoc.title.ilike(needle),
-            KnowledgeDoc.content.ilike(needle),
-            KnowledgeDoc.tags.ilike(needle),
+            KnowledgeDoc.title.ilike(needle, escape="\\"),
+            KnowledgeDoc.content.ilike(needle, escape="\\"),
+            KnowledgeDoc.tags.ilike(needle, escape="\\"),
         ))
         .order_by(KnowledgeDoc.content_length.asc())
         .limit(limit)

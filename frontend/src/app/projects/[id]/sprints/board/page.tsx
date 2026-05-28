@@ -324,7 +324,7 @@ function TaskDetailPanel({
             <div className="text-[12.5px] text-ink-2">
               {task.aiAgent ?? task.owner?.name ?? "Unassigned"}
               {task.aiAgent && (
-                <span className="ml-1 text-[10.5px] text-ink-4 font-mono">AGENT</span>
+                <span className="ml-1 text-[10.5px] text-ink-3 font-mono">AGENT</span>
               )}
             </div>
           </div>

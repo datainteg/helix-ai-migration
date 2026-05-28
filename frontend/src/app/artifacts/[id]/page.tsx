@@ -51,10 +51,11 @@ export default function ArtifactDetailPage() {
   const [reviewing, setReviewing] = useState(false);
 
   const refresh = async () => {
-    if (!token || !id) return;
+    if (!id) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/artifacts/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      // SC-010: auth via the HttpOnly cookie (credentials:"include").
+      const res = await fetch(`${API_BASE}/api/v1/artifacts/${id}`, { credentials: "include" });
       if (!res.ok) throw new Error(`Failed (${res.status})`);
       setArt(await res.json());
       setError("");
@@ -68,12 +69,13 @@ export default function ArtifactDetailPage() {
   useEffect(() => { void refresh(); }, [token, id]);
 
   const generateRollback = async () => {
-    if (!token || !id) return;
+    if (!id) return;
     setRolling(true);
     setError("");
     try {
+      // SC-010: auth via the HttpOnly cookie (credentials:"include").
       const res = await fetch(`${API_BASE}/api/v1/artifacts/${id}/generate-rollback`, {
-        method: "POST", headers: { Authorization: `Bearer ${token}` },
+        method: "POST", credentials: "include",
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({ detail: res.statusText }));
@@ -88,14 +90,16 @@ export default function ArtifactDetailPage() {
   };
 
   const runPairReview = async () => {
-    if (!token || !id) return;
+    if (!id) return;
     setReviewing(true);
     setError("");
     setPairReview(null);
     try {
+      // SC-010: auth via the HttpOnly cookie (credentials:"include").
       const res = await fetch(`${API_BASE}/api/v1/artifacts/${id}/pair-review`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reviewer_model: reviewerModel || null,
           reviewer_provider_type: reviewerProvider || null,

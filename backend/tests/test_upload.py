@@ -37,10 +37,10 @@ def test_artifact_upload_flow(client):
     """Test artifact upload API, validation, and metadata."""
 
     client.post("/api/v1/auth/first-admin", json={
-        "email": "up@t.com", "name": "U", "password": "Test123!",
+        "email": "up@t.com", "name": "U", "password": "TestPass123!",
         "organization_name": "O", "organization_slug": "o",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "up@t.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "up@t.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
 
@@ -86,10 +86,10 @@ def test_artifact_upload_with_unsafe_filename_stays_inside_storage_root(client, 
     monkeypatch.setattr(settings, "ARTIFACT_STORAGE_PATH", str(tmp_path))
 
     client.post("/api/v1/auth/first-admin", json={
-        "email": "unsafe@t.com", "name": "U", "password": "Test123!",
+        "email": "unsafe@t.com", "name": "U", "password": "TestPass123!",
         "organization_name": "O", "organization_slug": "o",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "unsafe@t.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "unsafe@t.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
 

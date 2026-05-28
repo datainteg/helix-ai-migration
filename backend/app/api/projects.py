@@ -186,11 +186,13 @@ async def api_test_source(request: Request, project_id: str, source_id: str, use
     conn, config = get_source_config(db, org_id, project_id, source_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
-    # SEC-015: revalidate the stored config at delivery time — a row may have
-    # been poisoned before the host allowlist was raised, or DNS may have
-    # rebinded since the row was stored.
-    _enforce_host_allowlist(config)
-    result = await svc_test_connection(conn.connector_type, config)
+    # SEC-015 / SC-015: revalidate the stored config at delivery time — a row
+    # may have been poisoned before the host allowlist was raised, or DNS may
+    # have rebinded since the row was stored. The returned config has its
+    # host pinned to the validated IP so connect-time can't re-resolve to an
+    # internal address.
+    safe_config = _enforce_host_allowlist(config)
+    result = await svc_test_connection(conn.connector_type, safe_config)
     conn.status = "active" if result.success else "error"
     db.commit()
     return ConnectionTestResponse(success=result.success, message=result.message)
@@ -203,8 +205,8 @@ async def api_discover_source_schemas(request: Request, project_id: str, source_
     conn, config = get_source_config(db, org_id, project_id, source_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
-    _enforce_host_allowlist(config)  # SEC-015
-    result = await svc_discover_schemas(conn.connector_type, config)
+    safe_config = _enforce_host_allowlist(config)  # SEC-015 / SC-015 (pins IP)
+    result = await svc_discover_schemas(conn.connector_type, safe_config)
     return [{"schema_name": s.schema_name} for s in result]
 
 
@@ -256,8 +258,8 @@ async def api_test_target(request: Request, project_id: str, target_id: str, use
     conn, config = get_target_config(db, org_id, project_id, target_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
-    _enforce_host_allowlist(config)  # SEC-015
-    result = await svc_test_connection(conn.connector_type, config)
+    safe_config = _enforce_host_allowlist(config)  # SEC-015 / SC-015 (pins IP)
+    result = await svc_test_connection(conn.connector_type, safe_config)
     conn.status = "active" if result.success else "error"
     db.commit()
     return ConnectionTestResponse(success=result.success, message=result.message)
@@ -270,8 +272,8 @@ async def api_discover_target_schemas(request: Request, project_id: str, target_
     conn, config = get_target_config(db, org_id, project_id, target_id)
     if not config:
         raise HTTPException(status_code=400, detail="Connection has no stored credentials")
-    _enforce_host_allowlist(config)  # SEC-015
-    result = await svc_discover_schemas(conn.connector_type, config)
+    safe_config = _enforce_host_allowlist(config)  # SEC-015 / SC-015 (pins IP)
+    result = await svc_discover_schemas(conn.connector_type, safe_config)
     return [{"schema_name": s.schema_name} for s in result]
 
 

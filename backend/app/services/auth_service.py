@@ -39,18 +39,34 @@ def seed_permissions(db: Session):
     db.commit()
 
 
+def _desired_permissions(db: Session, perm_codes: list[str]) -> list[Permission]:
+    if "*" in perm_codes:
+        return db.query(Permission).all()
+    return db.query(Permission).filter(Permission.code.in_(perm_codes)).all()
+
+
 def seed_roles(db: Session, organization_id: uuid.UUID):
+    """Create the system roles for an org, and refresh permissions for any
+    that already exist.
+
+    H-008: previously `if not existing: ...` skipped existing roles entirely,
+    so a permission newly added to SYSTEM_PERMISSIONS / SYSTEM_ROLES was
+    granted to NOBODY on already-seeded tenants — even super_admin saw
+    "Permission denied" on the new surface. We now recompute the desired
+    permission set for existing **system** roles (is_system=True) and
+    overwrite. Roles a tenant customised (is_system=False) are left
+    untouched so admin edits aren't clobbered.
+    """
     for role_name, perm_codes in SYSTEM_ROLES.items():
         existing = db.query(Role).filter(Role.organization_id == organization_id, Role.name == role_name).first()
         if not existing:
             role = Role(organization_id=organization_id, name=role_name, scope="organization", is_system=True)
             db.add(role)
             db.flush()
-            if "*" in perm_codes:
-                perms = db.query(Permission).all()
-            else:
-                perms = db.query(Permission).filter(Permission.code.in_(perm_codes)).all()
-            role.permissions = perms
+            role.permissions = _desired_permissions(db, perm_codes)
+        elif existing.is_system:
+            # Refresh the permission set against the current definition.
+            existing.permissions = _desired_permissions(db, perm_codes)
     db.commit()
 
 

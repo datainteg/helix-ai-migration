@@ -43,7 +43,8 @@ export function SchemaDriftCard({ projectId, sourceRef, fetchSchema }: Props) {
   const [showPaste, setShowPaste] = useState(false);
 
   const refresh = async () => {
-    if (!token || !projectId || !sourceRef) return;
+    // SC-010: auth via the HttpOnly cookie; gate on the required path params only.
+    if (!projectId || !sourceRef) return;
     setLoading(true);
     try {
       const [snaps, d] = await Promise.all([
@@ -63,7 +64,6 @@ export function SchemaDriftCard({ projectId, sourceRef, fetchSchema }: Props) {
   useEffect(() => { void refresh(); }, [token, projectId, sourceRef]);
 
   const onTakeSnapshot = async (payload: SnapshotPayload) => {
-    if (!token) return;
     setTaking(true);
     setError("");
     try {

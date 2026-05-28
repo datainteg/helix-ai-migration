@@ -105,8 +105,16 @@ async def _execute(
                 rc = await get_row_count(connector_type, config, schema, table)
                 expected = rule.definition or "0"
                 observed = str(rc.row_count)
-                passed = rc.row_count == int(expected) if expected.isdigit() else True
-                status = "passed" if passed else "failed"
+                # M-004: a non-numeric `expected` (e.g. "5,000" with a comma)
+                # previously fell through to `True` and SILENTLY passed the
+                # rule. Fail noisily instead — a malformed row-count threshold
+                # is an operator error, not a passing comparison.
+                if expected.isdigit():
+                    passed = rc.row_count == int(expected)
+                    status = "passed" if passed else "failed"
+                else:
+                    status = "error"
+                    observed = f"row_count={rc.row_count}; expected is not numeric: {expected!r}"
 
             elif rule.rule_type == "schema_compare":
                 defn = json.loads(rule.definition) if rule.definition else {}
@@ -130,7 +138,7 @@ async def _execute(
                 observed = ""
                 expected = ""
 
-            if status == "failed":
+            if status in ("failed", "error"):
                 all_passed = False
 
             vr = ValidationResult(

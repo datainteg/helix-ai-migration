@@ -85,7 +85,10 @@ def record_tick(
         "ticked_at": datetime.now(timezone.utc).isoformat(),
     }
     # Diff_summary slot is reused as the rolling tail checkpoint — last tick wins.
-    row.diff_summary = json.dumps({**(json.loads(row.diff_summary) if row.diff_summary else {}), "last_tail_tick": payload})
+    # C-004: tolerant read of the existing Text value (never crash on a
+    # malformed/legacy row), then re-serialise to a JSON string.
+    from app.services.cdc_engine import _load_diff_summary
+    row.diff_summary = json.dumps({**_load_diff_summary(row.diff_summary), "last_tail_tick": payload})
     db.commit()
     write_audit(db, org_id=org_id, actor_id=user_id, action="cutover_tail_tick",
                 entity_type="cutover", entity_id=row.id,

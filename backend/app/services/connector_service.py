@@ -85,10 +85,21 @@ def list_connector_registry() -> list[dict[str, Any]]:
         })
     from connectors.custom.registry import list_registered_connectors
     for ctype, display_name in list_registered_connectors().items():
+        # M-007: custom connectors previously reported `capabilities={}`, which
+        # greyed out every action button in the marketplace UI. Derive the real
+        # capabilities from the registered class (every connector subclasses
+        # BaseConnector and declares a `capabilities` attribute). Fall back to
+        # {} only if the class is missing or doesn't declare them.
+        cls = get_custom_connector(ctype)
+        caps = {}
+        if cls is not None:
+            class_caps = getattr(cls, "capabilities", None)
+            if class_caps is not None:
+                caps = class_caps.to_dict() if hasattr(class_caps, "to_dict") else dict(class_caps)
         registry.append({
             "connector_type": ctype,
             "display_name": display_name,
-            "capabilities": {},
+            "capabilities": caps,
             "mode": "custom",
         })
     return registry

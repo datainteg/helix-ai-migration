@@ -46,8 +46,9 @@ export function MetricCard({
         <div className="min-w-0 flex-1">
           <div className="eyebrow text-[10px]">{label}</div>
           <div
+            title={String(value)}
             className={cn(
-              "mt-1 font-mono tabular-nums leading-[1.05] font-medium tracking-editorial",
+              "mt-1 font-mono tabular-nums leading-[1.05] font-medium tracking-editorial truncate",
               big ? "text-[32px]" : "text-[24px]"
             )}
             style={{ color: accent || "var(--con-ink-1)" }}
@@ -97,11 +98,14 @@ export function MetricCell({
 }: MetricCardProps) {
   const dir = delta === undefined ? 0 : delta > 0 ? 1 : delta < 0 ? -1 : 0;
   return (
-    <div className={cn("px-5 py-4", className)}>
+    // min-w-0 so the cell can shrink inside a reflowed grid (UI-025); the value
+    // line truncates instead of forcing the column wider than its track.
+    <div className={cn("px-5 py-4 min-w-0", className)}>
       <div className="eyebrow text-[10px]">{label}</div>
       <div
+        title={String(value)}
         className={cn(
-          "mt-1 font-mono tabular-nums leading-[1.05] font-medium tracking-editorial",
+          "mt-1 font-mono tabular-nums leading-[1.05] font-medium tracking-editorial truncate",
           big ? "text-[32px]" : "text-[24px]"
         )}
         style={{ color: accent || "var(--con-ink-1)" }}

@@ -220,12 +220,67 @@ def _persist_started_workflow(db: Session | None, started: HelixBMADResult, heli
             db.close()
 
 
+def _upsert_workflow_run(
+    db: Session,
+    *,
+    organization_id: str,
+    project_id: str,
+    requirement_id: str,
+    workflow_id: str,
+    run_id: str,
+    status: str,
+    mode: str,
+) -> WorkflowRun:
+    """C-001: insert-or-update a workflow_run keyed by (workflow_id, org).
+
+    The Temporal path inserts a `status="started"` row in
+    `_persist_started_workflow`; later (and on the local-fallback path) we must
+    NOT insert a second row with the same workflow_id — that produced duplicate
+    rows and, once the unique index lands, an IntegrityError. Select the
+    existing row FOR UPDATE (serialising concurrent writers for the same
+    workflow) and update it, otherwise insert.
+    """
+    q = db.query(WorkflowRun).filter(
+        WorkflowRun.workflow_id == workflow_id,
+        WorkflowRun.organization_id == organization_id,
+    )
+    # FOR UPDATE only on backends that support row locks (Postgres). SQLite
+    # ignores it; the test path is single-writer anyway.
+    try:
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            q = q.with_for_update()
+    except Exception:  # noqa: BLE001
+        pass
+    existing = q.first()
+    if existing:
+        existing.status = status
+        existing.mode = mode
+        if run_id:
+            existing.run_id = run_id
+        db.commit()
+        db.refresh(existing)
+        return existing
+    return create_workflow_run(
+        db,
+        organization_id=organization_id,
+        project_id=project_id,
+        requirement_id=requirement_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        status=status,
+        mode=mode,
+    )
+
+
 def _persist_workflow_result(db: Session | None, result: HelixBMADResult, helix: HelixBMAD) -> None:
     own_db = db is None
     if own_db:
         db = SessionLocal()
     try:
-        run = create_workflow_run(
+        # C-001: upsert so a pre-existing "started" row (Temporal path) is
+        # updated in place rather than duplicated. Steps are persisted against
+        # the resolved run's id below.
+        run = _upsert_workflow_run(
             db,
             organization_id=helix.organization_id or "unknown",
             project_id=helix.project_id,
@@ -357,6 +412,66 @@ def update_workflow_run_status(
         db.commit()
         db.refresh(run)
     return run
+
+
+def update_workflow_run_status_for_temporal_completion(
+    workflow_id: str,
+    status: str,
+    summary: str | None = None,
+    organization_id: str | None = None,
+    db: Session | None = None,
+) -> WorkflowRun | None:
+    """C-002: reconcile a WorkflowRun to its terminal state when a Temporal
+    workflow finishes.
+
+    The worker owns the actual call site (e.g. at the end of
+    BMADPerNodeWorkflow.run, via the same persist-step activity wiring that
+    already imports this module). Exposing it here keeps the run-status write
+    path in one place: the worker calls this with the resolved
+    `(workflow_id, status)` and an optional human-readable `summary`, and the
+    backend updates the row using its own session when one isn't supplied.
+
+    Returns the updated run, or None if no matching row exists (older
+    pre-Temporal rows). Never raises on a missing row so the worker activity
+    stays idempotent.
+    """
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        q = db.query(WorkflowRun).filter(WorkflowRun.workflow_id == workflow_id)
+        if organization_id is not None:
+            q = q.filter(WorkflowRun.organization_id == organization_id)
+        run = q.first()
+        if not run:
+            logger.warning(
+                "Temporal completion reconcile: no WorkflowRun for workflow_id=%s",
+                workflow_id,
+            )
+            return None
+        run.status = status
+        # Persist the summary as a terminal step row so the SSE stream and the
+        # status endpoint surface it without a schema change to WorkflowRun.
+        if summary:
+            try:
+                save_workflow_step(
+                    db,
+                    workflow_run_id=run.id,
+                    agent_name="_terminal",
+                    step_order=9999,
+                    status=status,
+                    error_message=None if status != "failed" else summary[:2000],
+                    parsed_output_json={"summary": summary[:8000]},
+                )
+            except SQLAlchemyError as exc:
+                logger.warning("Failed to persist terminal summary step: %s", exc)
+                db.rollback()
+        db.commit()
+        db.refresh(run)
+        return run
+    finally:
+        if own_db:
+            db.close()
 
 
 def save_workflow_step(

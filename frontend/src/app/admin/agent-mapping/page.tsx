@@ -55,21 +55,22 @@ export default function AgentMappingPage() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState("");
 
-  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  // SC-010: auth now rides on the HttpOnly cookie (credentials:"include"); the
+  // Authorization header is no longer used. `authHeader` is kept as an empty
+  // object so the existing `...authHeader` spreads remain harmless no-ops.
+  const authHeader: Record<string, string> = {};
 
   const loadProviders = useCallback(async () => {
-    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, { headers: authHeader });
+      const res = await fetch(`${API_BASE}/api/v1/llm-providers`, { credentials: "include", headers: authHeader });
       if (res.ok) setProviders(await res.json());
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const loadMappings = useCallback(async () => {
-    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, { headers: authHeader });
+      const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, { credentials: "include", headers: authHeader });
       if (!res.ok) return;
       const rows: AgentMapping[] = await res.json();
       const next: Record<string, AgentMapping> = {};
@@ -83,7 +84,7 @@ export default function AgentMappingPage() {
     loadProviders();
     loadMappings();
     // Rich registry: { provider_type: [{id, name, context_window, ...}] }
-    fetch(`${API_BASE}/api/v1/llm-providers/models`, { headers: authHeader })
+    fetch(`${API_BASE}/api/v1/llm-providers/models`, { credentials: "include", headers: authHeader })
       .then((r) => (r.ok ? r.json() : {}))
       .then((data: ModelRegistry) => setModelRegistry(data))
       .catch(() => {});
@@ -105,7 +106,6 @@ export default function AgentMappingPage() {
   };
 
   const handleSave = async () => {
-    if (!token) return;
     setSaving(true);
     setError("");
     setSavedAt(null);
@@ -124,6 +124,7 @@ export default function AgentMappingPage() {
       }
       const res = await fetch(`${API_BASE}/api/v1/llm-agent-mappings`, {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify(payload),
       });

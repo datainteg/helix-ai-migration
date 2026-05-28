@@ -40,6 +40,7 @@ from worker.activities.bmad_node_activities import (
     mary_analyze_activity,
     paige_docs_activity,
     persist_workflow_step_activity,
+    persist_workflow_terminal_state_activity,
     sally_ux_activity,
     winston_architecture_activity,
     winston_project_context_activity,
@@ -162,6 +163,7 @@ async def main() -> int:
             amelia_code_review_activity,
             paige_docs_activity,
             persist_workflow_step_activity,
+            persist_workflow_terminal_state_activity,
         ],
     )
 

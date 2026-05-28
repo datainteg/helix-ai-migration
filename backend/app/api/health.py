@@ -17,7 +17,13 @@ class HealthResponse(BaseModel):
 
 class ReadyResponse(BaseModel):
     status: str
-    database: str
+    # SC-018: `database` / `detail` are kept in the schema for backward
+    # compatibility (clients may still read them) but are no longer
+    # populated — the response body is now identical regardless of DB
+    # state so an attacker can't use /readyz to detect when the DB is
+    # down and time an exploit. The HTTP status code (200 vs 503) is the
+    # only differentiator, which is all k8s/LB probes need.
+    database: str | None = None
     detail: str | None = None
 
 
@@ -56,13 +62,13 @@ async def readiness_check(response: Response, db: Session = Depends(get_db)):
     """
     try:
         db.execute(text("SELECT 1"))
-        return ReadyResponse(status="ready", database="ok")
+        # SC-018: uniform body — no `database`/`detail` field that would
+        # leak internal state. Status code 200 signals ready.
+        return ReadyResponse(status="ok")
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception("Readiness probe DB check failed: %s", exc)
         response.status_code = 503
-        return ReadyResponse(
-            status="not_ready",
-            database="down",
-            detail="Database connectivity check failed",
-        )
+        # SC-018: identical shape to the 200 body — only the HTTP status
+        # code differs. The real cause is in the server logs above.
+        return ReadyResponse(status="not_ready")

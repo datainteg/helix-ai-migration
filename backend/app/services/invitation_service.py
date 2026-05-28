@@ -50,7 +50,27 @@ def create_invitation(
         .first()
     )
     if pending:
-        raise HTTPException(status_code=409, detail="Invitation already pending for this email")
+        # M-012: when a re-invite arrives with a DIFFERENT role than the
+        # still-pending invitation, the old behaviour silently kept the old
+        # role. Surface the existing role + the requested one in the 409 so the
+        # admin knows they must revoke the pending invite before changing the
+        # role (rather than assuming the new role took effect).
+        existing_role = (
+            db.query(Role).filter(Role.id == pending.role_id).first()
+            if pending.role_id else None
+        )
+        existing_role_name = existing_role.name if existing_role else None
+        detail = {
+            "message": "Invitation already pending for this email",
+            "existing_role": existing_role_name,
+            "requested_role": role_name,
+        }
+        if existing_role_name is not None and existing_role_name != role_name:
+            detail["hint"] = (
+                "Revoke the pending invitation first to re-invite with a "
+                "different role."
+            )
+        raise HTTPException(status_code=409, detail=detail)
 
     role = db.query(Role).filter(Role.organization_id == org_id, Role.name == role_name).first()
     raw_token = secrets.token_urlsafe(32)

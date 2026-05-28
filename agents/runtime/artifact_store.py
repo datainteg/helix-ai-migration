@@ -133,6 +133,7 @@ _SECRET_KEY_PREFIXES: tuple[str, ...] = ("secret_", "password_", "token_", "apik
 _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),               # OpenAI / Anthropic
     re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),           # Anthropic
+    re.compile(r"^org-[A-Za-z0-9]{12,}$"),                # OpenAI organization id (M-003)
     re.compile(r"^xox[baprs]-[A-Za-z0-9-]{10,}$"),        # Slack
     re.compile(r"^AKIA[0-9A-Z]{12,}$"),                   # AWS access key ID
     re.compile(r"^ASIA[0-9A-Z]{12,}$"),                   # AWS STS key ID
@@ -141,6 +142,12 @@ _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}$"),  # JWT
     re.compile(r"^Bearer\s+[A-Za-z0-9._-]{20,}$", re.IGNORECASE),
 )
+
+# M-003: lowered from 16 → 12 so shorter-but-still-credential tokens (e.g.
+# OpenAI ``org-`` ids, 12-char AWS key suffixes) are screened by the
+# value-shape heuristics below. Anything shorter than the smallest credential
+# pattern can't match anyway, so this only widens, never narrows, coverage.
+_MIN_SECRET_VALUE_LEN = 12
 
 _REDACTED_SENTINEL = "[REDACTED]"
 
@@ -159,7 +166,7 @@ def _value_looks_secret(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     stripped = value.strip()
-    if len(stripped) < 16:
+    if len(stripped) < _MIN_SECRET_VALUE_LEN:
         return False
     return any(pat.match(stripped) for pat in _SECRET_VALUE_PATTERNS)
 
@@ -180,6 +187,10 @@ def _safe_frontmatter(value: Any) -> Any:
         out: dict[str, Any] = {}
         for k, v in value.items():
             if _key_is_denied(k):
+                # L-007: surface which keys the scrubber drops so operators
+                # debugging "my provenance field vanished from the artifact"
+                # can see it was a denylist hit, not a silent data-loss bug.
+                logger.info("Frontmatter key %r dropped by secret scrubber (denied key)", k)
                 continue
             out[k] = _safe_frontmatter(v)
         return out

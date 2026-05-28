@@ -1,7 +1,6 @@
 "use client";
 
-import { Bell, Menu, Sparkles } from "lucide-react";
-import { Kbd } from "@/components/ui/Kbd";
+import { Menu, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TopbarProps {
@@ -56,20 +55,16 @@ export function Topbar({ crumbs = [], extras, onMobileMenuClick }: TopbarProps) 
       {/* Right actions */}
       <div className="flex items-center gap-1.5">
         {extras}
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="grid place-items-center h-9 w-9 rounded-md text-ink-3 hover:bg-app-2"
-        >
-          <Bell className="h-[15px] w-[15px]" />
-        </button>
+        {/* UI-021: the notification feature is not wired yet, and the global
+            ⌘J "Ask Helix" shortcut has no handler. Rather than advertise dead
+            affordances we drop the clickable Bell and the ⌘J Kbd hint until
+            those features ship. */}
         <button
           type="button"
           className="hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 border border-hx-2 rounded-md bg-surface text-ink-2 text-[11.5px] hover:bg-app-2 transition-colors"
         >
           <Sparkles className="h-[13px] w-[13px] text-[var(--con-brand)]" />
           <span>Ask Helix</span>
-          <Kbd>⌘ J</Kbd>
         </button>
       </div>
     </header>

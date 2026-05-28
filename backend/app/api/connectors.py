@@ -21,6 +21,7 @@ from app.services.connector_service import (
 )
 from app.services.project_service import ensure_project_access
 from app.api.audit import write_audit
+from app.core.config import settings
 from app.rate_limiting import limiter
 
 router = APIRouter(tags=["connectors"])
@@ -52,28 +53,43 @@ def _safe_config(config: dict) -> dict:
 # who legitimately need to reach private hosts (self-hosted Postgres on
 # the same VPC) set HELIX_ALLOW_PRIVATE_HOSTS=1.
 
-_ALLOW_PRIVATE = os.environ.get("HELIX_ALLOW_PRIVATE_HOSTS", "").lower() in {"1", "true", "yes"}
 _BLOCK_HOST_KEYS = ("host", "hostname", "server", "endpoint", "endpoint_url", "url", "base_url")
 _BLOCK_IPS = {"169.254.169.254", "169.254.170.2"}  # AWS + ECS task metadata
+
+
+def _allow_private_hosts() -> bool:
+    """SC-015: read the escape-hatch flag from settings on EVERY call so an
+    operator can flip it at runtime (settings re-reads env) without the value
+    being frozen at module-import time.
+    """
+    return str(settings.HELIX_ALLOW_PRIVATE_HOSTS or "").lower() in {"1", "true", "yes"}
 
 
 def _resolve_host(value: str) -> list[str]:
     """Return all IPs a host string resolves to. Best-effort; empty on failure."""
     if not value:
         return []
-    # Strip URL scheme / port / path so we can resolve the host alone.
+    bare = _strip_host(value)
+    try:
+        return [ai[4][0] for ai in socket.getaddrinfo(bare, None)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _strip_host(value: str) -> str:
+    """Strip URL scheme / userinfo / port / path down to the bare host."""
     s = value.strip()
     for prefix in ("https://", "http://", "tcp://", "postgres://", "postgresql://", "mysql://"):
         if s.startswith(prefix):
             s = s[len(prefix):]
             break
     s = s.split("/")[0].split("@")[-1]
+    # Leave IPv6-in-brackets intact; otherwise split off the :port.
+    if s.startswith("["):
+        return s
     if ":" in s:
         s = s.split(":")[0]
-    try:
-        return [ai[4][0] for ai in socket.getaddrinfo(s, None)]
-    except Exception:  # noqa: BLE001
-        return []
+    return s
 
 
 def _is_blocked(ip: str) -> bool:
@@ -86,14 +102,28 @@ def _is_blocked(ip: str) -> bool:
     return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
 
 
-def _enforce_host_allowlist(config: dict) -> None:
-    """Raise 400 if the config points at an internal / metadata address."""
-    if _ALLOW_PRIVATE:
-        return
+def _enforce_host_allowlist(config: dict) -> dict:
+    """Validate that the connector config doesn't point at an internal /
+    metadata address, and PIN the resolved public IP back into the config so
+    the connect-time resolution cannot rebind to a different (internal) IP.
+
+    SC-015: returns the (possibly rewritten) config. For the primary `host`
+    key we substitute the validated IP that admission resolved, so the
+    SQLAlchemy connect later dials exactly that address — a DNS-rebind that
+    flips the A record to 127.0.0.1 between admission and connect is now
+    inert because the connector never re-resolves the hostname.
+
+    Raises 400 if any host key resolves to a forbidden address.
+    """
+    if _allow_private_hosts():
+        return config
+    pinned = dict(config)
     for key in _BLOCK_HOST_KEYS:
         if key not in config:
             continue
-        for ip in _resolve_host(str(config[key])):
+        raw = str(config[key])
+        resolved = _resolve_host(raw)
+        for ip in resolved:
             if _is_blocked(ip):
                 raise HTTPException(
                     status_code=400,
@@ -102,6 +132,20 @@ def _enforce_host_allowlist(config: dict) -> None:
                         "Set HELIX_ALLOW_PRIVATE_HOSTS=1 on the backend if this is intentional."
                     ),
                 )
+        # SC-015: pin the first validated IP into the plain `host`/`hostname`
+        # field so connect-time uses the admission-validated address. Only
+        # done for bare host fields (not full URLs) and only when the raw
+        # value was a hostname (not already a literal IP, which needs no pin).
+        if key in ("host", "hostname", "server") and resolved:
+            bare = _strip_host(raw)
+            try:
+                ipaddress.ip_address(bare)
+                is_literal_ip = True
+            except ValueError:
+                is_literal_ip = False
+            if not is_literal_ip and bare == raw.strip():
+                pinned[key] = resolved[0]
+    return pinned
 
 
 @router.post("/connectors/test")
@@ -114,8 +158,8 @@ async def api_test_connection(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, data.project_id)
-    _enforce_host_allowlist(data.config)
-    result = await test_connection(data.connector_type, data.config)
+    safe_config = _enforce_host_allowlist(data.config)  # SC-015: pins resolved IP
+    result = await test_connection(data.connector_type, safe_config)
     write_audit(
         db, org_id, user_id,
         "connector_tested",
@@ -141,8 +185,8 @@ async def api_discover_schemas(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, data.project_id)
-    _enforce_host_allowlist(data.config)
-    result = await discover_schemas(data.connector_type, data.config)
+    safe_config = _enforce_host_allowlist(data.config)  # SC-015
+    result = await discover_schemas(data.connector_type, safe_config)
     return [{"schema_name": s.schema_name} for s in result]
 
 
@@ -156,8 +200,8 @@ async def api_discover_tables(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, data.project_id)
-    _enforce_host_allowlist(data.config)
-    result = await discover_tables(data.connector_type, data.config, data.schema_name)
+    safe_config = _enforce_host_allowlist(data.config)  # SC-015
+    result = await discover_tables(data.connector_type, safe_config, data.schema_name)
     return [{"schema_name": t.schema_name, "table_name": t.table_name, "table_type": t.table_type} for t in result]
 
 
@@ -171,8 +215,8 @@ async def api_discover_columns(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, data.project_id)
-    _enforce_host_allowlist(data.config)
-    result = await discover_columns(data.connector_type, data.config, data.schema_name, data.table_name)
+    safe_config = _enforce_host_allowlist(data.config)  # SC-015
+    result = await discover_columns(data.connector_type, safe_config, data.schema_name, data.table_name)
     return [{"column_name": c.column_name, "data_type": c.data_type, "is_nullable": c.is_nullable} for c in result]
 
 
@@ -186,6 +230,6 @@ async def api_get_row_count(
     db: Session = Depends(get_db),
 ):
     ensure_project_access(db, org_id, data.project_id)
-    _enforce_host_allowlist(data.config)
-    result = await get_row_count(data.connector_type, data.config, data.schema_name, data.table_name)
+    safe_config = _enforce_host_allowlist(data.config)  # SC-015
+    result = await get_row_count(data.connector_type, safe_config, data.schema_name, data.table_name)
     return {"schema_name": result.schema_name, "table_name": result.table_name, "row_count": result.row_count}

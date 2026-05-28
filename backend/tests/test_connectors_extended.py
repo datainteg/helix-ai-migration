@@ -233,10 +233,10 @@ class TestCustomConnectorLifecycle:
 class TestConnectorDiscoverAPI:
     def _bootstrap(self, client):
         client.post("/api/v1/auth/first-admin", json={
-            "email": "d@t.com", "name": "D", "password": "Test123!",
+            "email": "d@t.com", "name": "D", "password": "TestPass123!",
             "organization_name": "O", "organization_slug": "do",
         })
-        login = client.post("/api/v1/auth/login", json={"email": "d@t.com", "password": "Test123!"})
+        login = client.post("/api/v1/auth/login", json={"email": "d@t.com", "password": "TestPass123!"})
         return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     def test_discover_schemas_endpoint_exists(self, client):

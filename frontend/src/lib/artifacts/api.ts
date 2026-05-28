@@ -21,8 +21,10 @@ export interface Artifact {
   created_at?: string | null;
 }
 
-async function get<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+// SC-010: auth rides on the HttpOnly cookie (`credentials: "include"`). The
+// `token` params are retained for call-site compatibility but unused.
+async function get<T>(path: string, _token: string | null): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -32,16 +34,16 @@ function unwrapItems<T>(data: unknown): T[] {
   return Array.isArray(data) ? (data as T[]) : (((data as any).items as T[]) ?? []);
 }
 
-export async function listProjectArtifacts(token: string, projectId: string, limit = 100): Promise<Artifact[]> {
+export async function listProjectArtifacts(token: string | null, projectId: string, limit = 100): Promise<Artifact[]> {
   const data = await get<unknown>(`/api/v1/projects/${projectId}/artifacts?limit=${limit}`, token);
   return unwrapItems<Artifact>(data);
 }
 
-export async function listOrgArtifacts(token: string, limit = 100): Promise<Artifact[]> {
+export async function listOrgArtifacts(token: string | null, limit = 100): Promise<Artifact[]> {
   const data = await get<unknown>(`/api/v1/artifacts?limit=${limit}`, token);
   return unwrapItems<Artifact>(data);
 }
 
-export function listArtifactVersions(token: string, artifactId: string): Promise<Artifact[]> {
+export function listArtifactVersions(token: string | null, artifactId: string): Promise<Artifact[]> {
   return get<Artifact[]>(`/api/v1/artifacts/${artifactId}/versions`, token);
 }

@@ -10,6 +10,13 @@ interface CardProps {
   actions?: React.ReactNode;
   padding?: "none" | "sm" | "md" | "lg";
   bodyClassName?: string;
+  /**
+   * Heading level to render the `title` as. Defaults to `"h2"` so a typical
+   * page with one `<h1>` (PageHero) plus several `<Card>` blocks produces a
+   * navigable heading outline for screen readers. Pass `"div"` when the
+   * card sits inside content that already has its own h2/h3 above it.
+   */
+  as?: "h2" | "h3" | "div";
 }
 
 const padMap = {
@@ -35,6 +42,7 @@ export function Card({
   actions,
   padding = "md",
   bodyClassName,
+  as: TitleTag = "h2",
 }: CardProps) {
   const showHeader = title || actions || eyebrow;
   return (
@@ -55,9 +63,9 @@ export function Card({
           <div className="min-w-0">
             {eyebrow && <div className="eyebrow mb-1">{eyebrow}</div>}
             {title && (
-              <div className="text-[14px] font-semibold text-ink tracking-tight">
+              <TitleTag className="text-[14px] font-semibold text-ink tracking-tight m-0">
                 {title}
-              </div>
+              </TitleTag>
             )}
             {description && (
               <div className="text-[12px] text-ink-3 mt-0.5">{description}</div>

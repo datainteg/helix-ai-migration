@@ -55,7 +55,13 @@ class PostgreSQLConnector(BaseConnector):
         self._engine = None
 
     def _build_connection_url(self) -> str:
-        """Build SQLAlchemy connection URL. Never logs password."""
+        """Build SQLAlchemy connection URL. Never logs password.
+
+        SC-015: the URL host is always the hostname (so TLS cert validation
+        under sslmode=verify-full still matches). The admission-validated IP
+        is applied separately via psycopg2 ``hostaddr`` in ``_connect_args``
+        so DNS is NOT re-resolved at connect time.
+        """
         cfg = self.config
         host = cfg.get("host", "localhost")
         port = cfg.get("port", 5432)
@@ -65,13 +71,30 @@ class PostgreSQLConnector(BaseConnector):
         ssl_mode = cfg.get("ssl_mode", "prefer")
         return f"postgresql://{quote_plus(username)}:{quote_plus(password)}@{host}:{port}/{database}?sslmode={ssl_mode}"
 
+    def _connect_args(self) -> dict:
+        """psycopg2 connect args. Pins the pre-resolved IP via ``hostaddr``.
+
+        SC-015: when the backend admission layer pre-resolves the hostname and
+        pins the validated public IP into ``host_ip`` (or already substituted
+        the IP into ``host``), pass it to libpq as ``hostaddr``. libpq then
+        connects to exactly that address WITHOUT a second DNS lookup, while the
+        ``host`` URL field is still used for TLS SNI + certificate name
+        matching. This closes the DNS-rebind window between admission and
+        connect. No-op when no pre-resolved IP is available.
+        """
+        args: dict = {"connect_timeout": 10}
+        host_ip = self.config.get("host_ip") or self.config.get("hostaddr")
+        if host_ip:
+            args["hostaddr"] = str(host_ip)
+        return args
+
     def _get_engine(self):
         """Lazy-init shared engine. Avoids per-call connection overhead."""
         from sqlalchemy import create_engine
         if self._engine is None:
             self._engine = create_engine(
                 self._build_connection_url(),
-                connect_args={"connect_timeout": 10},
+                connect_args=self._connect_args(),
                 pool_pre_ping=True,
             )
         return self._engine

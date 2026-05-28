@@ -493,6 +493,8 @@ psycopg2-binary==2.9.12
     # via -r backend/requirements.txt
 py-key-value-aio==0.4.4
     # via fastmcp-slim
+pyarrow==24.0.0
+    # via -r backend/requirements.txt
 pyasn1==0.6.3
     # via
     #   pyasn1-modules

@@ -13,6 +13,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
+ENV_LOCAL_FILE="$ROOT_DIR/.env.local"
 ENV_EXAMPLE="$ROOT_DIR/.env.example"
 
 FORCE=false
@@ -27,6 +28,23 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# ── Safety: never silently overwrite an .env that still contains placeholder
+#   markers (SC-003). If the operator has been editing .env manually we route
+#   generated secrets into .env.local instead so nothing is clobbered.
+if [ -f "$ENV_FILE" ] && [ "$FORCE" != true ] && [ "$PRINT_ONLY" != true ]; then
+  if grep -Eq '=change_me|=helix_password' "$ENV_FILE"; then
+    echo "" >&2
+    echo "WARNING: $ENV_FILE still contains placeholder markers (change_me / helix_password)." >&2
+    echo "         Refusing to overwrite it in place. Writing generated secrets to" >&2
+    echo "         $ENV_LOCAL_FILE instead — merge by hand or re-run with --force." >&2
+    echo "" >&2
+    ENV_FILE="$ENV_LOCAL_FILE"
+    if [ ! -f "$ENV_FILE" ]; then
+      : > "$ENV_FILE"
+    fi
+  fi
+fi
 
 # ── Generators ───────────────────────────────────────────────────────
 

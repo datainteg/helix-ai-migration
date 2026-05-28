@@ -2,12 +2,16 @@
 
 import asyncio
 import json
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.session import get_db
+from app.core.config import settings
 from app.auth.jwt import get_current_user_id
 from app.auth.dependencies import get_current_organization_id
 from app.services.project_service import ensure_project_access
@@ -26,7 +30,10 @@ from app.utils.idempotency import idempotent
 
 class StartWorkflowRequest(BaseModel):
     requirement_id: str
-    requirement_text: str | None = None
+    # SC-019: this text is concatenated into every BMAD agent's LLM prompt;
+    # cap at 10 KB so a malicious member cannot burn the org's token budget
+    # with a multi-MB requirement.
+    requirement_text: str | None = Field(default=None, max_length=10_000)
 
 
 class StartWorkflowResponse(BaseModel):
@@ -39,7 +46,8 @@ class StartWorkflowResponse(BaseModel):
 
 class ApprovalRequest(BaseModel):
     decision: str  # "approved" or "rejected"
-    notes: str = ""
+    # SC-019: approval notes can flow into downstream prompts / audit meta.
+    notes: str = Field(default="", max_length=10_000)
 
 
 class WorkflowRunSummary(BaseModel):
@@ -89,6 +97,59 @@ class WorkflowArtifactContent(BaseModel):
 
 
 router = APIRouter(tags=["agent-workflows"])
+
+
+def _artifact_canonical_roots() -> list[Path]:
+    """SC-014: the set of directories an artifact path is allowed to live
+    under. A workflow step row stores `artifact_path` written by the worker
+    — if the worker is ever compromised (or prompt-injection persuades it to
+    record `/etc/passwd`), the per-workflow allowlist alone would still serve
+    the file because the path exists in the row. We additionally pin every
+    served path under one of these canonical roots.
+
+    Roots:
+      * settings.ARTIFACT_STORAGE_PATH — the backend's local artifact store.
+      * the BMAD `_bmad-output` directory — where the worker persists
+        planning artifacts (mounted read-only into the backend container).
+        Resolved from HELIX_PROJECT_ROOT to mirror worker/main.py.
+    """
+    roots: list[Path] = []
+    try:
+        roots.append(Path(settings.ARTIFACT_STORAGE_PATH or "./data/artifacts").resolve())
+    except Exception:
+        pass
+    # BMAD output root. Worker uses HELIX_PROJECT_ROOT (defaults /app in
+    # container) and writes under <root>/_bmad-output.
+    project_root = os.getenv("HELIX_PROJECT_ROOT") or os.getcwd()
+    try:
+        roots.append((Path(project_root) / "_bmad-output").resolve())
+    except Exception:
+        pass
+    # Optional explicit override for non-standard deployments.
+    override = os.getenv("HELIX_BMAD_OUTPUT_ROOT")
+    if override:
+        try:
+            roots.append(Path(override).resolve())
+        except Exception:
+            pass
+    return roots
+
+
+def _artifact_path_is_allowed(path: str) -> bool:
+    """True iff `path` resolves to a file under one of the canonical roots."""
+    try:
+        resolved = Path(path).resolve()
+    except Exception:
+        return False
+    for root in _artifact_canonical_roots():
+        try:
+            if resolved == root or resolved.is_relative_to(root):
+                return True
+        except (ValueError, AttributeError):
+            # is_relative_to raises ValueError on unrelated drives (Windows);
+            # AttributeError only on <3.9 (not in scope).
+            continue
+    return False
 
 
 @router.post("/projects/{project_id}/agent-workflows", response_model=StartWorkflowResponse)
@@ -201,17 +262,30 @@ async def read_workflow_artifact(
 ):
     """Read the raw markdown content of one artifact produced by this workflow.
 
-    Path must match one of the artifact_paths persisted on the workflow's steps —
-    guards against arbitrary filesystem reads.
+    Path must match one of the artifact_paths persisted on the workflow's steps
+    AND resolve (after symlink/.. canonicalisation) under a pinned BMAD output
+    root (SC-014) — guards against arbitrary filesystem reads even if a
+    compromised worker records a hostile `artifact_path`.
     """
-    import os
-
     _assert_workflow_in_org(db, workflow_id, org_id)
     status = await get_workflow_status(workflow_id, db=db)
-    allowed_paths = {step.get("artifact_path") for step in status.get("steps", [])}
-    allowed_paths.discard(None)
-    if path not in allowed_paths:
+    # M-011: canonicalise (realpath) BOTH the stored allowlist entries and the
+    # supplied path before comparing, so a symlinked stored path and the
+    # client-supplied path resolve to the same absolute target. Builds on the
+    # SC-014 canonical-root pin below. We keep an exact-string fallback so a
+    # stored path that no longer exists on disk (realpath returns it unchanged)
+    # still matches an identical supplied string.
+    raw_allowed = {step.get("artifact_path") for step in status.get("steps", [])}
+    raw_allowed.discard(None)
+    canon_allowed = {os.path.realpath(p) for p in raw_allowed}
+    if os.path.realpath(path) not in canon_allowed and path not in raw_allowed:
         raise HTTPException(status_code=403, detail="Path not associated with this workflow")
+    # SC-014: hard-pin to canonical roots. Reject anything that escapes the
+    # BMAD output / artifact-storage directories after resolving symlinks
+    # and `..` segments. Done even though the path is in `allowed_paths`
+    # because step rows are populated by the worker, not the user.
+    if not _artifact_path_is_allowed(path):
+        raise HTTPException(status_code=403, detail="Artifact path outside permitted storage roots")
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Artifact file missing on disk")
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -223,7 +297,7 @@ async def read_workflow_artifact(
     "/agent-workflows/{workflow_id}/approve",
     response_model=ApprovalSignalResponse,
 )
-def approve_step(
+async def approve_step(
     workflow_id: str,
     data: ApprovalRequest,
     request: Request,
@@ -231,10 +305,39 @@ def approve_step(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Record a human approval decision for a workflow step."""
+    """Record a human approval decision for a workflow step.
+
+    H-015: a per-node Temporal workflow blocks in
+    `workflow.wait_condition(approval_decision is not None)`. Previously
+    /approve only flipped the DB row, leaving Temporal waiting until the 48h
+    timeout — the DB said "rejected" while Temporal kept running. We now send
+    the matching Temporal signal BEFORE flipping the DB row. If the workflow
+    handle can't be resolved (older row predating Temporal, or Temporal down)
+    we log a warning and proceed with a DB-only update so the legacy path
+    still works.
+    """
     _assert_workflow_in_org(db, workflow_id, org_id)
 
     new_status = "approved" if data.decision == "approved" else "rejected"
+
+    # Best-effort Temporal signal so the waiting workflow actually advances.
+    signal_name = "approve" if new_status == "approved" else "reject"
+    try:
+        from temporalio.client import Client
+
+        client = await Client.connect(os.getenv("TEMPORAL_ADDRESS", "localhost:7233"))
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal(signal_name, data.notes)
+    except Exception:  # noqa: BLE001
+        # Handle not resolvable (pre-Temporal row) or Temporal unavailable.
+        # Proceed with the DB-only update — never echo Temporal internals.
+        import logging
+        logging.getLogger(__name__).warning(
+            "Temporal signal '%s' could not be delivered for workflow %s; "
+            "proceeding with DB-only status update.",
+            signal_name, workflow_id,
+        )
+
     update_workflow_run_status(db, workflow_id, new_status, organization_id=org_id)
 
     write_audit(
@@ -278,8 +381,9 @@ async def stream_workflow_progress(
     so a closed browser tab tears the loop down immediately
     instead of running to the 2-min cap.
     """
-    from app.auth.jwt import decode_access_token_async
+    from app.auth.jwt import decode_access_token_async, sse_ticket_binding_ok
     from app.auth.dependencies import resolve_active_org_id
+    from app.utils.client_ip import get_client_ip
     from app.db.session import SessionLocal
 
     # ── Auth + access check on a short-lived session ────────────────
@@ -292,6 +396,13 @@ async def stream_workflow_progress(
                 raise ValueError("missing sub")
             if payload.get("scope") != "sse":
                 raise ValueError("token is not an sse ticket")
+            # SC-013: the ticket must be consumed from the same client it was
+            # minted for (forwarded IP + UA hash). A leaked ticket replayed
+            # from another client fails this check even within its 60s TTL.
+            if not sse_ticket_binding_ok(
+                token, get_client_ip(request), request.headers.get("user-agent")
+            ):
+                raise ValueError("sse ticket client mismatch")
             org_id = resolve_active_org_id(auth_db, user_id)
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid stream token")
@@ -300,13 +411,42 @@ async def stream_workflow_progress(
     finally:
         auth_db.close()
 
+    # H-003: capture the token's expiry so the stream can self-terminate when
+    # the JWT lapses mid-stream instead of continuing to push events for up to
+    # 2 minutes with an expired credential.
+    token_exp = payload.get("exp")
+
+    def _sse(event_type: str, body: dict) -> str:
+        # M-016: emit a typed `event:` line in addition to the `data:` JSON.
+        # The JSON still carries `type` so existing `onmessage` consumers keep
+        # working; clients that prefer typed dispatch can `addEventListener`
+        # on the event name instead.
+        return f"event: {event_type}\ndata: {json.dumps(body)}\n\n"
+
     async def event_generator():
+        import time as _time
         last_step_count = 0
         try:
-            for _ in range(120):  # max 2 min polling at 1s intervals
+            for tick in range(120):  # max 2 min polling at 1s intervals
                 # Tear down immediately when the client goes away.
                 if await request.is_disconnected():
                     return
+
+                # H-003: every 10 ticks, re-validate the token. Cheap exp
+                # check each cycle; a full re-decode every 10s catches
+                # revocation too. On expiry/revocation, emit a final
+                # `auth_expired` event and close the stream cleanly so the
+                # client knows to re-authenticate rather than silently
+                # streaming on an invalid credential.
+                if token_exp is not None and _time.time() >= float(token_exp):
+                    yield _sse("auth_expired", {"type": "auth_expired"})
+                    return
+                if tick and tick % 10 == 0:
+                    try:
+                        await decode_access_token_async(token)
+                    except Exception:  # noqa: BLE001
+                        yield _sse("auth_expired", {"type": "auth_expired"})
+                        return
 
                 # Fresh DB session per tick; closed before the
                 # asyncio.sleep so the pool is never held idle.
@@ -319,18 +459,16 @@ async def stream_workflow_progress(
                 steps = status.get("steps", [])
                 if len(steps) > last_step_count:
                     for step in steps[last_step_count:]:
-                        data = json.dumps({"type": "step", "step": step})
-                        yield f"data: {data}\n\n"
+                        yield _sse("step", {"type": "step", "step": step})
                     last_step_count = len(steps)
 
                 run_status = status.get("status", "")
                 if run_status in ("completed", "approved", "rejected", "failed"):
-                    data = json.dumps({"type": "done", "status": run_status})
-                    yield f"data: {data}\n\n"
+                    yield _sse("done", {"type": "done", "status": run_status})
                     return
 
                 await asyncio.sleep(1)
-            yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
+            yield _sse("timeout", {"type": "timeout"})
         except asyncio.CancelledError:
             # Client closed the connection mid-yield. Re-raise so
             # Starlette can clean up cancellation without logging an

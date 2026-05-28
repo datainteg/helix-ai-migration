@@ -559,7 +559,9 @@ tenacity==9.1.4
     #   langchain-core
     #   pydantic-ai-slim
 tiktoken==0.13.0
-    # via pydantic-ai-slim
+    # via
+    #   -r worker/requirements.txt
+    #   pydantic-ai-slim
 tokenizers==0.23.1
     # via cohere
 tqdm==4.67.3

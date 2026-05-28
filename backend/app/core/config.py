@@ -62,6 +62,37 @@ class Settings(BaseSettings):
 
     SAFE_EXECUTION_MODE: str = "analysis_only"
 
+    # SC-011: one-time bootstrap token guarding POST /auth/first-admin.
+    # MUST be set in the operator's environment before the backend is
+    # exposed; when unset the endpoint refuses to mint the super-admin.
+    SETUP_TOKEN: str | None = None
+
+    # SC-015: escape hatch for operators who legitimately need to reach
+    # private hosts (self-hosted Postgres on the same VPC). Read via the
+    # settings object so it can be flipped per-process without the value
+    # being frozen at module-import time. Accepts 1/true/yes.
+    HELIX_ALLOW_PRIVATE_HOSTS: str = ""
+
+    # SC-051: comma-separated list of trusted reverse-proxy IPs. When the
+    # immediate `request.client.host` is one of these, the audit writer +
+    # rate limiter trust the rightmost untrusted entry of `X-Forwarded-For`
+    # as the real client IP. Empty (default) means NEVER trust the header —
+    # `request.client.host` is used verbatim. Behind Caddy on the default
+    # bridge network, set this to the proxy's container IP (or "*" to trust
+    # any single proxy hop, suitable when only Caddy can reach the backend).
+    TRUSTED_PROXIES: str = ""
+
+    # SC-050: TTL (seconds) for the in-process JWT revocation negative cache.
+    # Bounds the window a revoked token can still authenticate per process.
+    # Default 1.0 matches the prior hard-coded value; set 0 to disable.
+    JWT_REVOKE_NEGCACHE_TTL: float = 1.0
+
+    # SC-056: static bearer required on the backend `/metrics` route (in
+    # addition to the Caddy 403). When set, a scraper must send
+    # `Authorization: Bearer <METRICS_TOKEN>`. When empty, /metrics keeps its
+    # prior behaviour (open on the backend port, blocked at Caddy only).
+    METRICS_TOKEN: str = ""
+
     SENTRY_DSN: str = ""
     OTEL_ENDPOINT: str = ""
 

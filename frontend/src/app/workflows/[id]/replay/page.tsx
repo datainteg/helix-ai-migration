@@ -47,7 +47,8 @@ export default function WorkflowReplayPage() {
   const [modelOverride, setModelOverride] = useState("");
 
   useEffect(() => {
-    if (!token || !id) return;
+    // SC-010: auth via the HttpOnly cookie; gate on id only.
+    if (!id) return;
     let cancelled = false;
     getWorkflowDetail(token, String(id))
       .then((d) => { if (!cancelled) setParent(d); })
@@ -57,7 +58,7 @@ export default function WorkflowReplayPage() {
   }, [token, id]);
 
   useEffect(() => {
-    if (!token || !replayId) return;
+    if (!replayId) return;
     let stopped = false;
     const poll = () => {
       getWorkflowDetail(token, replayId).then((d) => {
@@ -72,13 +73,14 @@ export default function WorkflowReplayPage() {
   }, [token, replayId]);
 
   const triggerReplay = async () => {
-    if (!token || !id) return;
+    if (!id) return;
     setRunning(true);
     setError("");
     try {
       const res = await fetch(`${API_BASE}/api/v1/workflows/${id}/replay`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include", // SC-010: auth via HttpOnly cookie
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agent_prompt_overrides: overrides,
           model_override: modelOverride || null,

@@ -169,7 +169,7 @@ export default function SprintRisksPage() {
       crumbs={["Projects", projectId, "Sprints", "Risks"]}
     >
       {/* Metric strip (6 cells, wraps 3+3) */}
-      <div className="grid grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-x divide-hx mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-y sm:divide-y-0 sm:divide-x divide-hx mb-6">
         <MetricCell big label="Critical" value={counts.critical} accent={counts.critical > 0 ? "var(--con-err)" : undefined} />
         <MetricCell big label="High"     value={counts.high}     accent={counts.high > 0 ? "var(--con-err)" : undefined} />
         <MetricCell big label="Medium"   value={counts.med}      accent={counts.med > 0 ? "var(--con-warn)" : undefined} />
@@ -178,7 +178,7 @@ export default function SprintRisksPage() {
         <MetricCell big label="Mitigation"    value="62%" hint="Plans in progress" />
       </div>
 
-      <div className="grid grid-cols-[1fr_320px] gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
         <div className="flex flex-col gap-4">
           {/* Category breakdown */}
           <Card title="Risk by category" eyebrow="DISTRIBUTION">

@@ -64,12 +64,32 @@ class SnowflakeConnector(BaseConnector):
             params.append(f"role={quote_plus(role)}")
         return f"{url}?{'&'.join(params)}" if params else url
 
+    def _connect_args(self) -> dict:
+        """Snowflake connector connect args.
+
+        SC-015 note: Snowflake addresses servers by *account* (e.g.
+        ``xy12345.us-east-1``) which the snowflake driver maps to its own
+        ``*.snowflakecomputing.com`` endpoint with provider-controlled TLS —
+        there is no user-supplied hostname for an attacker to DNS-rebind, and
+        the driver exposes no ``hostaddr``-style IP override (forcing one would
+        break TLS to the Snowflake domain). So IP-pinning is intentionally a
+        no-op here. We still forward an explicit ``host``/``host_ip`` override
+        when one was configured (private-link / proxy setups) so the pinned IP
+        is honoured in that one case.
+        """
+        cfg = self.config
+        args: dict = {"login_timeout": 10}
+        pinned = cfg.get("host_ip") or cfg.get("hostaddr") or cfg.get("host")
+        if pinned:
+            args["host"] = str(pinned)
+        return args
+
     def _get_engine(self):
         from sqlalchemy import create_engine
         if self._engine is None:
             self._engine = create_engine(
                 self._build_connection_url(),
-                connect_args={"login_timeout": 10},
+                connect_args=self._connect_args(),
                 pool_pre_ping=True,
             )
         return self._engine

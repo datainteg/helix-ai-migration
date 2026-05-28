@@ -56,8 +56,17 @@ def _get_fernet() -> MultiFernet:
 def encrypt_value(value: str | None) -> str:
     """Encrypt a secret. Empty/None returns "" so providers using ambient
     credentials (AWS Bedrock with IAM role, Vertex AI with ADC) can be stored
-    without a key. NOT NULL columns accept the empty string."""
-    if not value:
+    without a key. NOT NULL columns accept the empty string.
+
+    M-002: the empty-string sentinel is returned ONLY for ``None`` or the
+    literal empty string — not for every falsy value. The previous
+    ``if not value`` swallowed ``"0"``-shaped... actually ``"0"`` is truthy,
+    but ``0`` (int), ``False``, ``[]`` and ``{}`` all hit the falsy branch
+    and silently returned ``""`` instead of encrypting. Callers pass
+    ``str | None`` so this is defensive, but the explicit check matches the
+    docstring contract exactly.
+    """
+    if value is None or value == "":
         return ""
     return _get_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
 
@@ -104,8 +113,12 @@ def rewrap_if_legacy(encrypted: str | None) -> str | None:
 
 
 def mask_key(key: str, visible_chars: int = 4) -> str:
-    if not key:
+    """L-002: return a consistent fixed mask for empty / short keys instead of
+    ``"*" * len(key)``. The variable-length mask leaked the exact key length
+    (and diverged from the ``"***"`` empty-key sentinel). Keys that are too
+    short to safely reveal a prefix/suffix now return a fixed ``"***"`` so no
+    length information escapes; longer keys keep the prefix+suffix preview.
+    """
+    if not key or len(key) <= visible_chars * 2:
         return "***"
-    if len(key) <= visible_chars * 2:
-        return "*" * len(key)
     return key[:visible_chars] + "*" * (len(key) - visible_chars * 2) + key[-visible_chars:]

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import {
   LayoutDashboard,
@@ -18,7 +18,6 @@ import {
   Puzzle,
   Settings,
   Search,
-  ChevronDown,
   DollarSign,
   X,
 } from "lucide-react";
@@ -113,11 +112,10 @@ function NavGroup({ label, items, isActive, onNavigate }: { label?: string; item
 }
 
 function WorkspaceSwitcher() {
+  // UI-030 — there's no org-switcher menu yet, so render a static info block
+  // rather than a button with a ChevronDown that implies a dropdown does nothing.
   return (
-    <button
-      type="button"
-      className="w-full flex items-center gap-2 px-2.5 py-2 bg-surface border border-hx-2 rounded-[8px] text-left text-[12.5px] text-ink-2 hover:bg-surface-hi transition-colors"
-    >
+    <div className="w-full flex items-center gap-2 px-2.5 py-2 bg-surface border border-hx-2 rounded-[8px] text-left text-[12.5px] text-ink-2">
       <span
         className="grid place-items-center h-[18px] w-[18px] rounded-[4px] text-[10px] font-semibold text-white"
         style={{ background: "linear-gradient(135deg,#4F46E5,#06B6D4)" }}
@@ -128,21 +126,76 @@ function WorkspaceSwitcher() {
         <div className="font-medium text-ink truncate">DataInteg Inc.</div>
         <div className="text-[10.5px] text-ink-4 font-mono">prod · us-east-1</div>
       </div>
-      <ChevronDown className="h-3 w-3 text-ink-4" />
-    </button>
+    </div>
   );
 }
 
 function SearchTrigger() {
+  // UI-021 — the global command palette isn't built, so don't advertise a ⌘K
+  // shortcut that does nothing. Disable the trigger and drop the Kbd hint until
+  // a palette ships (no new palette feature is in scope for this pass).
   return (
     <button
       type="button"
-      className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-transparent border border-hx-2 rounded-[8px] text-[12px] text-ink-4 hover:bg-surface-hi transition-colors"
+      disabled
+      aria-label="Global search (coming soon)"
+      title="Coming soon"
+      className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-transparent border border-hx-2 rounded-[8px] text-[12px] text-ink-4 cursor-default opacity-70"
     >
       <Search className="h-[13px] w-[13px]" />
       <span className="flex-1 text-left">Search…</span>
-      <Kbd>⌘ K</Kbd>
     </button>
+  );
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/**
+ * UI-041 — bind the footer status pill to the real /api/v1/system/health summary
+ * instead of a hardcoded green dot. Falls back to a neutral "Status unknown"
+ * state when the call fails or there's no session yet, so we never claim
+ * "operational" without evidence.
+ */
+function SystemStatus() {
+  const { token } = useAuth();
+  const [state, setState] = useState<"unknown" | "ok" | "degraded">("unknown");
+
+  useEffect(() => {
+    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const comps: Array<{ status?: string }> = data?.components ?? [];
+        if (comps.length === 0) { setState("unknown"); return; }
+        const allHealthy = comps.every((c) => c.status === "healthy");
+        setState(allHealthy ? "ok" : "degraded");
+      })
+      .catch(() => { if (!cancelled) setState("unknown"); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const dotColor =
+    state === "ok" ? "var(--con-ok)" :
+    state === "degraded" ? "var(--con-warn)" : "var(--con-ink-4)";
+  const label =
+    state === "ok" ? "All systems operational" :
+    state === "degraded" ? "Some systems degraded" : "Status unknown";
+
+  return (
+    <Link
+      href="/admin/system-health"
+      className="flex items-center gap-2 px-1 py-1.5 text-[11px] text-ink-3 rounded-md hover:bg-app-2 focus-ring"
+    >
+      <span
+        aria-hidden
+        className={cn("h-1.5 w-1.5 rounded-full", state === "ok" && "motion-safe:animate-pulse-dot")}
+        style={{ background: dotColor }}
+      />
+      <span>{label}</span>
+      <span aria-hidden className="ml-auto font-mono text-[10px] text-ink-4">↗</span>
+    </Link>
   );
 }
 
@@ -157,7 +210,7 @@ function UserFooter() {
         <div className="text-[12px] font-medium text-ink truncate">{name}</div>
         <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
       </div>
-      <ChevronDown className="h-3 w-3 text-ink-4" />
+      {/* UI-030 — no user menu wired yet; omit the ChevronDown that implies one. */}
     </div>
   );
 }
@@ -225,11 +278,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
 
       {/* Status + user */}
       <div className="px-3.5 pt-2 pb-3 border-t border-hx bg-surface-hi">
-        <div className="flex items-center gap-2 px-1 py-1.5 text-[11px] text-ink-3">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--con-ok)] motion-safe:animate-pulse-dot" />
-          <span>All systems operational</span>
-          <span aria-hidden className="ml-auto font-mono text-[10px] text-ink-4">↗</span>
-        </div>
+        <SystemStatus />
         <UserFooter />
       </div>
     </>
@@ -248,9 +297,11 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
       {/* Mobile drawer overlay */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex" role="presentation">
+          {/* UI-023 — distinct label from the in-drawer X ("Close navigation")
+              so screen readers don't announce two identical controls. */}
           <button
             type="button"
-            aria-label="Close navigation"
+            aria-label="Dismiss navigation overlay"
             tabIndex={-1}
             className="absolute inset-0 bg-black/40"
             onClick={onMobileClose}
