@@ -16,7 +16,7 @@ helper) when you need ``total`` / paging metadata.
 
 from __future__ import annotations
 
-from typing import Any, Optional, TypedDict
+from typing import Any, Callable, Optional, TypedDict
 
 import httpx
 
@@ -67,18 +67,62 @@ def _as_paginated(data: Any) -> PaginatedResponse:
     return PaginatedResponse(items=items, total=len(items), limit=len(items), offset=0)
 
 
+def _paginate_all(
+    fetch_page: Callable[[int], PaginatedResponse],
+    *,
+    max_pages: int = 100,
+) -> list[dict]:
+    """Walk pagination envelopes by ``offset`` until all rows are collected.
+
+    H-011: callers of ``.list()`` previously saw at most the server-side cap
+    (100/200). ``.list_all()`` helpers delegate to this loop so they fetch
+    every page transparently. Guarded by ``max_pages`` to prevent runaway
+    requests if a buggy server keeps returning the same ``total`` forever.
+    """
+    collected: list[dict] = []
+    offset = 0
+    for _ in range(max_pages):
+        page = fetch_page(offset)
+        items = page.get("items") or []
+        collected.extend(items)
+        total = page.get("total")
+        # Server may not know the true total (None) — fall back to "stop when
+        # we get an empty page or a page smaller than the page size".
+        page_size = page.get("limit") or len(items) or 1
+        if total is not None and len(collected) >= total:
+            break
+        if not items or len(items) < page_size:
+            break
+        offset += page_size
+    return collected
+
+
 class _Resource:
     def __init__(self, client: "Helix") -> None:
         self._c = client
 
 
 class _Projects(_Resource):
-    def list(self) -> list[dict]:
-        return _unwrap(self._c._get("/api/v1/projects?limit=200"))
+    _PAGE_SIZE = 200
 
-    def paginated(self) -> PaginatedResponse:
+    def list(self) -> list[dict]:
+        """Return the first page (max ``_PAGE_SIZE`` rows).
+
+        H-011: returns at most ``_PAGE_SIZE`` items even when the org has
+        more. Use :meth:`paginated` for ``total`` metadata, or
+        :meth:`list_all` to walk every page transparently.
+        """
+        return _unwrap(self._c._get(f"/api/v1/projects?limit={self._PAGE_SIZE}"))
+
+    def paginated(self, offset: int = 0) -> PaginatedResponse:
         """Return the full pagination envelope for projects."""
-        return _as_paginated(self._c._get("/api/v1/projects?limit=200"))
+        return _as_paginated(
+            self._c._get(f"/api/v1/projects?limit={self._PAGE_SIZE}&offset={offset}")
+        )
+
+    def list_all(self) -> list[dict]:
+        """Walk all pages and return every project (H-011)."""
+        return _paginate_all(self.paginated)
 
     def get(self, project_id: str) -> dict:
         return self._c._get(f"/api/v1/projects/{project_id}")
@@ -88,6 +132,8 @@ class _Projects(_Resource):
 
 
 class _Workflows(_Resource):
+    _PAGE_SIZE = 100
+
     def start(self, project_id: str, requirement_id: str, requirement_text: str = "") -> dict:
         return self._c._post(
             f"/api/v1/projects/{project_id}/agent-workflows",
@@ -98,15 +144,39 @@ class _Workflows(_Resource):
         return self._c._get(f"/api/v1/agent-workflows/{workflow_id}")
 
     def list(self, project_id: Optional[str] = None) -> list[dict]:
-        if project_id:
-            return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100"))
-        return _unwrap(self._c._get("/api/v1/agent-workflows?limit=100"))
+        """Return the first page (max ``_PAGE_SIZE`` rows).
 
-    def paginated(self, project_id: Optional[str] = None) -> PaginatedResponse:
+        H-011: this is the legacy "first page only" helper. Use
+        :meth:`paginated` for ``total`` metadata or :meth:`list_all` to
+        walk every page transparently.
+        """
+        if project_id:
+            return _unwrap(
+                self._c._get(
+                    f"/api/v1/projects/{project_id}/agent-workflows?limit={self._PAGE_SIZE}"
+                )
+            )
+        return _unwrap(self._c._get(f"/api/v1/agent-workflows?limit={self._PAGE_SIZE}"))
+
+    def paginated(
+        self,
+        project_id: Optional[str] = None,
+        offset: int = 0,
+    ) -> PaginatedResponse:
         """Return the full pagination envelope for workflows."""
         if project_id:
-            return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/agent-workflows?limit=100"))
-        return _as_paginated(self._c._get("/api/v1/agent-workflows?limit=100"))
+            return _as_paginated(
+                self._c._get(
+                    f"/api/v1/projects/{project_id}/agent-workflows?limit={self._PAGE_SIZE}&offset={offset}"
+                )
+            )
+        return _as_paginated(
+            self._c._get(f"/api/v1/agent-workflows?limit={self._PAGE_SIZE}&offset={offset}")
+        )
+
+    def list_all(self, project_id: Optional[str] = None) -> list[dict]:
+        """Walk all pages and return every workflow (H-011)."""
+        return _paginate_all(lambda off: self.paginated(project_id, offset=off))
 
     def approve(self, workflow_id: str, notes: str = "") -> dict:
         return self._c._post(f"/api/v1/agent-workflows/{workflow_id}/signal-approve", {"decision": "approved", "notes": notes})
@@ -138,11 +208,27 @@ class _Cost(_Resource):
 
 class _Templates(_Resource):
     def list(self) -> list[dict]:
+        """Return the full migration-template catalog.
+
+        Note: the templates catalog is a static, in-memory list — the
+        endpoint returns every entry in one bare-array response (no
+        server-side paging). :meth:`list_all` is provided for API symmetry
+        and simply returns the same full set.
+        """
         return _unwrap(self._c._get("/api/v1/migration-templates"))
 
     def paginated(self) -> PaginatedResponse:
-        """Return the full pagination envelope for migration templates."""
+        """Return a pagination-shaped envelope for migration templates.
+
+        Synthesised from the bare-array response so callers get a consistent
+        ``{items,total,limit,offset}`` shape; ``total`` equals the catalog
+        size.
+        """
         return _as_paginated(self._c._get("/api/v1/migration-templates"))
+
+    def list_all(self) -> list[dict]:
+        """Return the full template catalog (H-011 symmetry helper)."""
+        return _paginate_all(lambda _off: self.paginated())
 
     def clone(self, template_id: str, project_name: str, description: str | None = None) -> dict:
         return self._c._post("/api/v1/migration-templates/clone", {
@@ -153,12 +239,28 @@ class _Templates(_Resource):
 
 
 class _Cutovers(_Resource):
-    def list(self, project_id: str) -> list[dict]:
-        return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/cutovers"))
+    _PAGE_SIZE = 100
 
-    def paginated(self, project_id: str) -> PaginatedResponse:
+    def list(self, project_id: str) -> list[dict]:
+        """Return the first page of cutovers for a project.
+
+        H-011: server-paginated; use :meth:`list_all` to walk every page.
+        """
+        return _unwrap(
+            self._c._get(f"/api/v1/projects/{project_id}/cutovers?limit={self._PAGE_SIZE}")
+        )
+
+    def paginated(self, project_id: str, offset: int = 0) -> PaginatedResponse:
         """Return the full pagination envelope for cutovers."""
-        return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/cutovers"))
+        return _as_paginated(
+            self._c._get(
+                f"/api/v1/projects/{project_id}/cutovers?limit={self._PAGE_SIZE}&offset={offset}"
+            )
+        )
+
+    def list_all(self, project_id: str) -> list[dict]:
+        """Walk all pages and return every cutover for a project (H-011)."""
+        return _paginate_all(lambda off: self.paginated(project_id, offset=off))
 
     def create(self, project_id: str, source_ref: str, target_ref: str, *, workflow_id: str | None = None, notes: str | None = None) -> dict:
         return self._c._post(f"/api/v1/projects/{project_id}/cutovers", {
@@ -189,10 +291,22 @@ class _Knowledge(_Resource):
         })
 
     def search(self, q: str, limit: int = 5) -> list[dict]:
+        """Return the top-``limit`` matching knowledge docs.
+
+        Note: ``/knowledge/search`` is a relevance-ranked top-N endpoint, NOT
+        an offset-paginated list (server caps ``limit`` at 20). There is no
+        ``search_all`` because the endpoint never returns more than the top-N
+        you ask for — raise ``limit`` (up to 20) to widen the result set.
+        """
         return _unwrap(self._c._get(f"/api/v1/knowledge/search?q={q}&limit={limit}"))
 
     def search_paginated(self, q: str, limit: int = 5) -> PaginatedResponse:
-        """Return the full pagination envelope for knowledge search results."""
+        """Return a pagination-shaped envelope for knowledge search results.
+
+        Synthesised from the bare top-N response so callers get a consistent
+        ``{items,total,limit,offset}`` shape; there is no true server-side
+        offset paging for relevance search.
+        """
         return _as_paginated(self._c._get(f"/api/v1/knowledge/search?q={q}&limit={limit}"))
 
 
@@ -208,12 +322,35 @@ class _SchemaDrift(_Resource):
 
 
 class _Artifacts(_Resource):
-    def list_for_project(self, project_id: str) -> list[dict]:
-        return _unwrap(self._c._get(f"/api/v1/projects/{project_id}/artifacts"))
+    _PAGE_SIZE = 100
 
-    def list_for_project_paginated(self, project_id: str) -> PaginatedResponse:
+    def list_for_project(self, project_id: str) -> list[dict]:
+        """Return the first page of artifacts for a project.
+
+        H-011: server-paginated; use :meth:`list_all_for_project` to walk
+        every page transparently.
+        """
+        return _unwrap(
+            self._c._get(f"/api/v1/projects/{project_id}/artifacts?limit={self._PAGE_SIZE}")
+        )
+
+    def list_for_project_paginated(
+        self,
+        project_id: str,
+        offset: int = 0,
+    ) -> PaginatedResponse:
         """Return the full pagination envelope for project artifacts."""
-        return _as_paginated(self._c._get(f"/api/v1/projects/{project_id}/artifacts"))
+        return _as_paginated(
+            self._c._get(
+                f"/api/v1/projects/{project_id}/artifacts?limit={self._PAGE_SIZE}&offset={offset}"
+            )
+        )
+
+    def list_all_for_project(self, project_id: str) -> list[dict]:
+        """Walk all pages and return every artifact for a project (H-011)."""
+        return _paginate_all(
+            lambda off: self.list_for_project_paginated(project_id, offset=off)
+        )
 
     def generate_rollback(self, artifact_id: str) -> dict:
         return self._c._post(f"/api/v1/artifacts/{artifact_id}/generate-rollback", {})

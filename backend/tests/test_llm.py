@@ -35,10 +35,10 @@ def test_llm_flow_uses_mocked_provider_connection(client, monkeypatch):
     """Full LLM provider flow with no real external LLM API calls."""
 
     client.post("/api/v1/auth/first-admin", json={
-        "email": "admin@test.com", "name": "Admin", "password": "Test123!",
+        "email": "admin@test.com", "name": "Admin", "password": "TestPass123!",
         "organization_name": "TestOrg", "organization_slug": "test-org",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "admin@test.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "admin@test.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 

@@ -8,7 +8,7 @@ import {
   MetricCard,
   Donut,
   StatusBadge,
-  Chip,
+  DemoBanner,
 } from "@/components/ui";
 import { formatDate, formatTime, formatNumber } from "@/lib/utils";
 
@@ -38,11 +38,17 @@ export default function ReconciliationPage() {
       actions={
         <>
           <Button variant="outline"><Download className="h-4 w-4" /> Export Report</Button>
-          <Button><Play className="h-4 w-4" /> Run Reconciliation</Button>
+          <Button
+            disabled
+            title="Reconciliation API not yet enabled"
+          >
+            <Play className="h-4 w-4" /> Run Reconciliation
+          </Button>
         </>
       }
     >
-      <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 mb-5 text-[12.5px] text-amber-800 flex items-start gap-2">
+      <DemoBanner message="Reconciliation API not yet enabled — see Settings → Reconciliation. All numbers below are sample placeholders." />
+      <div className="rounded-xl bg-warn-soft border border-hx px-4 py-2.5 mt-4 mb-5 text-[12.5px] text-warn flex items-start gap-2">
         <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
         <span>
           <strong>Metadata-only mode:</strong> row counts and aggregates are reconciled — source rows are not copied.
@@ -80,7 +86,7 @@ export default function ReconciliationPage() {
         <Card className="lg:col-span-2" title="Reconciliation Jobs" description="Run history across tables" padding="none">
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
-              <thead className="bg-zinc-50/70 text-[11.5px] uppercase tracking-wider text-ink-4">
+              <thead className="bg-app-2 text-[11.5px] uppercase tracking-wider text-ink-4">
                 <tr>
                   <th className="px-4 py-2.5 text-left font-medium border-b border-hx">Table</th>
                   <th className="px-4 py-2.5 text-right font-medium border-b border-hx">Source</th>
@@ -98,12 +104,12 @@ export default function ReconciliationPage() {
                   </tr>
                 ) : (
                   reconRuns.map((r) => (
-                    <tr key={r.id} className="hover:bg-zinc-50/60">
+                    <tr key={r.id} className="hover:bg-surface-hi">
                       <td className="px-4 py-3 font-medium text-ink font-mono text-[12.5px]">{r.table}</td>
                       <td className="px-4 py-3 text-right font-mono text-[12px] text-ink-2">{formatNumber(r.sourceCount)}</td>
                       <td className="px-4 py-3 text-right font-mono text-[12px] text-ink-2">{formatNumber(r.targetCount)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-[12px] text-amber-700">{r.mismatched}</td>
-                      <td className="px-4 py-3 text-right font-mono text-[12px] font-semibold text-emerald-700">{r.score.toFixed(2)}%</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] text-warn">{r.mismatched}</td>
+                      <td className="px-4 py-3 text-right font-mono text-[12px] font-semibold text-ok">{r.score.toFixed(2)}%</td>
                       <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                       <td className="px-4 py-3 text-ink-3 text-[12px]">{formatDate(r.startedAt)} · {formatTime(r.startedAt)}</td>
                     </tr>

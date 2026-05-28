@@ -59,23 +59,70 @@ _DEFAULT_TRANSPORT_ORDER = ("pydantic_ai", "httpx", "mock")
 # Override via HELIX_PROMPT_TOKEN_BUDGET env var.
 _DEFAULT_TOKEN_BUDGET = 6000
 
+# M-013: budget guardrails. Below the hard floor the persona + output contract
+# + a single upstream artifact no longer fit, so we clamp up to the floor and
+# log loudly. Between the floor and the soft floor the prompt fits but upstream
+# context gets truncated so aggressively that BMAD handoffs degrade — warn so
+# operators know to raise the budget.
+_MIN_TOKEN_BUDGET = 4000   # hard floor — values below this are clamped up
+_WARN_TOKEN_BUDGET = 6000  # soft floor — below this we warn but honour it
+
 # Rough char→token ratio. English ≈ 4 chars/token; mono-spaced markdown
 # averages closer to 3.5. Pick 4 to under-estimate (truncate aggressively).
 _CHARS_PER_TOKEN = 4
 
 
 def _token_budget() -> int:
+    """Resolve the per-call prompt token budget with M-013 guardrails.
+
+    - Unset / unparseable → conservative default.
+    - Below ``_MIN_TOKEN_BUDGET`` (4000) → clamp UP to the floor + error-log,
+      because a smaller budget cannot hold the non-truncatable persona +
+      output contract.
+    - Below ``_WARN_TOKEN_BUDGET`` (6000) → honoured but warn, since upstream
+      artifact context will be heavily truncated.
+    """
     raw = os.getenv("HELIX_PROMPT_TOKEN_BUDGET", "")
     if not raw:
         return _DEFAULT_TOKEN_BUDGET
     try:
-        return max(int(raw), 1000)
+        value = int(raw)
     except ValueError:
+        logger.warning(
+            "HELIX_PROMPT_TOKEN_BUDGET=%r is not an integer — using default %d.",
+            raw,
+            _DEFAULT_TOKEN_BUDGET,
+        )
         return _DEFAULT_TOKEN_BUDGET
+
+    if value < _MIN_TOKEN_BUDGET:
+        logger.error(
+            "HELIX_PROMPT_TOKEN_BUDGET=%d is below the minimum %d — clamping up. "
+            "Prompts smaller than this cannot hold the persona + output contract.",
+            value,
+            _MIN_TOKEN_BUDGET,
+        )
+        return _MIN_TOKEN_BUDGET
+    if value < _WARN_TOKEN_BUDGET:
+        logger.warning(
+            "HELIX_PROMPT_TOKEN_BUDGET=%d is below the recommended %d — upstream "
+            "artifact context will be heavily truncated; raise it if BMAD "
+            "handoffs degrade.",
+            value,
+            _WARN_TOKEN_BUDGET,
+        )
+    return value
 
 
 def _estimate_tokens(text: str) -> int:
-    """Char-based token estimate. Fast, deterministic, no tokenizer dep."""
+    """Char-based token estimate. Fast, deterministic, no tokenizer dep.
+
+    L-008: a real tokenizer (``tiktoken``) would be more accurate, but it is
+    NOT an installed dependency (verified against worker/requirements.txt and
+    the agents deps) and the review forbids adding one. The len//4 heuristic
+    deliberately under-counts so the budget allocator truncates conservatively;
+    when ``tiktoken`` is added in the future, swap this body to use it.
+    """
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
@@ -136,10 +183,18 @@ def _build_system_prompt(
             label=f"BMAD skill body for {skill.name}",
         )
 
-    fields_block = json.dumps(
-        {name: str(field.annotation) for name, field in output_model.model_fields.items()},
-        indent=2,
-    )
+    # L-001: emit the real JSON Schema (types, enums, defaults, descriptions,
+    # required/optional) instead of Python's ``str(annotation)`` reprs like
+    # "typing.Optional[list[str]]" which the LLM cannot reliably map to JSON.
+    try:
+        schema = output_model.model_json_schema()
+        properties = schema.get("properties", schema)
+        fields_block = json.dumps(properties, indent=2)
+    except Exception:  # noqa: BLE001 — never let schema gen break prompt building
+        fields_block = json.dumps(
+            {name: str(field.annotation) for name, field in output_model.model_fields.items()},
+            indent=2,
+        )
 
     return (
         f"{persona}\n\n"
@@ -343,11 +398,20 @@ def _transport_order() -> tuple[str, ...]:
     return tuple(x.strip() for x in override.split(",") if x.strip())
 
 
-def _resolve_provider_for_org(org_id: str | None) -> dict[str, Any] | None:
+def _resolve_provider_for_org(
+    org_id: str | None,
+    agent_code: str = "bmad-agent",
+) -> dict[str, Any] | None:
     """Return decrypted provider details for an org, or None if unavailable.
 
     Used by the PydanticAI transport. Reads the same LLMProvider table the
     httpx transport uses, so behaviour is consistent across paths.
+
+    H-012 fix: ``agent_code`` is forwarded to ``resolve_routing`` so per-agent
+    LLM mappings configured in the admin UI (e.g.
+    ``bmad-agent-architect`` → Claude Opus) are honoured by PydanticAI too,
+    not just the httpx transport. The default ``"bmad-agent"`` preserves
+    legacy behaviour for any caller that still doesn't supply an agent_code.
     """
     if not org_id:
         return None
@@ -388,7 +452,7 @@ def _resolve_provider_for_org(org_id: str | None) -> dict[str, Any] | None:
             .all()
         )
         pid, model, temp, max_tokens = resolve_routing(
-            "bmad-agent",
+            agent_code,
             provider.id,
             provider.default_model,
             mappings,
@@ -421,11 +485,17 @@ def _try_pydantic_ai(
     output_model: type[BaseModel],
     org_id: str | None,
 ) -> tuple[BaseModel | None, str | None]:
-    """Try PydanticAI transport. Returns (parsed_model, raw_markdown) or (None, None)."""
+    """Try PydanticAI transport. Returns (parsed_model, raw_markdown) or (None, None).
+
+    H-012: ``agent.code`` is forwarded into provider resolution so per-agent
+    LLM routing (admin-configured ``bmad-agent-architect`` → Opus etc.) is
+    consulted on this path. Previously the literal string ``"bmad-agent"``
+    was used and every PydanticAI call silently used the org default.
+    """
     if not pydantic_ai_available():
         return None, None
 
-    provider_info = _resolve_provider_for_org(org_id)
+    provider_info = _resolve_provider_for_org(org_id, agent_code=agent.code)
     if not provider_info:
         return None, None
 

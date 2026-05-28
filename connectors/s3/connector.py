@@ -29,9 +29,25 @@ class S3Connector(BaseConnector):
         supports_recon=False,
     )
 
+    def __init__(self, config: dict[str, Any]):
+        super().__init__(config)
+        # H-013: cache the boto3 S3 client on the instance so high-frequency
+        # discovery (list_schemas → list_tables → list_columns) reuses one
+        # SigV4-signed HTTPS connection pool instead of building a fresh
+        # client + connection pool per call. Set lazily in _get_client.
+        self._client: Any = None
+
     def _get_client(self):
+        # H-013: cached client short-circuit. assume_role-issued tokens are
+        # held inside the cached client; refresh requires re-instantiating
+        # the connector. Caller lifecycle (one S3Connector per discovery
+        # request) already bounds the token lifetime to that request.
+        if self._client is not None:
+            return self._client
+
         try:
             import boto3
+            from botocore.exceptions import NoCredentialsError
         except ImportError as exc:
             raise DiscoveryError("boto3 not installed. Add boto3 to requirements.txt.", "s3") from exc
 
@@ -42,7 +58,19 @@ class S3Connector(BaseConnector):
             kwargs["aws_secret_access_key"] = cfg.get("secret_access_key", "")
         if cfg.get("role_arn"):
             sts = boto3.client("sts", **kwargs)
-            assumed = sts.assume_role(RoleArn=cfg["role_arn"], RoleSessionName="helix-s3")
+            try:
+                assumed = sts.assume_role(
+                    RoleArn=cfg["role_arn"],
+                    RoleSessionName="helix-s3",
+                )
+            except NoCredentialsError as exc:
+                # H-013: replace the opaque NoCredentialsError with an
+                # actionable message that points at the two valid setups.
+                raise ConnectionError(
+                    "S3 connector requires either ambient IAM credentials "
+                    "in the worker container, or explicit access_key_id + "
+                    "secret_access_key in the connector config."
+                ) from exc
             creds = assumed["Credentials"]
             kwargs = {
                 "aws_access_key_id": creds["AccessKeyId"],
@@ -50,7 +78,8 @@ class S3Connector(BaseConnector):
                 "aws_session_token": creds["SessionToken"],
                 "region_name": cfg.get("region", "us-east-1"),
             }
-        return boto3.client("s3", **kwargs)
+        self._client = boto3.client("s3", **kwargs)
+        return self._client
 
     async def test_connection(self) -> ConnectorTestResult:
         try:

@@ -49,6 +49,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // L-011: propagate token changes across tabs. The `storage` event fires in
+  // OTHER tabs when localStorage["helix_token"] is written/removed, so logging
+  // in or out in one tab updates the rest without a manual refresh.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "helix_token") return;
+      const next = e.newValue;
+      if (!next) {
+        // Logged out elsewhere — clear local session.
+        setToken(null);
+        setUser(null);
+        return;
+      }
+      if (next === token) return; // no-op (we triggered it)
+      setToken(next);
+      fetch(`${API_BASE}/api/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${next}` },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) setUser({ email: data.email, name: data.name });
+        })
+        .catch(() => {
+          /* best-effort; token still set so requests can proceed */
+        });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [token]);
+
   const loginFn = async (email: string, password: string) => {
     const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
       method: "POST",
@@ -98,6 +128,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // SC-010: revoke the token server-side so a copy stolen via XSS cannot
+    // outlive the session. Fire-and-forget — clear local state regardless of
+    // the network result so logout always feels instant and never blocks.
+    const stored = token ?? localStorage.getItem("helix_token");
+    if (stored) {
+      void fetch(`${API_BASE}/api/v1/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${stored}` },
+      }).catch(() => {
+        /* best-effort: token still expires at JWT TTL */
+      });
+    }
     localStorage.removeItem("helix_token");
     setToken(null);
     setUser(null);

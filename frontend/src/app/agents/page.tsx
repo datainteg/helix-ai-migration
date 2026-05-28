@@ -275,7 +275,7 @@ function LinearView({ run, selectedRun, setSelectedRun }: ViewProps) {
             <div className="flex gap-1.5">
               <Button variant="outline" size="sm"><Pause className="h-3 w-3" /> Pause</Button>
               <Button variant="outline" size="sm"><X className="h-3 w-3" /> Cancel</Button>
-              <Button variant="ghost" size="icon"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+              <Button variant="ghost" size="icon" aria-label="More actions"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
             </div>
           </div>
 

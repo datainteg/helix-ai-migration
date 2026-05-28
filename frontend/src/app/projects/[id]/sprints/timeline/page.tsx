@@ -218,9 +218,12 @@ export default function SprintTimelinePage() {
       <Card padding="sm" bodyClassName="p-0">
         <div className="overflow-x-auto">
           <svg
-            width={CHART_WIDTH}
+            width="100%"
             height={totalHeight}
+            viewBox={`0 0 ${CHART_WIDTH} ${totalHeight}`}
+            preserveAspectRatio="xMinYMin meet"
             className="block"
+            style={{ minWidth: CHART_WIDTH }}
             role="img"
             aria-label="Sprint timeline"
           >

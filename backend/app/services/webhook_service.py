@@ -37,7 +37,16 @@ async def deliver_webhook(db: Session, org_id: str, event: str, payload: dict) -
 
     async with httpx.AsyncClient(timeout=10) as client:
         for ep in endpoints:
-            events_list = [e.strip() for e in ep.events.split(",")]
+            # H-014: drop empty tokens so a poisoned `events == ""` (which
+            # split() turns into [""]) is treated as "no events" — it must
+            # NOT silently match `*`. An endpoint with no real event names
+            # delivers nothing rather than everything.
+            events_list = [e.strip() for e in (ep.events or "").split(",") if e.strip()]
+            if not events_list:
+                logger.warning(
+                    "webhook_skip_empty_events endpoint=%s — events list is empty", ep.id
+                )
+                continue
             if "*" not in events_list and event not in events_list:
                 continue
 

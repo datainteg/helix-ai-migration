@@ -172,7 +172,16 @@ def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:
     """
     from sqlalchemy import cast, Date
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    now = datetime.now(timezone.utc)
+    # H-004: snap `since` to midnight UTC of the FIRST day in the window so
+    # the SQL filter and the zero-fill loop cover exactly the same N days.
+    # Previously `since = now - timedelta(days=days)` crossed day boundaries
+    # (e.g. a 09:00 request excluded a usage row written at 08:30 on the
+    # trailing day, while the loop still zero-filled that date) — costs near
+    # the window edge appeared to vanish.
+    since = (now - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     rows = (
         db.query(
             cast(LLMUsageRecord.created_at, Date).label("d"),
@@ -186,8 +195,8 @@ def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:
     )
     by_date = {str(r[0]): float(r[1] or 0.0) for r in rows}
     out: list[dict] = []
-    cursor = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
-    today = datetime.now(timezone.utc).date()
+    cursor = since.date()
+    today = now.date()
     while cursor <= today:
         key = cursor.isoformat()
         out.append({"date": key, "cost_usd": round(by_date.get(key, 0.0), 4)})

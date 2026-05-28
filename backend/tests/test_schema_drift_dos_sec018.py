@@ -131,7 +131,7 @@ def _admin_token(client) -> tuple[str, str]:
     res = client.post("/api/v1/auth/first-admin", json={
         "email": f"dos+{slug}@example.com",
         "name": "DoS Admin",
-        "password": "DosPass123!",
+        "password": "DosPassPass123!",
         "organization_name": "DoS Org",
         "organization_slug": slug,
     })

@@ -160,6 +160,7 @@ interface WizardData {
   name: string;
   email: string;
   password: string;
+  setup_token: string;
   region: string;
   env: string;
   // step 1
@@ -225,6 +226,7 @@ export default function FirstAdminSetupPage() {
     name: "",
     email: "",
     password: "",
+    setup_token: "",
     region: "us-east-1",
     env: "development",
     providers: [],
@@ -292,7 +294,10 @@ export default function FirstAdminSetupPage() {
     data.organization_slug.trim().length > 0 &&
     data.name.trim().length > 0 &&
     /^\S+@\S+\.\S+$/.test(data.email) &&
-    data.password.length >= 8;
+    // SC-002: backend password policy requires min 12 chars + complexity.
+    data.password.length >= 12 &&
+    // SC-011: setup token is mandatory for the first-admin bootstrap.
+    data.setup_token.trim().length > 0;
 
   const step1Valid =
     data.providers.length > 0 &&
@@ -314,7 +319,12 @@ export default function FirstAdminSetupPage() {
   const persistStep0 = async () => {
     const res = await fetch(`${API_BASE}/api/v1/auth/first-admin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // SC-011: the backend requires an out-of-band setup token (printed to
+        // the backend logs on first boot) to defeat the bootstrap race.
+        "X-Setup-Token": data.setup_token.trim(),
+      },
       body: JSON.stringify({
         email: data.email,
         name: data.name,
@@ -764,12 +774,28 @@ function StepWorkspace({
           required
         />
       </FormRow>
-      <FormRow label="Password" span={2} hint="Minimum 8 characters. Stored as a bcrypt hash.">
+      <FormRow
+        label="Password"
+        span={2}
+        hint="Minimum 12 characters with upper + lower case, a digit, and a symbol. Stored as a bcrypt hash."
+      >
         <Input
           type="password"
-          placeholder="••••••••"
+          placeholder="••••••••••••"
           value={data.password}
           onChange={(e) => update("password", e.target.value)}
+          required
+        />
+      </FormRow>
+      <FormRow
+        label="Setup token"
+        span={2}
+        hint="Printed to the backend logs on first boot (SETUP_TOKEN). Required to provision the first admin."
+      >
+        <Input
+          placeholder="paste the X-Setup-Token value from the backend logs"
+          value={data.setup_token}
+          onChange={(e) => update("setup_token", e.target.value)}
           required
         />
       </FormRow>

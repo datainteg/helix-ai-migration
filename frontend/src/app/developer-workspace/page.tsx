@@ -688,8 +688,9 @@ function AiReviewPane() {
             style={{ left: 10, color: "var(--con-brand)" }}
           />
           <input
+            aria-label="Ask Helix about this migration step"
             placeholder="Explain this migration step…"
-            className="bg-transparent border-0 outline-none w-full text-ink"
+            className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
             style={{ fontSize: 12.5, height: "100%" }}
           />
           <Kbd>↵</Kbd>
@@ -700,6 +701,21 @@ function AiReviewPane() {
 }
 
 export default function WorkspacePage() {
+  const [showLeftPane, setShowLeftPane] = useState(true);
+  const [showRightPane, setShowRightPane] = useState(true);
+
+  // Build responsive column template:
+  // - Below md: only center pane visible (left/right are toggleable)
+  // - md to <lg: left + center, optional right
+  // - lg+: left + center + right
+  const cols = [
+    showLeftPane ? "260px" : null,
+    "1fr",
+    showRightPane ? "360px" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <AppShell fullBleed>
       <div style={{ padding: "12px 32px 0" }}>
@@ -739,7 +755,27 @@ export default function WorkspacePage() {
           />
           <ProjectSwitcher />
         </div>
-        <div className="flex" style={{ gap: 8 }}>
+        <div className="flex flex-wrap" style={{ gap: 8 }}>
+          <Button
+            variant="outline"
+            size="md"
+            className="md:hidden"
+            aria-pressed={showLeftPane}
+            aria-label={showLeftPane ? "Hide files" : "Show files"}
+            onClick={() => setShowLeftPane((v) => !v)}
+          >
+            <Folder size={13} /> {showLeftPane ? "Hide files" : "Show files"}
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            className="lg:hidden"
+            aria-pressed={showRightPane}
+            aria-label={showRightPane ? "Hide review" : "Show review"}
+            onClick={() => setShowRightPane((v) => !v)}
+          >
+            <Sparkles size={13} /> {showRightPane ? "Hide review" : "Show review"}
+          </Button>
           <Button variant="outline" size="md">
             <Upload size={13} /> Upload artifact
           </Button>
@@ -752,17 +788,21 @@ export default function WorkspacePage() {
         </div>
       </div>
 
-      {/* Three-pane workspace */}
+      {/* Three-pane workspace — wrapped in overflow-x-auto so the IDE
+          degrades gracefully below ~1100px instead of clipping. */}
+      <div className="overflow-x-auto border-b border-hx">
       <div
-        className="grid border-b border-hx"
+        className="grid"
         style={{
-          gridTemplateColumns: "260px 1fr 360px",
+          gridTemplateColumns: cols,
+          minWidth: showLeftPane && showRightPane ? 980 : 620,
           height: "calc(100vh - 44px - 81px)",
         }}
       >
         {/* LEFT: artifact explorer */}
+        {showLeftPane && (
         <div
-          className="flex flex-col bg-surface overflow-hidden"
+          className="flex flex-col bg-surface overflow-hidden min-w-0"
           style={{ borderRight: "1px solid var(--con-line)" }}
         >
           <div
@@ -788,8 +828,9 @@ export default function WorkspacePage() {
                 style={{ left: 10 }}
               />
               <input
+                aria-label="Search files"
                 placeholder="Search files…"
-                className="bg-transparent border-0 outline-none w-full text-ink"
+                className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
                 style={{ fontSize: 12, height: "100%" }}
               />
             </label>
@@ -855,17 +896,23 @@ export default function WorkspacePage() {
             </div>
           </div>
         </div>
+        )}
 
-        {/* CENTER: diff */}
-        <DiffPane />
+        {/* CENTER: diff — wrapped to allow shrinking */}
+        <div className="min-w-0 overflow-hidden">
+          <DiffPane />
+        </div>
 
         {/* RIGHT: AI review */}
+        {showRightPane && (
         <div
-          className="bg-surface-hi overflow-hidden"
+          className="bg-surface-hi overflow-hidden min-w-0"
           style={{ borderLeft: "1px solid var(--con-line)" }}
         >
           <AiReviewPane />
         </div>
+        )}
+      </div>
       </div>
     </AppShell>
   );

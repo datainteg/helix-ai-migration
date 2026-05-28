@@ -51,6 +51,7 @@ export default function SystemHealthPage() {
         <LoadingState label="Checking system health…" />
       ) : (
         <Card bodyClassName="p-0">
+          <div className="overflow-x-auto table-scroll">
           <table className="w-full text-[13px] border-t border-hx">
             <thead className="bg-surface-hi text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono">
               <tr>
@@ -76,6 +77,7 @@ export default function SystemHealthPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
     </AdminShell>

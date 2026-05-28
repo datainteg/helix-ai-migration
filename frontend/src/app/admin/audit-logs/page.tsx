@@ -82,7 +82,7 @@ export default function AuditLogsPage() {
                   <td className="px-4 py-3 font-mono text-[12px] text-ink-3">{formatDate(log.created_at)} · {formatTime(log.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <Avatar name={log.actor || "System"} size="sm" />
+                      <Avatar name={log.actor || "System"} size={20} />
                       <span className="text-ink-2">{log.actor || "System"}</span>
                     </div>
                   </td>

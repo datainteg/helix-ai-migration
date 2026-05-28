@@ -53,6 +53,28 @@ async def _poll_once() -> None:
         db.close()
 
 
+def _load_diff_summary(raw) -> dict:
+    """C-004: tolerant read of the `diff_summary` Text column.
+
+    The column is `Text`; the canonical contract is "a JSON STRING produced
+    by json.dumps". This helper normalises reads so a single malformed /
+    legacy row (e.g. one where a writer accidentally stored a Python-repr
+    dict, or where the value is already a dict because a future column type
+    change landed) does not crash the CDC poll loop. Always returns a dict.
+    """
+    if raw is None or raw == "":
+        return {}
+    # JSONB column or a writer that stored a dict directly → already parsed.
+    if isinstance(raw, dict):
+        return raw
+    try:
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("CDC: diff_summary not valid JSON; resetting to {}")
+        return {}
+
+
 async def _poll_cutover(db: Session, c) -> None:
     """Poll one cutover. Updates cutover.diff_summary in place."""
     # MVP: source_ref is informational ("oracle://schema.table"). We don't
@@ -60,7 +82,10 @@ async def _poll_cutover(db: Session, c) -> None:
     # supplies the tick via POST /cutovers/{id}/tail-sync/tick. The engine
     # only marks "we checked" so dashboards can show liveness.
     now_iso = datetime.now(timezone.utc).isoformat()
-    summary = json.loads(c.diff_summary) if c.diff_summary else {}
+    # C-004: every writer normalises to a JSON STRING (column is Text), and
+    # every reader goes through _load_diff_summary. No json.dumps wrapping of
+    # an already-string value, no Python-repr leakage.
+    summary = _load_diff_summary(c.diff_summary)
     summary["last_poll_check_at"] = now_iso
     c.diff_summary = json.dumps(summary)
     db.commit()

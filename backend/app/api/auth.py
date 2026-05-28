@@ -1,16 +1,26 @@
-from fastapi import APIRouter, Depends, Request, BackgroundTasks
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.identity import User
 from app.schemas.identity import UserLogin, TokenResponse, FirstAdminSetup, UserResponse
 from app.services.auth_service import setup_first_admin, login, get_current_user
 from app.services.password_reset_service import request_password_reset, confirm_password_reset
-from app.auth.jwt import create_access_token, get_current_user_id, revoke_token, register_sse_ticket
+from app.auth.jwt import (
+    create_access_token, get_current_user_id, revoke_token,
+    register_sse_ticket, bind_sse_ticket,
+)
+from app.utils.client_ip import get_client_ip
 from app.api.audit import write_audit
 from app.rate_limiting import limiter
 from app.core.config import settings
-from pydantic import BaseModel, EmailStr
+from app.security.password_policy import validate_password
+from pydantic import BaseModel, EmailStr, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class PasswordResetRequest(BaseModel):
@@ -21,6 +31,11 @@ class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
 
+    @field_validator("new_password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:  # SC-002
+        return validate_password(v)
+
 
 router = APIRouter(tags=["auth"])
 _bearer = HTTPBearer()
@@ -29,6 +44,33 @@ _bearer = HTTPBearer()
 @router.post("/auth/first-admin", response_model=TokenResponse)
 @limiter.limit("5/minute")
 def create_first_admin(request: Request, data: FirstAdminSetup, db: Session = Depends(get_db)):
+    # SC-011: require an out-of-band X-Setup-Token that matches the
+    # operator-configured SETUP_TOKEN envvar. This closes the bootstrap race
+    # where the first network caller after `alembic upgrade head` owns the
+    # platform. If SETUP_TOKEN is not configured, the endpoint refuses
+    # entirely — a noisy denial is safer than a TOFU bootstrap.
+    expected = settings.SETUP_TOKEN
+    if not expected:
+        # Print to stderr / log once so the operator sees what to set.
+        if not db.query(User).filter(User.is_super_admin == True).first():
+            logger.critical(
+                "POST /auth/first-admin invoked but SETUP_TOKEN is not "
+                "configured. Set SETUP_TOKEN=<random hex> in the backend env "
+                "and resend the request with header X-Setup-Token: <value>."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="first-admin bootstrap is disabled: SETUP_TOKEN env var is not configured",
+        )
+    provided = request.headers.get("X-Setup-Token", "")
+    # Constant-time comparison to avoid trivial timing oracle.
+    import hmac as _hmac
+    if not provided or not _hmac.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="invalid or missing X-Setup-Token",
+        )
+
     result = setup_first_admin(db, data)
     uid = result.get("user_id", "")
     user = get_current_user(db, uid)
@@ -72,6 +114,12 @@ def issue_sse_ticket(
     SEC-003: bind the ticket to the bearer that minted it — when the
     operator hits /auth/logout (or /auth/refresh), the ticket is revoked
     too, so a stolen SSE ticket cannot outlive its parent session.
+
+    SC-013: additionally bind the ticket to the caller's forwarded IP + a
+    UA hash captured here. The SSE consume handlers verify both, so a ticket
+    that leaks via a proxy access log / Referer header cannot be replayed
+    from a different client even inside its 60s TTL. Now feasible because
+    SC-051 gives a trustworthy client IP behind the proxy.
     """
     from datetime import timedelta
     ttl_seconds = 60
@@ -81,6 +129,12 @@ def issue_sse_ticket(
         extra_claims={"scope": "sse"},
     )
     register_sse_ticket(credentials.credentials, ticket, ttl_seconds)
+    bind_sse_ticket(
+        ticket,
+        get_client_ip(request),
+        request.headers.get("user-agent"),
+        ttl_seconds,
+    )
     return {"ticket": ticket, "expires_in": ttl_seconds}
 
 

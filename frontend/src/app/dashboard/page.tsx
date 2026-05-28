@@ -146,7 +146,7 @@ export default function DashboardPage() {
           <DemoBanner message="Charts and tables below are sample. Once you create a project and run a workflow, the metric strip + workflow tiles populate from real data." />
         )}
         {/* Metric strip — every value now comes from /api/v1/dashboard/stats. */}
-        <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell big label="ACTIVE PROJECTS"
             value={stats ? String(stats.activeProjects) : "—"}
             hint={stats ? `${stats.archivedProjects} archived` : "loading…"}
@@ -172,7 +172,7 @@ export default function DashboardPage() {
         </div>
 
         {/* LLM spend row — real numbers from /api/v1/usage/llm. */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-4 bg-surface border border-hx rounded-[10px] divide-y sm:divide-y-0 sm:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell label="LLM SPEND · 30D"
             value={usage ? fmtUsd(usage.total_cost_usd) : "—"}
             hint={usage ? `${(usage.input_tokens + usage.output_tokens).toLocaleString()} tokens` : "loading…"}
@@ -192,7 +192,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Trend + Validation outcomes */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card
             title="Migration throughput"
             description="Tables migrated per day · last 30 days"
@@ -221,7 +221,9 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
-            <AreaChart data={TREND_DATA} width={760} height={220} />
+            <div className="w-full overflow-x-auto">
+              <AreaChart data={TREND_DATA} width={760} height={220} />
+            </div>
           </Card>
 
           <Card title="Validation outcomes" eyebrow="LAST 24 H" description="Across 2,341 validation runs">
@@ -256,7 +258,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Live feed + Risk matrix */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card
             title="Agent activity"
             eyebrow="LIVE STREAM"
@@ -424,7 +426,7 @@ export default function DashboardPage() {
         </Card>
 
         {/* Agent roster + connector health */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card title="Agent roster" eyebrow="BMAD CREW" description="Per-agent reliability and routing" className="col-span-2" bodyClassName="p-0">
             <div className="border-t border-hx">
               <table className="w-full border-collapse text-[12.5px]">

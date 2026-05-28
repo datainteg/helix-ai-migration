@@ -7,7 +7,7 @@ def _admin_token(client):
     res = client.post("/api/v1/auth/first-admin", json={
         "email": "kb@example.com",
         "name": "KB Admin",
-        "password": "KbPass1234!",
+        "password": "KbPassPass1234!",
         "organization_name": "KB Org",
         "organization_slug": f"kb-{uuid.uuid4().hex[:8]}",
     })

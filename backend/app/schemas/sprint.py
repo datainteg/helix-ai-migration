@@ -5,17 +5,38 @@ shapes; mirrors `frontend/src/lib/sprints/types.ts`. Mutation endpoints
 exist for create/update; seed populates via the same shapes.
 """
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# SC-019: free-text caps for the mutation (Create/Update) schemas below.
+# Short labels get 200 chars; multi-line narrative fields get a few KB.
+
+# H-016: the canonical set of task statuses (mirrors the frontend kanban
+# `TaskStatus` union in frontend/src/lib/sprints/types.ts). Constraining the
+# update schema to this Literal rejects garbage like "banana" at the schema
+# layer instead of silently writing it to SprintTaskHistory.to_status.
+TaskStatusLiteral = Literal[
+    "backlog",
+    "ready",
+    "in_progress",
+    "ai_processing",
+    "human_review",
+    "validation",
+    "recon",
+    "qa",
+    "approved",
+    "completed",
+    "blocked",
+]
 
 
 # ── Sprint ─────────────────────────────────────────────────────────
 
 class SprintCreate(BaseModel):
     index: int
-    name: str
-    goal: Optional[str] = None
+    name: str = Field(max_length=200)
+    goal: Optional[str] = Field(default=None, max_length=2000)
     status: str = "planning"
     health: str = "on-track"
     start_date: Optional[datetime] = None
@@ -43,14 +64,14 @@ class SprintResponse(BaseModel):
 # ── Tasks ──────────────────────────────────────────────────────────
 
 class SprintTaskCreate(BaseModel):
-    title: str
+    title: str = Field(max_length=500)
     type: str
     status: str = "backlog"
     priority: str = "P3"
     owner_id: Optional[str] = None
-    owner_name: Optional[str] = None
+    owner_name: Optional[str] = Field(default=None, max_length=200)
     owner_kind: str = "human"
-    ai_agent: Optional[str] = None
+    ai_agent: Optional[str] = Field(default=None, max_length=200)
     epic_id: Optional[str] = None
     risk_level: str = "low"
     story_points: int = 0
@@ -60,7 +81,7 @@ class SprintTaskCreate(BaseModel):
     recon_status: Optional[str] = None
     dependency_ids: list[str] = []
     artifact_ids: list[str] = []
-    blocked_reason: Optional[str] = None
+    blocked_reason: Optional[str] = Field(default=None, max_length=2000)
 
 
 class SprintTaskResponse(SprintTaskCreate):
@@ -71,27 +92,28 @@ class SprintTaskResponse(SprintTaskCreate):
 
 
 class SprintTaskUpdate(BaseModel):
-    status: Optional[str] = None
+    # H-016: reject unknown status strings at the schema layer.
+    status: Optional[TaskStatusLiteral] = None
     priority: Optional[str] = None
     owner_id: Optional[str] = None
-    owner_name: Optional[str] = None
-    ai_agent: Optional[str] = None
+    owner_name: Optional[str] = Field(default=None, max_length=200)
+    ai_agent: Optional[str] = Field(default=None, max_length=200)
     risk_level: Optional[str] = None
     story_points: Optional[int] = None
     actual_hours: Optional[int] = None
     validation_status: Optional[str] = None
     recon_status: Optional[str] = None
-    blocked_reason: Optional[str] = None
+    blocked_reason: Optional[str] = Field(default=None, max_length=2000)
 
 
 # ── Risks ──────────────────────────────────────────────────────────
 
 class SprintRiskCreate(BaseModel):
-    title: str
+    title: str = Field(max_length=500)
     category: str
     level: str
-    description: Optional[str] = None
-    mitigation: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=4000)
+    mitigation: Optional[str] = Field(default=None, max_length=4000)
     status: str = "open"
     ai_confidence: Optional[int] = None
     owner_id: Optional[str] = None
@@ -109,7 +131,7 @@ class SprintRiskResponse(SprintRiskCreate):
 class SprintApprovalCreate(BaseModel):
     task_id: Optional[str] = None
     kind: str
-    title: str
+    title: str = Field(max_length=500)
     requested_by: str
     approvers: list[str] = []
     status: str = "pending"
@@ -131,7 +153,7 @@ class ApprovalDecision(BaseModel):
 # ── Releases ───────────────────────────────────────────────────────
 
 class MigrationReleaseCreate(BaseModel):
-    name: str
+    name: str = Field(max_length=200)
     sprint_ids: list[str] = []
     stage: str = "planned"
     target_environment: str = "staging"

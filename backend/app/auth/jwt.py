@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.config import settings
@@ -18,6 +18,10 @@ _REVOKED_PREFIX = "revoked_token:"
 # When the bearer is revoked (logout / refresh), every ticket in the set
 # is revoked too so a leaked ticket cannot outlive its parent session.
 _SSE_TICKETS_PREFIX = "sse_tickets:"
+# SC-013: per-ticket binding to the caller's forwarded IP + a UA hash,
+# captured at mint time and verified on consume. A ticket leaked via a
+# proxy/Referer log (CWE-598) is then unusable from a different client.
+_SSE_BIND_PREFIX = "sse_bind:"
 # SEC-030: helpful constants for iat/iss/aud.
 _TOKEN_ISSUER = settings.APP_NAME
 _TOKEN_AUDIENCE = settings.APP_NAME
@@ -80,6 +84,68 @@ def _sse_set_key(parent_token: str) -> str:
     return _SSE_TICKETS_PREFIX + _token_hash(parent_token)
 
 
+def _sse_bind_key(sse_ticket: str) -> str:
+    return _SSE_BIND_PREFIX + _token_hash(sse_ticket)
+
+
+def _sse_bind_fingerprint(client_ip: str | None, user_agent: str | None) -> str:
+    """Stable fingerprint of the consuming client. We hash the UA (it can be
+    long / contain PII) and concatenate the forwarded IP. An empty IP is
+    tolerated (mint and consume must simply agree)."""
+    ua_hash = hashlib.sha256((user_agent or "").encode("utf-8")).hexdigest()
+    return f"{client_ip or ''}|{ua_hash}"
+
+
+def bind_sse_ticket(sse_ticket: str, client_ip: str | None, user_agent: str | None, ttl_seconds: int) -> None:
+    """SC-013: store the mint-time client fingerprint for `sse_ticket`.
+
+    No-op when Redis is unavailable — in that degraded mode the ticket falls
+    back to its existing protections (60s TTL + session-revocation cascade).
+    """
+    from app.core.redis_client import get_redis
+    r = get_redis()
+    if not r:
+        return
+    try:
+        r.setex(
+            _sse_bind_key(sse_ticket),
+            ttl_seconds,
+            _sse_bind_fingerprint(client_ip, user_agent),
+        )
+    except Exception:
+        pass
+
+
+def sse_ticket_binding_ok(sse_ticket: str, client_ip: str | None, user_agent: str | None) -> bool:
+    """SC-013: True iff the consuming client matches the mint-time binding.
+
+    Fail-OPEN when there is no stored binding (Redis offline at mint, or a
+    legacy ticket minted before this change) so we never break the SSE flow in
+    a degraded deployment. Fail-CLOSED only when a binding EXISTS and differs —
+    that is the leaked-ticket-replayed-elsewhere case.
+    """
+    from app.core.redis_client import get_redis
+    r = get_redis()
+    if not r:
+        return True
+    try:
+        stored = r.get(_sse_bind_key(sse_ticket))
+    except Exception:
+        return True
+    if stored is None:
+        return True
+    if isinstance(stored, bytes):
+        stored = stored.decode("utf-8", errors="replace")
+    return hmac_compare(stored, _sse_bind_fingerprint(client_ip, user_agent))
+
+
+def hmac_compare(a: str, b: str) -> bool:
+    """Constant-time string compare (thin wrapper so callers don't import
+    the stdlib symbol directly)."""
+    import hmac as _hmac
+    return _hmac.compare_digest(a, b)
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -110,6 +176,12 @@ def create_access_token(
         "iss": _TOKEN_ISSUER,
         "aud": _TOKEN_AUDIENCE,
         "jti": secrets.token_urlsafe(16),
+        # SC-036: every token carries an explicit scope. Normal bearers are
+        # "default"; the SSE ticket mint overrides this with "sse" via
+        # extra_claims. `get_current_user_id` rejects any token whose scope is
+        # set and not "default", so an SSE ticket can never act as a full
+        # bearer on a non-SSE endpoint (the two SSE handlers check for "sse").
+        "scope": "default",
     }
     if extra_claims:
         to_encode.update(extra_claims)
@@ -279,9 +351,33 @@ async def decode_access_token_async(token: str) -> dict:
     return payload
 
 
-async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+async def get_current_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
     payload = decode_access_token(credentials.credentials)
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    # SC-036: reject scoped tokens on the normal bearer path. Only "default"
+    # (or a token minted before this change, which carries no scope) is a
+    # full bearer. An SSE ticket (scope="sse") must NOT authenticate any
+    # non-SSE endpoint even within its 60s TTL — the two SSE handlers verify
+    # scope=="sse" themselves and bypass this dependency entirely.
+    scope = payload.get("scope")
+    if scope is not None and scope != "default":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token scope is not valid for this endpoint",
+        )
+    # SC-012: propagate impersonation attribution onto request.state so
+    # the audit writer can record the originating super-admin alongside
+    # the impersonated user. Missing/None when the JWT was not minted by
+    # /superadmin/impersonate. Wrapped in a try/except because some test
+    # paths construct ASGI scopes without a `state` attribute.
+    try:
+        request.state.impersonator_id = payload.get("imp_by")
+        request.state.impersonation_reason = payload.get("imp_reason")
+    except Exception:  # noqa: BLE001 — best-effort, never block auth
+        pass
     return user_id

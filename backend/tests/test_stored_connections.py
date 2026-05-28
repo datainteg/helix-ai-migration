@@ -21,12 +21,12 @@ def _login(client, email: str, slug: str) -> tuple[str, str]:
         json={
             "email": email,
             "name": "Tester",
-            "password": "Test123!",
+            "password": "TestPass123!",
             "organization_name": f"Org-{slug}",
             "organization_slug": slug,
         },
     )
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
     proj = client.post("/api/v1/projects", json={"name": "P"}, headers=h)

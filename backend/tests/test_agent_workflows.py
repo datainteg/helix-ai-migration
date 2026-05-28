@@ -20,12 +20,12 @@ def _login(client, email: str, slug: str) -> str:
         json={
             "email": email,
             "name": "Tester",
-            "password": "Test123!",
+            "password": "TestPass123!",
             "organization_name": f"Org-{slug}",
             "organization_slug": slug,
         },
     )
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     return login.json()["access_token"]
 
 
@@ -59,8 +59,17 @@ def _seed_workflow(client, token, *, status: str = "completed", mode: str = "loc
         db.commit()
         db.refresh(run)
 
-        # Persist artifact file so artifact-content can read it.
-        tmpfile = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+        # Persist artifact file so artifact-content can read it. SC-014:
+        # artifact-content now hard-pins served paths to the BMAD output /
+        # ARTIFACT_STORAGE_PATH roots, so the file MUST live under that root
+        # (a bare system tempfile would now be correctly rejected as 403).
+        from app.core.config import settings as _settings
+        from pathlib import Path as _Path
+        root = _Path(_settings.ARTIFACT_STORAGE_PATH or "./data/artifacts").resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        tmpfile = tempfile.NamedTemporaryFile(
+            "w", suffix=".md", delete=False, encoding="utf-8", dir=str(root)
+        )
         tmpfile.write("---\nagent: analyst\n---\n# Sample artifact\nbody")
         tmpfile.close()
         artifact_path = tmpfile.name
@@ -160,7 +169,7 @@ def test_get_workflow_cross_org_rejected(client):
         json={
             "email": "b@t.com",
             "name": "B",
-            "password": "Test123!",
+            "password": "TestPass123!",
             "organization_name": "Org-B",
             "organization_slug": "orgb",
         },
@@ -178,7 +187,7 @@ def test_get_workflow_cross_org_rejected(client):
         user_b = User(
             email="b2@t.com",
             name="B2",
-            password_hash=hash_password("Test123!"),
+            password_hash=hash_password("TestPass123!"),
             is_super_admin=False,
         )
         db.add(user_b)
@@ -194,7 +203,7 @@ def test_get_workflow_cross_org_rejected(client):
     finally:
         db.close()
 
-    login_b = client.post("/api/v1/auth/login", json={"email": "b2@t.com", "password": "Test123!"})
+    login_b = client.post("/api/v1/auth/login", json={"email": "b2@t.com", "password": "TestPass123!"})
     token_b = login_b.json()["access_token"]
 
     resp = client.get(

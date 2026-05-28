@@ -5,10 +5,10 @@ def test_val_audit_health_flow(client):
     """Test validation, audit, and health endpoints."""
 
     client.post("/api/v1/auth/first-admin", json={
-        "email": "final@t.com", "name": "F", "password": "Test123!",
+        "email": "final@t.com", "name": "F", "password": "TestPass123!",
         "organization_name": "O", "organization_slug": "o",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "final@t.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "final@t.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
 
@@ -35,8 +35,10 @@ def test_val_audit_health_flow(client):
         "source": {"connector_type": "postgres", "schema": "public", "table": "t", "config": {}},
         "target": {"connector_type": "postgres", "schema": "public", "table": "t", "config": {}},
     })
-    # 502 expected in tests — connectors aren't available; 200 if connectors are up
-    assert resp.status_code in (200, 502)
+    # In tests the connectors aren't reachable. H-002: connector failures now
+    # return a structured 422 (recon_run persisted as failed) instead of a
+    # generic 502. 200 if connectors happen to be up.
+    assert resp.status_code in (200, 422, 502)
 
     # Audit logs
     resp = client.get("/api/v1/audit-logs", headers=h)

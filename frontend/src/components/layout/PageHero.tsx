@@ -30,7 +30,7 @@ interface PageHeroProps {
 export function PageHero({ eyebrow, title, subtitle, description, metric, crumbs, actions }: PageHeroProps) {
   const desc = description ?? subtitle;
   return (
-    <div className="px-10 pt-8 pb-6 border-b border-hx">
+    <div className="px-4 sm:px-6 lg:px-10 pt-8 pb-6 border-b border-hx">
       {crumbs && crumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 mb-3.5 text-[11.5px] text-ink-4">
           {crumbs.map((c, i) => {

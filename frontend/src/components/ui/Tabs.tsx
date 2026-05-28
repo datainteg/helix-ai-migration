@@ -89,7 +89,7 @@ export function Tabs({ tabs, value, onChange, variant = "pill", className, panel
             >
               {t.label}
               {t.count !== undefined && (
-                <span className="font-mono text-[11px] text-ink-4">{t.count}</span>
+                <span className="font-mono text-[11px] text-ink-3">{t.count}</span>
               )}
             </button>
           );
@@ -129,7 +129,7 @@ export function Tabs({ tabs, value, onChange, variant = "pill", className, panel
           >
             {t.label}
             {t.count !== undefined && (
-              <span className="font-mono text-[10.5px] text-ink-4">{t.count}</span>
+              <span className="font-mono text-[11px] text-ink-3">{t.count}</span>
             )}
           </button>
         );

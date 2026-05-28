@@ -1089,10 +1089,11 @@ export default function ConnectorsPage() {
             />
             <input
               id={searchInputId}
+              aria-label="Search connectors"
               placeholder="Search connectors…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="bg-transparent border-0 outline-none w-full text-ink"
+              className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
               style={{ fontSize: 12.5, height: "100%" }}
             />
           </label>

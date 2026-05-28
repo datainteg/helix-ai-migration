@@ -11,6 +11,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.sprint import (
@@ -23,32 +25,78 @@ from app.models.sprint import (
 # ── Create helpers ─────────────────────────────────────────────────
 
 
+def _next_sprint_index(db: Session, org_id: str, project_id: str) -> int:
+    """H-001: allocate the next sprint index atomically.
+
+    The previous `count() + 1` raced: two concurrent POSTs both counted N and
+    both inserted N+1. Use `SELECT max(index) ... FOR UPDATE` so the row(s)
+    are locked for the duration of the transaction — the second writer blocks
+    until the first commits, then sees the new max. FOR UPDATE is a no-op on
+    SQLite (single-writer test path), where the partial unique index still
+    backstops correctness.
+    """
+    q = (
+        db.query(func.max(Sprint.index))
+        .filter(Sprint.organization_id == org_id, Sprint.project_id == project_id)
+    )
+    try:
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            q = q.with_for_update()
+    except Exception:  # noqa: BLE001
+        pass
+    current_max = q.scalar()
+    return (current_max or 0) + 1
+
+
 def create_sprint(db: Session, org_id: str, project_id: str, data) -> Sprint:
     """Create a new sprint for a project. Index auto-increments off the
-    current max(index) for the project — manual indexing avoids re-numbering
-    races when two admins create simultaneously."""
-    last_index = (
-        db.query(Sprint)
-        .filter(Sprint.organization_id == org_id, Sprint.project_id == project_id)
-        .count()
-    )
-    sp = Sprint(
-        organization_id=org_id,
-        project_id=project_id,
-        index=data.index if getattr(data, "index", None) else last_index + 1,
-        name=data.name,
-        goal=data.goal,
-        status=data.status or "planning",
-        health=data.health or "on-track",
-        start_date=data.start_date,
-        end_date=data.end_date,
-        metrics=data.metrics,
-        milestones=data.milestones,
-    )
-    db.add(sp)
-    db.commit()
-    db.refresh(sp)
-    return sp
+    current max(index) for the project.
+
+    H-001: index allocation uses `max(index) FOR UPDATE` inside the
+    transaction (not count()) so concurrent creators can't collide. A
+    partial unique index on (organization_id, project_id, index) backstops
+    this; on the rare residual IntegrityError we retry once with a freshly
+    computed index.
+    """
+    def _attempt() -> Sprint:
+        idx = data.index if getattr(data, "index", None) else _next_sprint_index(db, org_id, project_id)
+        sp = Sprint(
+            organization_id=org_id,
+            project_id=project_id,
+            index=idx,
+            name=data.name,
+            goal=data.goal,
+            status=data.status or "planning",
+            health=data.health or "on-track",
+            start_date=data.start_date,
+            end_date=data.end_date,
+            metrics=data.metrics,
+            milestones=data.milestones,
+        )
+        db.add(sp)
+        db.commit()
+        db.refresh(sp)
+        return sp
+
+    try:
+        return _attempt()
+    except IntegrityError:
+        # Lost the race on the unique index — recompute and retry once. If the
+        # caller pinned an explicit index that collides, surface a 409.
+        db.rollback()
+        if getattr(data, "index", None):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Sprint index {data.index} already exists for this project",
+            )
+        try:
+            return _attempt()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Could not allocate a unique sprint index; please retry",
+            )
 
 
 def create_task(db: Session, org_id: str, sprint_id: str, data) -> SprintTask:
@@ -259,8 +307,10 @@ def compute_velocity(db: Session, org_id: str, project_id: str) -> list[dict]:
             .filter(SprintTask.organization_id == org_id, SprintTask.sprint_id == s.id)
             .all()
         )
-        planned   = sum(t.story_points for t in tasks)
-        delivered = sum(t.story_points for t in tasks if t.status in ("completed", "approved"))
+        # H-010: story_points is nullable; coalesce to 0 so a single
+        # NULL row doesn't raise TypeError and 500 the analytics endpoint.
+        planned   = sum((t.story_points or 0) for t in tasks)
+        delivered = sum((t.story_points or 0) for t in tasks if t.status in ("completed", "approved"))
         rows.append({"sprint_label": f"S{s.index}", "planned": planned, "delivered": delivered})
     return rows
 
@@ -285,7 +335,7 @@ def compute_burndown(db: Session, org_id: str, sprint_id: str) -> list[dict]:
         .filter(SprintTask.organization_id == org_id, SprintTask.sprint_id == sprint_id)
         .all()
     )
-    total = sum(t.story_points for t in tasks)
+    total = sum((t.story_points or 0) for t in tasks)  # H-010: NULL-safe
     if total == 0:
         return []
 
@@ -310,11 +360,11 @@ def compute_burndown(db: Session, org_id: str, sprint_id: str) -> list[dict]:
         if not h.created_at:
             continue
         d = h.created_at.date().isoformat()
-        sp_per_task_at_day.setdefault(d, {})[h.task_id] = h.story_points
+        sp_per_task_at_day.setdefault(d, {})[h.task_id] = h.story_points or 0  # H-010
 
     # Use history fallback if it's empty
     if not history:
-        done = sum(t.story_points for t in tasks if t.status in ("completed", "approved"))
+        done = sum((t.story_points or 0) for t in tasks if t.status in ("completed", "approved"))  # H-010
         out: list[dict] = []
         for i in range(days):
             d = sp.start_date.date() + timedelta(days=i)

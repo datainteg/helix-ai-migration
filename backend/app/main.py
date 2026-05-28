@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -75,16 +77,7 @@ if settings.OTEL_ENDPOINT:
             "OTEL_ENDPOINT set but opentelemetry packages not installed; skipping tracing setup."
         )
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version="0.1.0",
-    docs_url="/docs",
-    openapi_url="/openapi.json",
-)
-
-
-@app.on_event("startup")
-async def _start_cdc_engine() -> None:
+def _start_cdc_engine() -> None:
     """Boot the CDC polling loop. No-op when HELIX_CDC_DISABLED is set."""
     try:
         from app.services.cdc_engine import start as start_cdc
@@ -94,13 +87,76 @@ async def _start_cdc_engine() -> None:
         logging.getLogger(__name__).warning("CDC engine failed to start: %s", exc)
 
 
-@app.on_event("shutdown")
-async def _stop_cdc_engine() -> None:
+def _check_first_admin_bootstrap() -> None:
+    """SC-011: tell the operator the SETUP_TOKEN they need to mint the first
+    admin. Runs once at boot; harmless to re-emit if the backend restarts
+    while still un-bootstrapped.
+    """
+    import logging as _logging
+    import sys as _sys
+    _log = _logging.getLogger(__name__)
+    try:
+        from app.db.session import SessionLocal
+        from app.models.identity import User
+        db = SessionLocal()
+        try:
+            already = db.query(User).filter(User.is_super_admin == True).first()
+        finally:
+            db.close()
+        if already:
+            return
+        if not settings.SETUP_TOKEN:
+            msg = (
+                "SETUP_TOKEN is not configured but no super_admin exists yet. "
+                "POST /auth/first-admin will reject all callers until you set "
+                "SETUP_TOKEN=<random hex> in the backend environment."
+            )
+        else:
+            msg = (
+                "No super_admin exists yet. POST /auth/first-admin must be "
+                "called with header X-Setup-Token: <value of SETUP_TOKEN>."
+            )
+        _log.critical(msg)
+        # Also print to stderr so it shows up in docker logs even when
+        # logging filters are misconfigured.
+        try:
+            print(f"[helix] {msg}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001 — never block boot on this advice
+        _log.debug("first-admin bootstrap check skipped: %s", exc)
+
+
+def _stop_cdc_engine() -> None:
     try:
         from app.services.cdc_engine import stop as stop_cdc
         stop_cdc()
     except Exception:  # noqa: BLE001
         pass
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """L-004: FastAPI `lifespan` replaces the deprecated `@app.on_event`
+    startup/shutdown handlers (Starlette removed on_event in newer releases).
+    Startup boots the CDC engine + emits the first-admin bootstrap advice;
+    shutdown stops the CDC poll loop.
+    """
+    _start_cdc_engine()
+    _check_first_admin_bootstrap()
+    try:
+        yield
+    finally:
+        _stop_cdc_engine()
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="0.1.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
+)
 
 app.state.limiter = limiter
 # Use our own 429 handler so the body matches the FastAPI-standard
@@ -156,7 +212,12 @@ async def add_security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-    if settings.APP_ENV == "production":
+    # SC-057: emit HSTS whenever the request is served over HTTPS — not only
+    # when APP_ENV=production. A staging/preview deploy on https was
+    # previously SSL-strippable because it lacked the header. `X-Forwarded-Proto`
+    # (set by Caddy) is reflected into `request.url.scheme` by Starlette's
+    # ProxyHeaders handling, so this fires correctly behind the proxy.
+    if request.url.scheme == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 

@@ -5,10 +5,10 @@ def test_artifact_metadata_creation(client):
     """Test artifact metadata and versioning models."""
 
     client.post("/api/v1/auth/first-admin", json={
-        "email": "art@t.com", "name": "A", "password": "Test123!",
+        "email": "art@t.com", "name": "A", "password": "TestPass123!",
         "organization_name": "O", "organization_slug": "o",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "art@t.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "art@t.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
 

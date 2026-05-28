@@ -30,7 +30,7 @@ def test_auth_flow(client):
     resp = client.post("/api/v1/auth/first-admin", json={
         "email": "admin@helix.datainteg.io",
         "name": "Admin User",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
         "organization_name": "Acme Corp",
         "organization_slug": "acme-corp",
     })
@@ -43,7 +43,7 @@ def test_auth_flow(client):
     resp = client.post("/api/v1/auth/first-admin", json={
         "email": "admin2@helix.datainteg.io",
         "name": "Admin 2",
-        "password": "Secure456!",
+        "password": "SecurePass456!",
         "organization_name": "Another Org",
         "organization_slug": "another-org",
     })
@@ -53,7 +53,7 @@ def test_auth_flow(client):
     # 3. Login with correct password
     resp = client.post("/api/v1/auth/login", json={
         "email": "admin@helix.datainteg.io",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
     })
     assert resp.status_code == 200
     token = resp.json()["access_token"]
@@ -81,13 +81,13 @@ def test_cross_organization_access_is_denied(client, db_session):
     client.post("/api/v1/auth/first-admin", json={
         "email": "org1@helix.datainteg.io",
         "name": "Org One Admin",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
         "organization_name": "Org One",
         "organization_slug": "org-one",
     })
     login = client.post("/api/v1/auth/login", json={
         "email": "org1@helix.datainteg.io",
-        "password": "Secure123!",
+        "password": "SecurePass123!",
     })
     org1_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 

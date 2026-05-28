@@ -27,6 +27,11 @@ export function useApi(): ApiClient {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
+    // 204 No Content (e.g. DELETE) has an empty body — calling .json() would
+    // throw "Unexpected end of JSON input". Return undefined for empty bodies.
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
     return res.json();
   };
 

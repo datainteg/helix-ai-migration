@@ -39,7 +39,8 @@ def test_reset_request_and_confirm(client, db_session):
     record.token_hash = hashlib.sha256(raw.encode()).hexdigest()
     db_session.commit()
 
-    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": raw, "new_password": "NewPass456!"})
+    # SC-002: new_password must satisfy the strength policy (>=12 chars).
+    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": raw, "new_password": "NewPass4567!"})
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
 
@@ -48,13 +49,17 @@ def test_reset_request_and_confirm(client, db_session):
     assert res.status_code == 401
 
     # New password works
-    res = client.post("/api/v1/auth/login", json={"email": "reset@example.com", "password": "NewPass456!"})
+    res = client.post("/api/v1/auth/login", json={"email": "reset@example.com", "password": "NewPass4567!"})
     assert res.status_code == 200
 
 
 def test_confirm_invalid_token(client):
-    """Invalid token returns 400."""
-    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": "bad-token", "new_password": "x"})
+    """Invalid token returns 400.
+
+    SC-002: use a policy-compliant password so the request passes schema
+    validation and actually reaches the token-validation path under test.
+    """
+    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": "bad-token", "new_password": "ValidPass123!"})
     assert res.status_code == 400
 
 
@@ -83,6 +88,7 @@ def test_confirm_expired_token(client, db_session):
     db_session.add(record)
     db_session.commit()
 
-    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": raw, "new_password": "NewPass!"})
+    # SC-002: compliant password so we exercise the expiry path, not validation.
+    res = client.post("/api/v1/auth/password-reset/confirm", json={"token": raw, "new_password": "NewValidPass123!"})
     assert res.status_code == 400
     assert "expired" in res.json()["detail"].lower()

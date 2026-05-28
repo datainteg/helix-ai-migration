@@ -14,7 +14,24 @@ param(
 $ErrorActionPreference = "Stop"
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 $EnvFile = Join-Path $RootDir ".env"
+$EnvLocalFile = Join-Path $RootDir ".env.local"
 $EnvExample = Join-Path $RootDir ".env.example"
+
+# Safety: refuse to overwrite a .env that still contains the placeholder
+# markers from .env.example (SC-003). Route generated secrets into .env.local
+# instead so manual edits are preserved.
+if ((Test-Path $EnvFile) -and (-not $Force) -and (-not $Print)) {
+    $existing = Get-Content $EnvFile -ErrorAction SilentlyContinue
+    if ($existing -and ($existing -match '=change_me|=helix_password')) {
+        Write-Warning ("$EnvFile still contains placeholder markers (change_me / helix_password). " +
+                      "Refusing to overwrite. Writing generated secrets to $EnvLocalFile " +
+                      "instead — merge by hand or re-run with -Force.")
+        $EnvFile = $EnvLocalFile
+        if (-not (Test-Path $EnvFile)) {
+            New-Item -ItemType File -Path $EnvFile | Out-Null
+        }
+    }
+}
 
 function RandHex([int]$ByteLength) {
     $bytes = New-Object byte[] $ByteLength

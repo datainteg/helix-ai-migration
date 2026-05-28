@@ -168,7 +168,7 @@ export default function SprintAnalyticsPage() {
       }
     >
       {/* Top metric strip */}
-      <div className="grid grid-cols-5 bg-surface border border-hx rounded-[10px] divide-x divide-hx mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-hx mb-6">
         <MetricCell big label="Avg velocity"        value={`${avgVelocity} SP`} hint="Rolling 5 sprints" />
         <MetricCell big label="Avg cycle time"      value="4.2d"                hint="Task ready → done" />
         <MetricCell big label="Validation pass"     value={`${avgValidation}%`} hint="Avg across sprints" />

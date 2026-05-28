@@ -3,10 +3,10 @@ def test_project_flow(client):
 
     # Auth setup
     client.post("/api/v1/auth/first-admin", json={
-        "email": "admin@p.com", "name": "Admin", "password": "Test123!",
+        "email": "admin@p.com", "name": "Admin", "password": "TestPass123!",
         "organization_name": "Org", "organization_slug": "org",
     })
-    login = client.post("/api/v1/auth/login", json={"email": "admin@p.com", "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": "admin@p.com", "password": "TestPass123!"})
     token = login.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
 

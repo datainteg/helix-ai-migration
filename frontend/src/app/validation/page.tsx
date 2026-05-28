@@ -29,6 +29,7 @@ import {
   Button,
   Card,
   Chip,
+  EmptyState,
   StatusBadge,
   Tabs,
   DemoBanner,
@@ -215,6 +216,13 @@ export default function ValidationPage() {
             eyebrow="LAST RUN WINDOW"
             description="Pass / fail / warning breakdown per validation category"
           >
+            {hasProjects === true ? (
+              <EmptyState
+                title="No category data yet"
+                description="Run a validation rule to populate the per-category breakdown."
+              />
+            ) : (
+            <>
             <div className="flex flex-col gap-[9px] py-1">
               {TYPE_BREAKDOWN.map((row) => {
                 const tot = row.p + row.w + row.f;
@@ -248,6 +256,8 @@ export default function ValidationPage() {
                 <span className="w-2 h-2 rounded-sm" style={{ background: "var(--con-err)" }} /> Failed
               </span>
             </div>
+            </>
+            )}
           </Card>
         </div>
 
@@ -292,6 +302,17 @@ export default function ValidationPage() {
               ]}
             />
           </div>
+          {hasProjects === true ? (
+            <EmptyState
+              title="No validation rules yet"
+              description="Once you attach validation rules to a project, runs and their pass/fail results will land here."
+              action={
+                <Button variant="primary">
+                  <Plus className="h-3.5 w-3.5" /> Create rule
+                </Button>
+              }
+            />
+          ) : (
           <table className="w-full border-collapse text-[12.5px]">
             <thead>
               <tr className="bg-surface-hi">
@@ -369,6 +390,7 @@ export default function ValidationPage() {
               })}
             </tbody>
           </table>
+          )}
         </Card>
 
         {/* Score trend */}

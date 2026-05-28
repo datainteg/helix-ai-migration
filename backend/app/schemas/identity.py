@@ -2,13 +2,20 @@ import uuid
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+from app.security.password_policy import validate_password
 
 
 class UserCreate(BaseModel):
     email: EmailStr
     name: str
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:  # SC-002
+        return validate_password(v)
 
 
 class UserResponse(BaseModel):
@@ -81,3 +88,8 @@ class FirstAdminSetup(BaseModel):
     password: str
     organization_name: str
     organization_slug: str
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:  # SC-002
+        return validate_password(v)

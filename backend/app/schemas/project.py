@@ -3,10 +3,13 @@ from pydantic import BaseModel, Field
 
 
 class ProjectCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
+    # SC-019: bound free-text inputs so unbounded blobs can't flow into
+    # storage / downstream prompts. Names are short; description is a small
+    # paragraph.
+    name: str = Field(max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
     risk_level: str = "unknown"
-    migration_type: Optional[str] = None
+    migration_type: Optional[str] = Field(default=None, max_length=100)
 
 
 class ProjectResponse(BaseModel):
@@ -38,7 +41,9 @@ class SubProjectResponse(BaseModel):
 
 
 class RequirementCreate(BaseModel):
-    source_text: str
+    # SC-019: source_text becomes the BMAD requirement that is concatenated
+    # into every agent's LLM prompt. Cap at 10 KB.
+    source_text: str = Field(max_length=10_000)
 
 
 class RequirementResponse(BaseModel):

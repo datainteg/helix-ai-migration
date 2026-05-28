@@ -129,7 +129,7 @@ export default function ProjectsPage() {
     >
       <div className="flex flex-col gap-4">
         {/* Summary cells */}
-        <div className="grid grid-cols-6 bg-surface border border-hx rounded-[10px] divide-x divide-[var(--con-line)] overflow-hidden">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell label="TOTAL"     value={counts.all}       hint="All time" />
           <MetricCell label="RUNNING"   value={counts.running}   hint="In progress"     accent="var(--con-info)" />
           <MetricCell label="AWAITING"  value={counts.awaiting}  hint="Human review"    accent="var(--con-warn)" />
@@ -165,7 +165,7 @@ export default function ProjectsPage() {
           <Button variant="outline" size="sm">
             <Filter className="h-3.5 w-3.5" /> Filters
           </Button>
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" aria-label="More actions">
             <MoreHorizontal className="h-3.5 w-3.5" />
           </Button>
         </div>

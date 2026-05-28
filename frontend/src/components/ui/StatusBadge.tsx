@@ -1,13 +1,15 @@
 import { Chip } from "./Chip";
 
 // Maps a freeform status string to a Chip tone + nicely-cased label.
-// Pulse on "running" / "started" gives the operational feel.
+// UI-043: pulse is reserved for genuinely *running* work (running / started /
+// in_progress). "active" means "live but idle" — it gets a static dot so we
+// don't have three or four things pulsing on one screen.
 const map: Record<string, { tone: "ok" | "warn" | "err" | "info" | "brand" | "default"; label?: string; pulse?: boolean }> = {
   // running / live
   running:      { tone: "info", label: "Running",   pulse: true },
   started:      { tone: "info", label: "Started",   pulse: true },
   in_progress:  { tone: "info", label: "In progress", pulse: true },
-  active:       { tone: "info", label: "Active",    pulse: true },
+  active:       { tone: "info", label: "Active" },
 
   // waiting
   queued:       { tone: "default", label: "Queued" },

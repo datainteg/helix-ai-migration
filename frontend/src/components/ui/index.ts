@@ -19,3 +19,5 @@ export { Kbd } from "./Kbd";
 export { DemoBanner } from "./DemoBanner";
 export { Modal } from "./Modal";
 export { ConfirmModal } from "./ConfirmModal";
+export { SearchInput } from "./SearchInput";
+export { Skeleton, SkeletonMetricRow, SkeletonTable } from "./Skeleton";

@@ -183,12 +183,30 @@ async def start_recon(request: Request, project_id: str, data: ReconRunCreate, o
             source=data.source,
             target=data.target,
         )
-        write_audit(db, org_id=org_id, actor_id=user_id, action="recon_run_started", entity_type="recon_run", entity_id=result.get("recon_run_id", ""), request=request)
-        return result
     except Exception:
         # Sanitize: never echo raw exception text to clients — reuses the
         # same pattern as agent_workflows.signal_* (REVIEW_API_CONTRACT
-        # `signal-approve` 503 issue).
+        # `signal-approve` 503 issue). This now only catches programming
+        # errors; expected connector failures are returned as a structured
+        # dict (H-002) and handled below.
         import logging
         logging.getLogger(__name__).exception("Reconciliation run failed for project %s", project_id)
         raise HTTPException(status_code=502, detail="Reconciliation failed (see server logs)")
+
+    # H-002: the service now returns a structured failure dict instead of
+    # raising, so the recon run row carries diagnostic data. Map it to a
+    # 422 with detail rather than a generic 500.
+    if result.get("status") == "failed":
+        write_audit(db, org_id=org_id, actor_id=user_id, action="recon_run_failed",
+                    entity_type="recon_run", entity_id=result.get("recon_run_id", ""),
+                    request=request)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Reconciliation could not complete",
+                "recon_run_id": result.get("recon_run_id", ""),
+                "error": result.get("error_message", "unknown error"),
+            },
+        )
+    write_audit(db, org_id=org_id, actor_id=user_id, action="recon_run_started", entity_type="recon_run", entity_id=result.get("recon_run_id", ""), request=request)
+    return result

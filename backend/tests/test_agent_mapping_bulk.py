@@ -10,12 +10,12 @@ def _login(client, email: str, slug: str):
         json={
             "email": email,
             "name": "Admin",
-            "password": "Test123!",
+            "password": "TestPass123!",
             "organization_name": f"Org-{slug}",
             "organization_slug": slug,
         },
     )
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": "Test123!"})
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!"})
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
@@ -156,7 +156,7 @@ def test_put_requires_admin_permission(client):
         viewer_user = User(
             email="viewer@t.com",
             name="Viewer",
-            password_hash=hash_password("Test123!"),
+            password_hash=hash_password("TestPass123!"),
             is_super_admin=False,
         )
         db.add(viewer_user)
@@ -173,7 +173,7 @@ def test_put_requires_admin_permission(client):
 
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "viewer@t.com", "password": "Test123!"},
+        json={"email": "viewer@t.com", "password": "TestPass123!"},
     )
     viewer_h = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
