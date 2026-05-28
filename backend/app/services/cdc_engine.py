@@ -45,10 +45,22 @@ async def _poll_once() -> None:
     db: Session = SessionLocal()
     try:
         rows = db.query(MigrationCutover).filter(MigrationCutover.state == "tail").all()
+        # M-005: catch per-cutover so one broken row (bad diff_summary, source
+        # error) does not abort the whole pass and starve every other cutover
+        # in tail state this tick. Roll back the failed cutover's partial txn
+        # before moving on so a poisoned write can't taint the next iteration.
         for c in rows:
-            await _poll_cutover(db, c)
+            try:
+                await _poll_cutover(db, c)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CDC poll failed for cutover=%s: %s", getattr(c, "id", "?"), exc)
+                try:
+                    db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception as exc:  # noqa: BLE001
-        logger.warning("CDC poll failed: %s", exc)
+        # Outer guard for the query itself / SessionLocal failures.
+        logger.warning("CDC poll pass failed: %s", exc)
     finally:
         db.close()
 

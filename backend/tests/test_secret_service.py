@@ -23,8 +23,10 @@ def test_empty_value_returns_empty():
 
 
 def test_mask_key_short():
+    # L-002: short keys return a fixed "***" so the exact key length is not
+    # leaked through a variable-length "*" run.
     assert mask_key("") == "***"
-    assert mask_key("ab") == "**"
+    assert mask_key("ab") == "***"
 
 
 def test_mask_key_long():

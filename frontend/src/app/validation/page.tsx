@@ -182,11 +182,13 @@ export default function ValidationPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
           <Card padding="lg">
             <div className="eyebrow">{showRealHero ? "OVERALL PASS RATE" : "OVERALL PASS RATE · SAMPLE"}</div>
-            <div className="flex items-baseline gap-3 mt-2">
-              <span className="font-mono tabular-nums text-[56px] font-medium tracking-[-0.03em] leading-none">
+            <div className="flex items-baseline gap-3 mt-2 min-w-0">
+              {/* UI-031 — step the hero number down on narrow viewports so it
+                  doesn't overflow its squeezed 1fr column in the grid. */}
+              <span className="font-mono tabular-nums text-[40px] sm:text-[48px] lg:text-[56px] font-medium tracking-[-0.03em] leading-none truncate">
                 {showRealHero ? (realPassRate ?? 0).toFixed(1) : "92.4"}
               </span>
-              <span className="text-[28px] text-ink-3 font-normal">%</span>
+              <span className="text-[24px] sm:text-[28px] text-ink-3 font-normal">%</span>
               {showRealHero ? (
                 <span className="ml-auto text-[12px] font-mono text-ink-3">org-wide</span>
               ) : (

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -185,7 +186,6 @@ def _cmd_admin_bootstrap(client: HelixClient, args: argparse.Namespace) -> int:
         return 2
 
     # Derive org slug from org_name
-    import re
     org_slug = re.sub(r"[^a-z0-9]+", "-", org_name.lower()).strip("-") or "helix"
 
     try:
@@ -217,6 +217,19 @@ def _cmd_admin_bootstrap(client: HelixClient, args: argparse.Namespace) -> int:
 # ── helix install (one-liner wrapper) ─────────────────────────────────────────
 
 
+# M-018: RFC-1123 hostname matcher. Each dot-separated label is 1-63 chars of
+# alphanumerics + hyphens (not leading/trailing hyphen); total length <= 253.
+# Deliberately rejects scheme, port, path, userinfo, and quoting characters so
+# the domain can be safely interpolated into URLs and the CORS JSON literal.
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
+
+
+def _is_valid_domain(domain: str) -> bool:
+    return bool(domain) and bool(_DOMAIN_RE.match(domain))
+
+
 def _cmd_install(client: HelixClient, args: argparse.Namespace) -> int:
     """helix install — run setup.sh then bootstrap the first admin.
 
@@ -245,14 +258,31 @@ def _cmd_install(client: HelixClient, args: argparse.Namespace) -> int:
     org_name = getattr(args, "org_name", None) or "Helix"
     setup_flags = getattr(args, "setup_flags", None) or []
 
+    # M-018: validate the domain BEFORE interpolating it into the JSON list
+    # literal that setup.sh feeds to CORS_ORIGINS. A `"` (or any non-hostname
+    # char) would produce malformed JSON like `["https://a"b"]` and crash
+    # setup.sh opaquely. Restrict to RFC-1123 hostnames (labels of
+    # alphanumerics/hyphens, dot-separated), so the interpolation is always a
+    # safe, well-formed URL.
+    if domain and not _is_valid_domain(domain):
+        print(
+            f"error: --domain {domain!r} is not a valid hostname. Use a bare "
+            "DNS name such as helix.example.com (no scheme, port, path, or "
+            "special characters).",
+            file=sys.stderr,
+        )
+        return 2
+
     # Build setup.sh invocation
     cmd = ["/bin/bash", "setup.sh"] + setup_flags
     if domain:
-        # Pass domain as env-var hint; setup.sh reads NEXT_PUBLIC_API_URL
+        # Pass domain as env-var hint; setup.sh reads NEXT_PUBLIC_API_URL.
+        # `domain` is validated above so json.dumps is belt-and-braces — it
+        # guarantees a well-formed JSON array string regardless.
         env = {
             **os.environ,
             "NEXT_PUBLIC_API_URL": f"https://{domain}",
-            "CORS_ORIGINS": f'["https://{domain}"]',
+            "CORS_ORIGINS": json.dumps([f"https://{domain}"]),
             "FRONTEND_URL": f"https://{domain}",
             "PUBLIC_HOSTNAME": domain,
         }
@@ -260,13 +290,32 @@ def _cmd_install(client: HelixClient, args: argparse.Namespace) -> int:
         env = None
 
     print(f"Running ./setup.sh{' ' + ' '.join(setup_flags) if setup_flags else ''} ...")
+    # L-009: use subprocess.run so we can surface the captured stderr tail (the
+    # actual failure: compose-up vs migration vs port-bind) instead of only an
+    # opaque exit code. stderr is streamed through to the user *and* captured so
+    # the error summary can quote the last lines.
     try:
-        ret = subprocess.call(cmd, env=env)
+        completed = subprocess.run(
+            cmd,
+            env=env,
+            check=False,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     except OSError as exc:
         print(f"error: could not run setup.sh: {exc}", file=sys.stderr)
         return 1
-    if ret != 0:
-        print(f"error: setup.sh exited with code {ret}", file=sys.stderr)
+    captured_err = completed.stderr or ""
+    if captured_err:
+        # Mirror setup.sh's own diagnostics back to the user.
+        print(captured_err, file=sys.stderr, end="" if captured_err.endswith("\n") else "\n")
+    if completed.returncode != 0:
+        tail = "\n".join(captured_err.strip().splitlines()[-10:])
+        print(
+            f"error: setup.sh exited with code {completed.returncode}."
+            + (f" Last error output:\n{tail}" if tail else ""),
+            file=sys.stderr,
+        )
         return 1
 
     # Determine API URL

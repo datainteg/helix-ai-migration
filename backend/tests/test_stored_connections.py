@@ -61,7 +61,10 @@ def test_create_source_encrypts_config_and_returns_mask(client):
     # Mask must hide the password.
     assert body["config_masked"] is not None
     assert "supersecret123" not in body["config_masked"]
-    assert "***t123" in body["config_masked"]  # last 4 visible
+    # SC-039: sensitive keys mask to a fixed "***" — the last 4 chars are no
+    # longer revealed. The plaintext password must not leak even partially.
+    assert "t123" not in body["config_masked"]
+    assert "password=***" in body["config_masked"]
     assert "db.example.com" in body["config_masked"]  # host plaintext OK
 
 
@@ -127,7 +130,9 @@ def test_patch_source_rotates_credentials(client):
     assert patched.status_code == 200
     masked = patched.json()["config_masked"]
     assert "old123" not in masked
-    assert "***d456" in masked
+    # SC-039: rotated credential is masked to a fixed "***" (no tail reveal).
+    assert "d456" not in masked
+    assert "password=***" in masked
 
 
 def test_delete_source_removes_row(client):

@@ -9,6 +9,7 @@
  */
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { Download, Plus } from "lucide-react";
 
@@ -23,16 +24,30 @@ import {
   MetricCell,
   StatusBadge,
   ProgressBar,
-  AreaChart,
-  Donut,
-  Sparkline,
   Avatar,
   Tabs,
   Chip,
   DemoBanner,
   ErrorBanner,
+  Skeleton,
+  SkeletonMetricRow,
 } from "@/components/ui";
 import { AppIcon, AgentIcon, LLMIcon } from "@/components/icons";
+
+// UI-037 — the SVG chart bundles are heavy and below the fold on first paint, so
+// lazy-load them client-side. A sized Skeleton holds the layout to avoid CLS.
+const AreaChart = dynamic(() => import("@/components/ui/AreaChart").then((m) => m.AreaChart), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[220px] w-full" />,
+});
+const Donut = dynamic(() => import("@/components/ui/Donut").then((m) => m.Donut), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[132px] w-[132px] rounded-full" />,
+});
+const Sparkline = dynamic(() => import("@/components/ui/Sparkline").then((m) => m.Sparkline), {
+  ssr: false,
+  loading: () => <Skeleton className="h-5 w-[70px]" />,
+});
 
 // ─── Demo data — TODO: hydrate from API ────────────────────────────
 
@@ -145,7 +160,12 @@ export default function DashboardPage() {
         {stats?.hasAnyData ? null : (
           <DemoBanner message="Charts and tables below are sample. Once you create a project and run a workflow, the metric strip + workflow tiles populate from real data." />
         )}
-        {/* Metric strip — every value now comes from /api/v1/dashboard/stats. */}
+        {/* Metric strip — every value now comes from /api/v1/dashboard/stats.
+            UI-046: a shaped skeleton holds the strip's footprint on first paint
+            so values don't pop in with layout shift. */}
+        {!stats && !loadError ? (
+          <SkeletonMetricRow cells={5} />
+        ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell big label="ACTIVE PROJECTS"
             value={stats ? String(stats.activeProjects) : "—"}
@@ -170,6 +190,7 @@ export default function DashboardPage() {
             accent={stats && stats.workflowsFailed > 0 ? "var(--con-err)" : undefined}
           />
         </div>
+        )}
 
         {/* LLM spend row — real numbers from /api/v1/usage/llm. */}
         <div className="grid grid-cols-1 sm:grid-cols-4 bg-surface border border-hx rounded-[10px] divide-y sm:divide-y-0 sm:divide-x divide-[var(--con-line)] overflow-hidden">
@@ -249,7 +270,7 @@ export default function DashboardPage() {
                     <span className="w-2 h-2 rounded-sm" style={{ background: r.color }} />
                     <span className="text-[12px] text-ink-2 flex-1">{r.label}</span>
                     <span className="font-mono tabular-nums text-[12.5px] font-medium">{fmt.n(r.value)}</span>
-                    <span className="font-mono text-[10.5px] text-ink-4 w-10 text-right">{r.pct}%</span>
+                    <span className="font-mono text-[11px] text-ink-3 w-10 text-right">{r.pct}%</span>
                   </div>
                 ))}
               </div>
@@ -380,7 +401,7 @@ export default function DashboardPage() {
                         <Link href={`/projects/${p.id}`} className="block">
                           <div className="flex flex-col gap-0.5">
                             <span className="font-medium text-ink">{p.name}</span>
-                            <span className="font-mono text-[10.5px] text-ink-4">{p.id}</span>
+                            <span className="font-mono text-[11px] text-ink-3">{p.id}</span>
                           </div>
                         </Link>
                       </td>

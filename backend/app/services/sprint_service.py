@@ -369,10 +369,12 @@ def compute_burndown(db: Session, org_id: str, sprint_id: str) -> list[dict]:
         for i in range(days):
             d = sp.start_date.date() + timedelta(days=i)
             ideal_remaining = round(total - (i / max(1, days - 1)) * total)
+            # M-014: future days carry no actual value (None) so the chart
+            # stops the actual line at today instead of projecting forward.
             if d <= today:
                 actual_remaining = round(total - (done * (i / max(1, days - 1))))
             else:
-                actual_remaining = total - done
+                actual_remaining = None
             out.append({"date": d.isoformat(), "ideal": ideal_remaining, "actual": actual_remaining})
         return out
 
@@ -386,6 +388,10 @@ def compute_burndown(db: Session, org_id: str, sprint_id: str) -> list[dict]:
                 completed_by_task.update(deltas)
         cumulative_done = sum(completed_by_task.values())
         ideal_remaining = round(total - (i / max(1, days - 1)) * total)
-        actual_remaining = total - cumulative_done if d <= today else total - cumulative_done
+        # M-014: the previous `... if d <= today else ...` had identical
+        # branches, so the actual line marched into the future as if today's
+        # progress applied to every future day. Emit `None` for future days so
+        # the chart doesn't draw a fabricated "predicted past" beyond today.
+        actual_remaining = (total - cumulative_done) if d <= today else None
         out.append({"date": d.isoformat(), "ideal": ideal_remaining, "actual": actual_remaining})
     return out

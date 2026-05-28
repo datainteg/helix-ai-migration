@@ -127,11 +127,20 @@ export default function NewProjectPage() {
       description="Define scope, source/target systems, and ownership for a new run."
       crumbs={[{ label: "Projects", href: "/projects" }, { label: "New" }]}
       actions={
-        <Link href="/projects">
-          <Button variant="outline">
+        // UI-034 — while the create POST is in flight, render Cancel as a
+        // disabled Button (not a live Link) so a click can't navigate away and
+        // race the API callback.
+        loading ? (
+          <Button variant="outline" disabled>
             <X className="h-3.5 w-3.5" /> Cancel
           </Button>
-        </Link>
+        ) : (
+          <Link href="/projects">
+            <Button variant="outline">
+              <X className="h-3.5 w-3.5" /> Cancel
+            </Button>
+          </Link>
+        )
       }
     >
       <div className="max-w-3xl">

@@ -238,6 +238,54 @@ export default function FirstAdminSetupPage() {
   const update = <K extends keyof WizardData>(field: K, value: WizardData[K]) =>
     setData((d) => ({ ...d, [field]: value }));
 
+  // UI-024 — persist the wizard step + non-secret draft to sessionStorage so an
+  // accidental reload mid-flow doesn't drop the operator back to step 0. We
+  // deliberately strip secrets (admin password, setup token, connection
+  // password) from the draft — those are re-entered after a reload rather than
+  // sitting in sessionStorage in plaintext.
+  const DRAFT_KEY = "helix.first-admin.draft.v1";
+  const [draftRestored, setDraftRestored] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { step?: number; data?: Partial<WizardData> };
+        if (saved.data) {
+          setData((d) => ({
+            ...d,
+            ...saved.data,
+            // never trust persisted secrets
+            password: "",
+            setup_token: "",
+            connection: { ...d.connection, ...(saved.data?.connection ?? {}), password: "" },
+            project: { ...d.project, ...(saved.data?.project ?? {}) },
+          }));
+        }
+        if (typeof saved.step === "number") setStep(saved.step);
+      }
+    } catch {
+      /* corrupt draft — ignore and start fresh */
+    }
+    setDraftRestored(true);
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!draftRestored) return; // don't clobber the saved draft before restore
+    try {
+      const { password: _pw, setup_token: _st, connection, ...rest } = data;
+      const safeConnection = { ...connection, password: "" };
+      sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ step, data: { ...rest, connection: safeConnection } })
+      );
+    } catch {
+      /* storage full / unavailable — non-fatal */
+    }
+  }, [step, data, draftRestored]);
+
   const onOrgNameChange = (e: ChangeEvent<HTMLInputElement>) => {
     const next = e.target.value;
     setData((d) => ({
@@ -491,6 +539,8 @@ export default function FirstAdminSetupPage() {
   const onPrimary = async () => {
     setError("");
     if (step === SETUP_STEPS.length - 1) {
+      // Setup finished — drop the saved draft so a future visit starts clean (UI-024).
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       router.push("/dashboard");
       return;
     }
@@ -1218,7 +1268,7 @@ function StepProject({
             placeholder="Migrate the GL_LEDGER, GL_TRANS, GL_RECON tables from Oracle production to Snowflake. Preserve audit columns. Run nightly delta until cutover."
             value={p.brief}
             onChange={(e) => patch({ brief: e.target.value })}
-            className="w-full px-3 py-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] font-mono text-ink outline-none resize-y focus-ring"
+            className="w-full px-3 py-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] font-mono text-ink resize-y focus-ring"
           />
         </FormRow>
       </div>
@@ -1372,7 +1422,7 @@ function Input({ className, ...rest }: InputProps) {
     <input
       {...rest}
       className={
-        "w-full h-9 px-3 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink outline-none focus-ring disabled:bg-app-2 disabled:text-ink-4 " +
+        "w-full h-9 px-3 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink focus-ring disabled:bg-app-2 disabled:text-ink-4 " +
         (className ?? "")
       }
     />
@@ -1391,7 +1441,7 @@ function Select({ options, className, ...rest }: SelectProps) {
     <select
       {...rest}
       className={
-        "w-full h-9 px-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink outline-none focus-ring " +
+        "w-full h-9 px-2.5 bg-surface border border-hx-2 rounded-md text-[12.5px] text-ink focus-ring " +
         (className ?? "")
       }
     >

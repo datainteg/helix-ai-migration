@@ -85,14 +85,18 @@ class CSVConnector(BaseConnector):
 
     async def get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         try:
-            import pandas as pd
-
             path = self._resolve_path()
-            df = pd.read_csv(path)
+            # L-006: count rows by streaming lines instead of loading the whole
+            # CSV into a pandas DataFrame (which materialises every cell in RAM
+            # just to call len()). Subtract one for the header row. This handles
+            # arbitrarily large files in constant memory.
+            with open(path, "rb") as fh:
+                line_count = sum(1 for _ in fh)
+            row_count = max(line_count - 1, 0)  # drop the header line
             return RowCountResult(
                 schema_name=schema_name,
                 table_name=table_name or path.stem,
-                row_count=len(df),
+                row_count=row_count,
             )
         except Exception as exc:
             raise DiscoveryError(f"CSV row count failed: {exc}", "csv_upload") from exc

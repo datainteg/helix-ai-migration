@@ -166,9 +166,18 @@ def list_deliveries(
     if not endpoint:
         raise HTTPException(status_code=404, detail="Webhook not found")
 
+    # SC-038: defence-in-depth — join deliveries to their endpoint and filter
+    # on the caller's org so a delivery row with a mismatched endpoint_id (data
+    # corruption / a future bug) can never surface cross-org. The endpoint
+    # ownership check above already gates access; this is a belt-and-braces
+    # filter at the row level.
     deliveries = (
         db.query(WebhookDelivery)
-        .filter(WebhookDelivery.endpoint_id == webhook_id)
+        .join(WebhookEndpoint, WebhookDelivery.endpoint_id == WebhookEndpoint.id)
+        .filter(
+            WebhookDelivery.endpoint_id == webhook_id,
+            WebhookEndpoint.organization_id == org_id,
+        )
         .order_by(WebhookDelivery.created_at.desc())
         .limit(50)
         .all()

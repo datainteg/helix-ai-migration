@@ -48,8 +48,22 @@ def request_password_reset(db: Session, email: str) -> str | None:
             pass
         return None
 
+    # M-001: invalidate every still-valid token for this user before minting a
+    # fresh one. Previously each request created a new token while leaving all
+    # prior ones usable — an attacker who intercepted an earlier reset link kept
+    # a 30-minute window even after the legitimate user requested a new link.
+    now = datetime.now(timezone.utc)
+    (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.user_id == str(user.id),
+            PasswordResetToken.used_at.is_(None),
+        )
+        .update({PasswordResetToken.used_at: now}, synchronize_session=False)
+    )
+
     raw_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=_TOKEN_TTL_MINUTES)
+    expires_at = now + timedelta(minutes=_TOKEN_TTL_MINUTES)
     record = PasswordResetToken(
         user_id=str(user.id),
         token_hash=_hash_token(raw_token),

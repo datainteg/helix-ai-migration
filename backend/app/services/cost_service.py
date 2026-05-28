@@ -182,15 +182,20 @@ def daily_cost(db: Session, organization_id: str, days: int = 30) -> list[dict]:
     since = (now - timedelta(days=days - 1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    # L-003: GROUP BY / ORDER BY the cast expression directly rather than the
+    # "d" label. Postgres accepts a SELECT-list alias in GROUP BY, but SQLite
+    # (used by the test suite) does not resolve the label in GROUP BY the same
+    # way — grouping by the expression is portable across both backends.
+    day_expr = cast(LLMUsageRecord.created_at, Date)
     rows = (
         db.query(
-            cast(LLMUsageRecord.created_at, Date).label("d"),
+            day_expr.label("d"),
             func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
         )
         .filter(LLMUsageRecord.organization_id == organization_id)
         .filter(LLMUsageRecord.created_at >= since)
-        .group_by("d")
-        .order_by("d")
+        .group_by(day_expr)
+        .order_by(day_expr)
         .all()
     )
     by_date = {str(r[0]): float(r[1] or 0.0) for r in rows}

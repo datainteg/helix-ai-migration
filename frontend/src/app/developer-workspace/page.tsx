@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
-  Search,
   X,
   GitBranch,
   Upload,
@@ -16,7 +15,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { AgentIcon } from "@/components/icons";
-import { Button, Chip, Kbd, Tabs, DemoBanner } from "@/components/ui";
+import { Button, Chip, Kbd, Tabs, DemoBanner, SearchInput } from "@/components/ui";
 
 // TODO: hydrate from API
 interface ArtifactFile {
@@ -174,16 +173,9 @@ function ProjectSwitcher() {
   return (
     <button
       type="button"
-      className="bg-surface flex items-center text-ink-2"
-      style={{
-        gap: 8,
-        padding: "6px 10px",
-        border: "1px solid var(--con-line-2)",
-        borderRadius: 7,
-        fontSize: 12,
-      }}
+      className="bg-surface flex items-center gap-2 text-ink-2 px-2.5 py-1.5 border border-hx-2 rounded-[7px] text-[12px]"
     >
-      <span className="font-mono text-ink-4" style={{ fontSize: 10.5 }}>
+      <span className="font-mono text-ink-4 text-[10.5px]">
         P-1042
       </span>
       <span className="text-ink font-medium">Oracle GL -&gt; Snowflake</span>
@@ -194,22 +186,16 @@ function ProjectSwitcher() {
 
 function Tree() {
   return (
-    <div style={{ padding: "4px 0", fontSize: 12 }}>
+    <div className="py-1 text-[12px]">
       {ARTIFACT_TREE.map((node, i) => (
         <div key={i}>
-          <div
-            className="flex items-center text-ink-3 font-medium"
-            style={{ gap: 6, padding: "5px 14px" }}
-          >
+          <div className="flex items-center gap-1.5 px-3.5 py-[5px] text-ink-3 font-medium">
             <ChevronDown size={12} className="text-ink-4" />
             <Folder size={13} className="text-ink-4" />
-            <span className="font-mono" style={{ fontSize: 11.5 }}>
+            <span className="font-mono text-[11.5px]">
               {node.label}
             </span>
-            <span
-              className="font-mono text-ink-5"
-              style={{ fontSize: 10.5, marginLeft: "auto" }}
-            >
+            <span className="font-mono text-ink-5 text-[10.5px] ml-auto">
               {node.children.length}
             </span>
           </div>
@@ -243,57 +229,27 @@ function Tree() {
             return (
               <div
                 key={j}
-                className="flex items-center cursor-pointer"
-                style={{
-                  gap: 6,
-                  padding: "4px 14px 4px 36px",
-                  background: f.active ? "var(--con-surface-hi)" : "transparent",
-                  borderLeft: f.active
-                    ? "2px solid var(--con-ink-1)"
-                    : "2px solid transparent",
-                }}
+                className={`flex items-center gap-1.5 cursor-pointer py-1 pr-3.5 pl-9 border-l-2 ${
+                  f.active ? "bg-surface-hi border-ink" : "border-transparent"
+                }`}
               >
                 <span
-                  className="font-mono uppercase font-semibold"
-                  style={{
-                    fontSize: 9.5,
-                    padding: "1px 4px",
-                    borderRadius: 3,
-                    background: extBg,
-                    color: extColor,
-                    letterSpacing: "0.04em",
-                    width: 28,
-                    textAlign: "center",
-                  }}
+                  className="font-mono uppercase font-semibold text-[9.5px] px-1 py-px rounded-[3px] tracking-[0.04em] w-7 text-center"
+                  style={{ background: extBg, color: extColor }}
                 >
                   {f.ext}
                 </span>
-                <span
-                  className="font-mono"
-                  style={{
-                    flex: 1,
-                    color: f.active ? "var(--con-ink-1)" : "var(--con-ink-2)",
-                    fontSize: 11.5,
-                  }}
-                >
+                <span className={`font-mono flex-1 text-[11.5px] ${f.active ? "text-ink" : "text-ink-2"}`}>
                   {f.label}
                 </span>
                 {aiColor && (
                   <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: aiColor,
-                      flexShrink: 0,
-                    }}
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: aiColor }}
                   />
                 )}
                 {f.suggestions !== undefined && (
-                  <span
-                    className="font-mono text-warn"
-                    style={{ fontSize: 10, flexShrink: 0 }}
-                  >
+                  <span className="font-mono text-warn text-[10px] flex-shrink-0">
                     {f.suggestions}
                   </span>
                 )}
@@ -322,63 +278,33 @@ function DiffPane() {
         : "var(--con-ink-5)";
 
   return (
-    <div
-      className="flex flex-col bg-surface"
-      style={{ height: "100%" }}
-    >
+    <div className="flex flex-col bg-surface h-full">
       {/* Tabs */}
-      <div
-        className="flex bg-surface-hi border-b border-hx"
-        style={{ height: 36, alignItems: "stretch" }}
-      >
-        <div
-          className="inline-flex items-center bg-surface"
-          style={{
-            gap: 8,
-            padding: "0 14px",
-            borderRight: "1px solid var(--con-line)",
-            borderBottom: "2px solid var(--con-ink-1)",
-            marginBottom: -1,
-          }}
-        >
+      <div className="flex items-stretch h-9 bg-surface-hi border-b border-hx">
+        <div className="inline-flex items-center gap-2 bg-surface px-3.5 border-r border-hx border-b-2 border-b-ink -mb-px">
           <span
-            className="font-mono font-semibold"
-            style={{
-              fontSize: 9.5,
-              padding: "1px 4px",
-              borderRadius: 3,
-              background: "#FEF3C7",
-              color: "#92400E",
-            }}
+            className="font-mono font-semibold text-[9.5px] px-1 py-px rounded-[3px]"
+            style={{ background: "#FEF3C7", color: "#92400E" }}
           >
             PY
           </span>
-          <span className="font-mono" style={{ fontSize: 12 }}>
+          <span className="font-mono text-[12px]">
             migrate.py
           </span>
-          <span className="text-warn" style={{ fontSize: 10 }}>
+          <span className="text-warn text-[10px]">
             ●
           </span>
-          <X size={11} className="text-ink-4" style={{ marginLeft: 4 }} />
+          <X size={11} className="text-ink-4 ml-1" />
         </div>
-        <div
-          className="inline-flex items-center text-ink-4"
-          style={{
-            gap: 8,
-            padding: "0 14px",
-            borderRight: "1px solid var(--con-line)",
-          }}
-        >
-          <span className="font-mono" style={{ fontSize: 11.5 }}>
+        <div className="inline-flex items-center gap-2 text-ink-4 px-3.5 border-r border-hx">
+          <span className="font-mono text-[11.5px]">
             utils.py
           </span>
           <X size={11} />
         </div>
         <div className="flex-1" />
-        <div
-          className="flex items-center"
-          style={{ padding: "0 12px", gap: 6 }}
-        >
+        <div className="flex items-center gap-1.5 px-3">
+
           <Tabs
             tabs={[
               { id: "diff", label: "Diff" },
@@ -392,72 +318,48 @@ function DiffPane() {
       </div>
 
       {/* Tab subbar */}
-      <div
-        className="flex items-center bg-surface border-b border-hx text-ink-3"
-        style={{
-          gap: 14,
-          padding: "8px 16px",
-          fontSize: 11.5,
-        }}
-      >
-        <span className="inline-flex items-center" style={{ gap: 5 }}>
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 bg-surface border-b border-hx text-ink-3 px-4 py-2 text-[11.5px]">
+        <span className="inline-flex items-center gap-1.5">
           <GitBranch size={12} className="text-ink-4" />
           <span className="font-mono">v3 ← v2</span>
         </span>
-        <span className="inline-flex items-center" style={{ gap: 5 }}>
+        <span className="inline-flex items-center gap-1.5">
           <span className="font-mono text-ok">+9</span>
           <span className="font-mono text-err">−5</span>
           <span className="font-mono">lines</span>
         </span>
-        <span className="inline-flex items-center" style={{ gap: 5 }}>
+        <span className="inline-flex items-center gap-1.5">
           <AgentIcon name="Amelia" size={14} />
           <span>Amelia · 12:42</span>
         </span>
         <span className="flex-1" />
-        <span className="font-mono text-ink-4" style={{ fontSize: 11 }}>
+        <span className="font-mono text-ink-4 text-[11px]">
           SHA 8f3c2a · 412 lines
         </span>
       </div>
 
       {/* Diff body */}
-      <div
-        className="flex-1 overflow-y-auto bg-surface font-mono"
-        style={{
-          padding: "10px 0",
-          fontSize: 12,
-          lineHeight: 1.6,
-        }}
-      >
+      <div className="flex-1 overflow-y-auto bg-surface font-mono py-2.5 text-[12px] leading-[1.6]">
         {DIFF_LINES.map((l, i) => (
           <div
             key={i}
-            className="grid"
-            style={{
-              gridTemplateColumns: "44px 22px 1fr",
-              background: lineColor(l.type),
-              padding: "1px 0",
-            }}
+            className="grid grid-cols-[44px_22px_1fr] py-px"
+            style={{ background: lineColor(l.type) }}
           >
             <span
-              style={{
-                textAlign: "right",
-                padding: "0 10px 0 0",
-                color: lineNumberColor(l.type),
-                fontSize: 11,
-              }}
+              className="text-right pr-2.5 text-[11px]"
+              style={{ color: lineNumberColor(l.type) }}
             >
               {l.n}
             </span>
             <span
-              style={{
-                textAlign: "center",
-                color: lineNumberColor(l.type),
-                fontWeight: 600,
-              }}
+              className="text-center font-semibold"
+              style={{ color: lineNumberColor(l.type) }}
             >
               {l.type === "add" ? "+" : l.type === "rem" ? "−" : ""}
             </span>
             <span
+              className="whitespace-pre"
               style={{
                 color:
                   l.type === "ctx"
@@ -465,35 +367,28 @@ function DiffPane() {
                     : l.type === "add"
                       ? "var(--con-ok)"
                       : "var(--con-err)",
-                whiteSpace: "pre",
               }}
             >
               {l.txt}
             </span>
           </div>
         ))}
-        <div
-          className="text-ink-4"
-          style={{ padding: "10px 24px", fontSize: 11 }}
-        >
+        <div className="text-ink-4 px-6 py-2.5 text-[11px]">
           — 386 more lines —
         </div>
       </div>
 
       {/* Bottom action bar */}
-      <div
-        className="flex items-center justify-between bg-surface-hi border-t border-hx"
-        style={{ padding: "10px 16px" }}
-      >
-        <div className="flex items-center" style={{ gap: 8 }}>
+      <div className="flex flex-wrap items-center justify-between gap-y-2 bg-surface-hi border-t border-hx px-4 py-2.5">
+        <div className="flex items-center gap-2">
           <Chip tone="warn" dot>
             Pending approval
           </Chip>
-          <span className="text-ink-3" style={{ fontSize: 11.5 }}>
+          <span className="text-ink-3 text-[11.5px]">
             3 AI suggestions · 0 review comments
           </span>
         </div>
-        <div className="flex" style={{ gap: 6 }}>
+        <div className="flex gap-1.5">
           <Button variant="ghost" size="sm">
             <X size={12} /> Reject
           </Button>
@@ -511,60 +406,27 @@ function DiffPane() {
 
 function AiReviewPane() {
   return (
-    <div
-      className="flex flex-col bg-surface"
-      style={{ height: "100%" }}
-    >
+    <div className="flex flex-col bg-surface h-full">
       {/* Header */}
-      <div
-        className="border-b border-hx"
-        style={{ padding: "12px 16px" }}
-      >
-        <div
-          className="eyebrow flex items-center"
-          style={{ gap: 6 }}
-        >
-          <Sparkles size={11} style={{ color: "var(--con-brand)" }} />
+      <div className="border-b border-hx px-4 py-3">
+        <div className="eyebrow flex items-center gap-1.5">
+          <Sparkles size={11} className="text-[var(--con-brand)]" />
           AI REVIEW · CLAUDE 3.7
         </div>
-        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>
+        <div className="text-[14px] font-semibold mt-1">
           migrate.py
         </div>
-        <div
-          className="flex text-ink-3"
-          style={{ gap: 12, marginTop: 8, fontSize: 11 }}
-        >
-          <span className="inline-flex items-center" style={{ gap: 4 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--con-ok)",
-              }}
-            />
+        <div className="flex gap-3 mt-2 text-ink-3 text-[11px]">
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-con-ok" />
             1 OK
           </span>
-          <span className="inline-flex items-center" style={{ gap: 4 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--con-warn)",
-              }}
-            />
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-con-warn" />
             2 Warning
           </span>
-          <span className="inline-flex items-center" style={{ gap: 4 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--con-info)",
-              }}
-            />
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-con-info" />
             1 Info
           </span>
         </div>
@@ -582,72 +444,34 @@ function AiReviewPane() {
           return (
             <div
               key={i}
-              style={{
-                padding: "14px 16px",
-                borderBottom:
-                  i === AI_REVIEWS.length - 1
-                    ? "none"
-                    : "1px solid var(--con-line)",
-              }}
+              className="px-4 py-3.5 border-b border-hx last:border-b-0"
             >
-              <div
-                className="flex items-start justify-between"
-                style={{ gap: 8, marginBottom: 6 }}
-              >
-                <div
-                  className="flex items-center min-w-0"
-                  style={{ gap: 7 }}
-                >
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-[7px] min-w-0">
                   <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: c,
-                      marginTop: 1,
-                    }}
+                    className="w-1.5 h-1.5 rounded-full mt-px flex-shrink-0"
+                    style={{ background: c }}
                   />
-                  <span
-                    className="text-ink"
-                    style={{ fontSize: 12.5, fontWeight: 500 }}
-                  >
+                  <span className="text-ink text-[12.5px] font-medium">
                     {r.title}
                   </span>
                 </div>
-                <span
-                  className="font-mono text-ink-4"
-                  style={{ fontSize: 10.5 }}
-                >
+                <span className="font-mono text-ink-4 text-[10.5px]">
                   L{r.line}
                 </span>
               </div>
-              <div className="eyebrow" style={{ fontSize: 9, marginBottom: 6 }}>
+              <div className="eyebrow text-[9px] mb-1.5">
                 {r.type}
               </div>
-              <p
-                className="text-ink-2"
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  lineHeight: 1.55,
-                }}
-              >
+              <p className="text-ink-2 m-0 text-[12px] leading-[1.55]">
                 {r.body}
               </p>
               {r.suggestion && (
-                <div
-                  className="bg-app border border-hx font-mono text-ok"
-                  style={{
-                    marginTop: 8,
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    fontSize: 11.5,
-                  }}
-                >
+                <div className="bg-app border border-hx font-mono text-ok mt-2 px-2.5 py-2 rounded-md text-[11.5px]">
                   {r.suggestion}
                 </div>
               )}
-              <div className="flex" style={{ gap: 6, marginTop: 8 }}>
+              <div className="flex gap-1.5 mt-2">
                 <Button variant="outline" size="sm">
                   <Check size={11} /> Apply
                 </Button>
@@ -664,34 +488,16 @@ function AiReviewPane() {
       </div>
 
       {/* Footer prompt */}
-      <div
-        className="border-t border-hx bg-surface-hi"
-        style={{ padding: 14 }}
-      >
-        <div className="eyebrow" style={{ marginBottom: 6 }}>
+      <div className="border-t border-hx bg-surface-hi p-3.5">
+        <div className="eyebrow mb-1.5">
           ASK HELIX ABOUT THIS FILE
         </div>
-        <label
-          className="relative flex items-center"
-          style={{
-            height: 34,
-            border: "1px solid var(--con-line)",
-            borderRadius: 7,
-            paddingLeft: 30,
-            paddingRight: 10,
-            background: "var(--con-surface)",
-          }}
-        >
-          <Sparkles
-            size={13}
-            className="absolute"
-            style={{ left: 10, color: "var(--con-brand)" }}
-          />
+        <label className="relative flex items-center h-[34px] border border-hx rounded-[7px] pl-[30px] pr-2.5 bg-surface focus-within:ring-2 focus-within:ring-[var(--con-brand)] focus-within:ring-offset-1">
+          <Sparkles size={13} aria-hidden className="absolute left-2.5 text-[var(--con-brand)]" />
           <input
             aria-label="Ask Helix about this migration step"
             placeholder="Explain this migration step…"
-            className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
-            style={{ fontSize: 12.5, height: "100%" }}
+            className="bg-transparent border-0 outline-none w-full h-full text-ink text-[12.5px]"
           />
           <Kbd>↵</Kbd>
         </label>
@@ -718,44 +524,24 @@ export default function WorkspacePage() {
 
   return (
     <AppShell fullBleed>
-      <div style={{ padding: "12px 32px 0" }}>
+      <div className="px-8 pt-3">
         <DemoBanner message="The IDE shows demo artifacts (migrate.py, ddl.sql, plan_v1.md). Upload or generate real artifacts to populate this workspace." />
       </div>
       {/* Custom page header (replaces PageHero for IDE layout) */}
-      <div
-        className="flex items-center justify-between border-b border-hx"
-        style={{
-          padding: "20px 32px 14px",
-          gap: 16,
-        }}
-      >
-        <div className="flex items-center" style={{ gap: 16 }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-hx px-8 pt-5 pb-3.5">
+        <div className="flex items-center gap-4">
           <div>
             <div className="eyebrow">
               DEVELOPER WORKSPACE · MIGRATE.PY
             </div>
-            <h1
-              className="m-0"
-              style={{
-                margin: "4px 0 0",
-                fontSize: 22,
-                fontWeight: 500,
-                letterSpacing: "-0.02em",
-              }}
-            >
+            <h1 className="mt-1 mb-0 text-[22px] font-medium tracking-[-0.02em]">
               Review &amp; approve
             </h1>
           </div>
-          <span
-            style={{
-              width: 1,
-              height: 28,
-              background: "var(--con-line-2)",
-            }}
-          />
+          <span aria-hidden className="w-px h-7 bg-[var(--con-line-2)]" />
           <ProjectSwitcher />
         </div>
-        <div className="flex flex-wrap" style={{ gap: 8 }}>
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             size="md"
@@ -801,92 +587,44 @@ export default function WorkspacePage() {
       >
         {/* LEFT: artifact explorer */}
         {showLeftPane && (
-        <div
-          className="flex flex-col bg-surface overflow-hidden min-w-0"
-          style={{ borderRight: "1px solid var(--con-line)" }}
-        >
-          <div
-            className="border-b border-hx"
-            style={{ padding: "12px 14px" }}
-          >
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
+        <div className="flex flex-col bg-surface overflow-hidden min-w-0 border-r border-hx">
+          <div className="border-b border-hx px-3.5 py-3">
+            <div className="eyebrow mb-2">
               ARTIFACT EXPLORER
             </div>
-            <label
-              className="relative flex items-center"
-              style={{
-                height: 28,
-                border: "1px solid var(--con-line)",
-                borderRadius: 7,
-                paddingLeft: 30,
-                paddingRight: 8,
-              }}
-            >
-              <Search
-                size={13}
-                className="absolute text-ink-4"
-                style={{ left: 10 }}
-              />
-              <input
-                aria-label="Search files"
-                placeholder="Search files…"
-                className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
-                style={{ fontSize: 12, height: "100%" }}
-              />
-            </label>
+            {/* UI-016/UI-026 — shared SearchInput primitive (aria-label + focus-ring). */}
+            <SearchInput
+              ariaLabel="Search files"
+              placeholder="Search files…"
+              className="h-7 text-[12px]"
+            />
           </div>
           <div className="flex-1 overflow-y-auto">
             <Tree />
           </div>
-          <div
-            className="bg-surface-hi border-t border-hx"
-            style={{ padding: "12px 14px" }}
-          >
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
+          <div className="bg-surface-hi border-t border-hx px-3.5 py-3">
+            <div className="eyebrow mb-2">
               VERSIONS · migrate.py
             </div>
-            <div className="flex flex-col" style={{ gap: 1 }}>
+            <div className="flex flex-col gap-px">
               {VERSION_HISTORY.map((v) => (
                 <div
                   key={v.v}
-                  className="grid items-center"
-                  style={{
-                    gridTemplateColumns: "26px 1fr auto",
-                    gap: 8,
-                    padding: "5px 0",
-                    fontSize: 11.5,
-                  }}
+                  className="grid grid-cols-[26px_1fr_auto] items-center gap-2 py-[5px] text-[11.5px]"
                 >
                   <span
-                    className="font-mono font-semibold"
-                    style={{
-                      fontSize: 9.5,
-                      padding: "1px 4px",
-                      borderRadius: 3,
-                      background: v.current
-                        ? "var(--con-ink-1)"
-                        : "var(--con-bg-2)",
-                      color: v.current ? "#FFF" : "var(--con-ink-3)",
-                      textAlign: "center",
-                    }}
+                    className={`font-mono font-semibold text-[9.5px] px-1 py-px rounded-[3px] text-center ${
+                      v.current ? "text-white" : "text-ink-3"
+                    }`}
+                    style={{ background: v.current ? "var(--con-ink-1)" : "var(--con-bg-2)" }}
                   >
                     {v.v}
                   </span>
                   <div className="min-w-0">
-                    <div
-                      className="text-ink overflow-hidden whitespace-nowrap"
-                      style={{
-                        fontWeight: v.current ? 500 : 400,
-                        fontSize: 11.5,
-                        textOverflow: "ellipsis",
-                      }}
-                    >
+                    <div className={`text-ink truncate text-[11.5px] ${v.current ? "font-medium" : "font-normal"}`}>
                       {v.msg}
                     </div>
-                    <div
-                      className="font-mono text-ink-4"
-                      style={{ fontSize: 10 }}
-                    >
+                    <div className="font-mono text-ink-4 text-[10px]">
                       {v.agent} · {v.date}
                     </div>
                   </div>
@@ -905,10 +643,7 @@ export default function WorkspacePage() {
 
         {/* RIGHT: AI review */}
         {showRightPane && (
-        <div
-          className="bg-surface-hi overflow-hidden min-w-0"
-          style={{ borderLeft: "1px solid var(--con-line)" }}
-        >
+        <div className="bg-surface-hi overflow-hidden min-w-0 border-l border-hx">
           <AiReviewPane />
         </div>
         )}

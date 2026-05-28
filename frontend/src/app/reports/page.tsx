@@ -26,9 +26,19 @@ export default function ReportsPage() {
           title="Report library is coming soon"
           description="Generated migration plans, validation outcomes, and recon summaries will be downloadable from here once the report service ships."
           action={
-            <Link href="/dashboard">
-              <Button variant="outline">Back to Dashboard</Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link href="/dashboard">
+                <Button variant="outline">Back to Dashboard</Button>
+              </Link>
+              {/* UI-042 — give the coming-soon page a roadmap escape hatch. */}
+              <a
+                href="https://github.com/datainteg/helix-ai-migration/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button variant="ghost">Track on GitHub</Button>
+              </a>
+            </div>
           }
         />
       </Card>

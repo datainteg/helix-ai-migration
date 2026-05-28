@@ -2,16 +2,18 @@ FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /build
 
-# Install from the lockfile for reproducible builds. Falls back to
-# requirements.txt only if the lock is missing (e.g. fresh fork before
-# `scripts/lock-requirements.sh` has been run).
+# SC-055: install ONLY from the lockfile for reproducible, supply-chain-safe
+# builds. Previously a missing requirements.lock fell back to requirements.txt
+# with a WARNING — the build silently proceeded with whatever transitive
+# versions PyPI returned, defeating pinning. Now we FAIL CLOSED: the build
+# aborts if requirements.lock is absent. Generate it with
+# `scripts/lock-requirements.sh` before building.
 COPY backend/requirements.txt backend/requirements.lock* ./
-RUN if [ -f requirements.lock ]; then \
-        pip install --no-cache-dir --prefix=/install -r requirements.lock ; \
-    else \
-        echo "WARNING: requirements.lock missing — installing from requirements.txt (non-reproducible)" ; \
-        pip install --no-cache-dir --prefix=/install -r requirements.txt ; \
-    fi
+RUN test -f requirements.lock || { \
+        echo "ERROR: requirements.lock missing — refusing non-reproducible build. Run scripts/lock-requirements.sh first." >&2 ; \
+        exit 1 ; \
+    } \
+    && pip install --no-cache-dir --prefix=/install -r requirements.lock
 
 
 FROM python:3.11-slim-bookworm AS runner

@@ -136,11 +136,13 @@ class S3Connector(BaseConnector):
                     return []
                 key = objects[0]["Key"]
 
-            obj = client.get_object(Bucket=schema_name, Key=key, Range="bytes=0-4096")
-            sample = obj["Body"].read().decode("utf-8", errors="replace")
-
             if key.endswith(".csv"):
-                header_line = sample.splitlines()[0] if sample else ""
+                # M-008: a 4 KB range can truncate a wide CSV header mid-column
+                # (250+ columns, or long names). Read in growing windows until
+                # the first newline is seen so the full header line is captured,
+                # capping the total read so a single-line/no-newline file can't
+                # force an unbounded download.
+                header_line = self._read_first_line(client, schema_name, key)
                 cols = [c.strip().strip('"') for c in header_line.split(",")]
                 return [
                     ColumnInfo(schema_name=schema_name, table_name=table_name,
@@ -151,6 +153,42 @@ class S3Connector(BaseConnector):
                                column_name="data", data_type="string", is_nullable=True, ordinal_position=1)]
         except Exception as exc:
             raise DiscoveryError(f"Column inference failed: {exc}", "s3") from exc
+
+    # M-008: cap a single header read at 1 MiB so a CSV whose first line is the
+    # whole file (no trailing newline) cannot force an unbounded GET.
+    _MAX_HEADER_BYTES = 1 << 20  # 1 MiB
+    _HEADER_CHUNK = 65536        # 64 KiB per ranged GET
+
+    def _read_first_line(self, client, bucket: str, key: str) -> str:
+        """Read bytes from `key` in growing ranges until the first newline.
+
+        Returns the decoded first line WITHOUT the trailing newline. Falls back
+        to whatever was read (up to _MAX_HEADER_BYTES) if no newline is present —
+        better a long single-column header than a silently truncated one.
+        """
+        buf = b""
+        start = 0
+        while len(buf) < self._MAX_HEADER_BYTES:
+            end = start + self._HEADER_CHUNK - 1
+            try:
+                obj = client.get_object(Bucket=bucket, Key=key, Range=f"bytes={start}-{end}")
+                chunk = obj["Body"].read()
+            except Exception:
+                # Range past EOF (or a backend that rejects the range) — stop
+                # with whatever we have.
+                break
+            if not chunk:
+                break
+            buf += chunk
+            nl = buf.find(b"\n")
+            if nl != -1:
+                buf = buf[:nl]
+                break
+            if len(chunk) < self._HEADER_CHUNK:
+                # Short read → reached EOF without a newline.
+                break
+            start += self._HEADER_CHUNK
+        return buf[: self._MAX_HEADER_BYTES].decode("utf-8", errors="replace").rstrip("\r")
 
     async def get_row_count(self, schema_name: str, table_name: str) -> RowCountResult:
         return RowCountResult(schema_name=schema_name, table_name=table_name, row_count=0)

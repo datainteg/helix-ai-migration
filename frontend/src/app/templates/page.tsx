@@ -27,9 +27,19 @@ export default function TemplatesPage() {
           title="Template catalog is coming soon"
           description="Reusable Oracle, SAS, SQL Server, and DataStage migration templates will be browsable from here once the template service ships."
           action={
-            <Link href="/dashboard">
-              <Button variant="outline">Back to Dashboard</Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link href="/dashboard">
+                <Button variant="outline">Back to Dashboard</Button>
+              </Link>
+              {/* UI-042 — give the coming-soon page a roadmap escape hatch. */}
+              <a
+                href="https://github.com/datainteg/helix-ai-migration/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button variant="ghost">Track on GitHub</Button>
+              </a>
+            </div>
           }
         />
       </Card>

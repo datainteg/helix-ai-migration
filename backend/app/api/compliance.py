@@ -167,7 +167,16 @@ def compliance_bundle(
     elements.append(Paragraph("2. Validation", H2))
     elements.append(Paragraph(f"Rules: {len(rules)} · Runs: {len(val_runs)}", Body))
     for run in val_runs[:50]:
-        results = db.query(ValidationResult).filter(ValidationResult.run_id == run.id).all()
+        # SC-054: cap per-run result rows pulled into memory for the PDF. A run
+        # with 10k+ results previously blocked the worker on serialisation; we
+        # only summarise pass/fail counts here, so 2000 rows is plenty for the
+        # headline tally and bounds the memory/CPU cost.
+        results = (
+            db.query(ValidationResult)
+            .filter(ValidationResult.run_id == run.id)
+            .limit(2000)
+            .all()
+        )
         passed = sum(1 for r in results if r.status == "passed")
         failed = sum(1 for r in results if r.status == "failed")
         elements.append(Paragraph(
@@ -182,8 +191,16 @@ def compliance_bundle(
     else:
         data = [["Recon Run", "Status", "Result Count", "Started (UTC)"]]
         for r in recon_runs[:50]:
-            results = db.query(ReconResult).filter(ReconResult.run_id == r.id).all()
-            data.append([r.id[:18], r.status or "", str(len(results)), str(r.created_at)[:19]])
+            # SC-054: only the COUNT is rendered — query the count directly
+            # instead of materialising every ReconResult row into memory.
+            from sqlalchemy import func as _func
+            result_count = (
+                db.query(_func.count(ReconResult.id))
+                .filter(ReconResult.run_id == r.id)
+                .scalar()
+                or 0
+            )
+            data.append([r.id[:18], r.status or "", str(result_count), str(r.created_at)[:19]])
         tbl = Table(data, repeatRows=1, hAlign="LEFT")
         tbl.setStyle(_table_style(colors))
         elements.append(tbl)

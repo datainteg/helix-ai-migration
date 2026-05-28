@@ -116,6 +116,33 @@ services:
     mem_limit: 500m
     logging: *default-logging
 
+  temporal-ui-guard:
+    # SC-034: pre-flight safety check. Refuses to let the temporal-ui start
+    # when it is bound OFF loopback (TEMPORAL_UI_BIND != 127.0.0.1) while auth
+    # is disabled (TEMPORAL_AUTH_ENABLED=false) — that combination exposes an
+    # unauthenticated workflow inspector (every tenant's planning artifacts) to
+    # the network. The guard exits non-zero on the unsafe combo, which (via
+    # `service_completed_successfully` below) blocks temporal-ui from starting.
+    image: busybox:1.36
+    container_name: helix-temporal-ui-guard
+    profiles: ["debug"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        BIND="${TEMPORAL_UI_BIND:-127.0.0.1}"
+        AUTH="${TEMPORAL_AUTH_ENABLED:-false}"
+        if [ "$$BIND" != "127.0.0.1" ] && [ "$$BIND" != "localhost" ] && [ "$$AUTH" != "true" ]; then
+          echo "FATAL (SC-034): TEMPORAL_UI_BIND=$$BIND exposes the Temporal UI off-loopback" >&2
+          echo "but TEMPORAL_AUTH_ENABLED=$$AUTH. Set TEMPORAL_AUTH_ENABLED=true (and a" >&2
+          echo "TEMPORAL_UI_PASSWORD), or keep TEMPORAL_UI_BIND=127.0.0.1. Refusing to start." >&2
+          exit 1
+        fi
+        echo "temporal-ui-guard: bind=$$BIND auth=$$AUTH — OK"
+    networks:
+      - helix-network
+    logging: *default-logging
+
   temporal-ui:
     # Opt-in only. Defaults to NOT exposing a public port. Operators who need
     # the dashboard run: `docker compose --profile debug up -d`. This avoids
@@ -128,7 +155,7 @@ services:
       # Bind to 127.0.0.1 by default so a public-internet host cannot reach
       # the UI even when this profile is enabled. Override with
       # TEMPORAL_UI_BIND=0.0.0.0 only if the host is behind a reverse proxy
-      # that enforces auth.
+      # that enforces auth (enforced by temporal-ui-guard above — SC-034).
       - "${TEMPORAL_UI_BIND:-127.0.0.1}:${TEMPORAL_UI_HOST_PORT:-8233}:8080"
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
@@ -141,6 +168,8 @@ services:
     depends_on:
       temporal:
         condition: service_started
+      temporal-ui-guard:
+        condition: service_completed_successfully
     networks:
       - helix-network
     # Sized for 4 GB VM; bump if running e2-standard-2+.

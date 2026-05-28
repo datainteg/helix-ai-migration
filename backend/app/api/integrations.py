@@ -59,7 +59,12 @@ def _verify_slack_signature(secret: str, body: bytes, timestamp: str, signature:
         return False
     if abs(time.time() - ts) > _MAX_TIMESTAMP_SKEW_SEC:
         return False
-    basestring = f"v0:{timestamp}:{body.decode('utf-8', errors='replace')}".encode()
+    # SC-033: HMAC the RAW request bytes, not a `decode(errors="replace")`
+    # round-trip. Slack signs the exact bytes it sent; decoding with the
+    # replacement char and re-encoding would diverge from Slack's basestring
+    # for any non-UTF-8 byte (silently rejecting legit traffic) and is a
+    # subtle protocol mismatch. Build the basestring as bytes directly.
+    basestring = b"v0:" + timestamp.encode("ascii", "ignore") + b":" + body
     digest = hmac.new(secret.encode(), basestring, hashlib.sha256).hexdigest()
     expected = f"v0={digest}"
     return hmac.compare_digest(expected, signature or "")

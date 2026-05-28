@@ -199,6 +199,27 @@ async def enforce_body_size(request: Request, call_next):
 
 
 @app.middleware("http")
+async def guard_metrics_endpoint(request: Request, call_next):
+    """SC-056: require a static bearer on the backend `/metrics` route when
+    METRICS_TOKEN is set.
+
+    Caddy already returns 403 for `/metrics`, but the backend still serves it on
+    :8000 — anyone bypassing Caddy (SSH tunnel, misconfigured firewall) could
+    scrape full Prometheus metrics (paths, latencies, tenant labels). When
+    METRICS_TOKEN is configured the scraper must send
+    `Authorization: Bearer <METRICS_TOKEN>`; an empty token keeps the prior
+    behaviour (open on the backend port, blocked at Caddy only).
+    """
+    if request.url.path == "/metrics" and settings.METRICS_TOKEN:
+        import hmac as _hmac
+        auth = request.headers.get("authorization", "")
+        expected = f"Bearer {settings.METRICS_TOKEN}"
+        if not auth or not _hmac.compare_digest(auth, expected):
+            return JSONResponse(status_code=401, content={"detail": "metrics access requires a valid bearer token"})
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Inject defensive HTTP response headers.
 
@@ -226,7 +247,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
-    allow_credentials=True,
+    # SC-035: the API is bearer-only (JWT in the Authorization header); it sets
+    # no cookies and reads none. `allow_credentials=True` only enables
+    # cookie/credentialed cross-origin requests, which we never make — and it
+    # combined with the dev origin regex to let any localhost:<port> page read
+    # responses. Dropping it closes that CSRF/origin-spoofing surface with zero
+    # functional impact on bearer auth.
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     # `Idempotency-Key` lets browsers + SDK consumers opt into POST
     # de-duplication on retries (API-C4). `X-Active-Org-Id` is read by
@@ -241,7 +268,30 @@ app.add_middleware(
     expose_headers=["Idempotency-Replayed", "Retry-After"],
 )
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# SC-040: BREACH-resistant gzip. The stock GZipMiddleware compresses every
+# response over `minimum_size`; if a secret and reflected/attacker-influenced
+# input ever co-occur in one gzipped body, the compressed length becomes a
+# BREACH oracle. We exclude the endpoints whose bodies may carry secrets
+# (`/auth/*` returns tokens; `/llm-providers/*` returns provider config) by
+# wrapping GZipMiddleware in a path-aware shim that bypasses compression for
+# those prefixes and delegates everything else.
+class _SelectiveGZipMiddleware(GZipMiddleware):
+    """GZipMiddleware that skips compression for secret-bearing path prefixes."""
+
+    _NO_GZIP_PREFIXES = ("/api/v1/auth/", "/api/v1/llm-providers/")
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if any(path.startswith(p) for p in self._NO_GZIP_PREFIXES):
+                # Hand the request straight to the wrapped ASGI app, bypassing
+                # the gzip responder entirely for these routes.
+                await self.app(scope, receive, send)
+                return
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(_SelectiveGZipMiddleware, minimum_size=1000)
 
 # Prometheus metrics at /metrics
 try:

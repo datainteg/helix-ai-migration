@@ -16,6 +16,7 @@ helper) when you need ``total`` / paging metadata.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Optional, TypedDict
 
 import httpx
@@ -425,7 +426,12 @@ class Helix:
             return
         detail = ""
         try:
-            detail = res.json().get("detail", "")
-        except Exception:
+            # L-010: narrow the parse guard to JSON-decode failures (and the
+            # AttributeError when the decoded body isn't a dict) instead of a
+            # blanket ``except Exception`` that would also swallow programming
+            # errors or KeyboardInterrupt.
+            body = res.json()
+            detail = body.get("detail", "") if isinstance(body, dict) else ""
+        except (ValueError, json.JSONDecodeError):
             detail = res.text[:200]
         raise HelixError(res.status_code, detail or res.reason_phrase, path=path)

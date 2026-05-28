@@ -2,7 +2,6 @@
 
 import React, { useEffect, useId, useState } from "react";
 import {
-  Search,
   Plus,
   Code,
   X,
@@ -17,7 +16,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { AppIcon } from "@/components/icons";
-import { Button, Card, Tabs, LoadingState, EmptyState, Modal, ErrorBanner } from "@/components/ui";
+import { Button, Card, Tabs, LoadingState, EmptyState, Modal, ErrorBanner, SearchInput } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -1057,46 +1056,19 @@ export default function ConnectorsPage() {
       <div className="flex flex-col" style={{ gap: 16 }}>
         {loadError && <ErrorBanner message={loadError} onDismiss={() => setLoadError("")} />}
 
-        {/* Filter */}
-        <div
-          className="flex items-center bg-surface border border-hx"
-          style={{
-            gap: 12,
-            padding: "10px 14px",
-            borderRadius: 10,
-          }}
-        >
-          <label
-            htmlFor={searchInputId}
-            className="relative flex items-center focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
-            style={{
-              flex: 1,
-              maxWidth: 320,
-              height: 30,
-              border: "1px solid var(--con-line)",
-              borderRadius: 7,
-              paddingLeft: 30,
-              paddingRight: 10,
-              outlineColor: "var(--con-brand)",
-            }}
-          >
-            <span className="sr-only">Search connectors</span>
-            <Search
-              size={13}
-              aria-hidden
-              className="absolute text-ink-4"
-              style={{ left: 10 }}
-            />
-            <input
-              id={searchInputId}
-              aria-label="Search connectors"
-              placeholder="Search connectors…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="bg-transparent border-0 outline-none focus-ring w-full text-ink"
-              style={{ fontSize: 12.5, height: "100%" }}
-            />
-          </label>
+        {/* Filter — UI-016/UI-010/UI-026: inline pixel styles replaced with
+            Tailwind utilities and the shared SearchInput primitive (carries its
+            own aria-label + focus-ring). Tab strip scrolls on narrow widths. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-surface border border-hx rounded-[10px] px-3.5 py-2.5">
+          <SearchInput
+            id={searchInputId}
+            ariaLabel="Search connectors"
+            placeholder="Search connectors…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            wrapperClassName="flex-1 min-w-[180px] max-w-[320px]"
+          />
+          <div className="max-w-full overflow-x-auto">
           <Tabs
             value={cat}
             onChange={setCat}
@@ -1111,6 +1083,7 @@ export default function ConnectorsPage() {
               { id: "custom", label: "Custom", count: counts.custom },
             ]}
           />
+          </div>
         </div>
 
         {loading ? (
