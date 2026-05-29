@@ -166,7 +166,10 @@ def write_audit(
         action=_strip_control_chars(action),
         entity_type=_strip_control_chars(entity_type),
         entity_id=_strip_control_chars(entity_id),
-        event_metadata=json.dumps(meta) if meta else None,
+        # DB column `metadata` is NOT NULL (migration) though the model marks it
+        # nullable; store an empty JSON object rather than NULL when no meta is
+        # passed (e.g. first_admin_created) to satisfy the constraint.
+        event_metadata=json.dumps(meta) if meta else "{}",
         ip_address=ip_address,
     )
     db.add(log)

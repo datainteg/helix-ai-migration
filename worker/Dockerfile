@@ -32,6 +32,7 @@ COPY backend/ ./backend/
 COPY _bmad/ ./_bmad/
 
 RUN adduser --disabled-password --gecos "" --uid 1000 helix \
+    && mkdir -p /app/_bmad-output \
     && chown -R helix:helix /app
 USER 1000
 

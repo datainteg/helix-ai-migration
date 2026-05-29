@@ -181,7 +181,9 @@ services:
     # Requires Docker Compose v2.13+ for `service_completed_successfully`.
     image: ${HELIX_IMAGE_PREFIX:-helix}/backend:${HELIX_IMAGE_TAG:-latest}
     container_name: helix-backend-init
-    command: ["alembic", "upgrade", "head"]
+    # Override the image's uvicorn ENTRYPOINT — this one-shot must run Alembic, not the server.
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
     env_file:
       - .env
     depends_on:

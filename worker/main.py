@@ -23,6 +23,7 @@ import logging
 import os
 import signal
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 
@@ -147,6 +148,12 @@ async def main() -> int:
         max_concurrent_activities=max_concurrent_activities,
         max_concurrent_workflow_tasks=max_concurrent_workflows,
         graceful_shutdown_timeout=graceful_shutdown_timeout,
+        # Sync (`def`) activities require a thread-pool executor. Size it to the
+        # activity concurrency limit so no activity slot is starved of a thread.
+        activity_executor=ThreadPoolExecutor(
+            max_workers=max_concurrent_activities,
+            thread_name_prefix="bmad-activity",
+        ),
         workflows=[BMADPlanningWorkflow, BMADPerNodeWorkflow],
         activities=[
             execute_bmad_graph_activity,

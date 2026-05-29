@@ -65,10 +65,9 @@ agents/bmad/BMAD-METHOD/README_VN.md
 _bmad-output
 
 # W-006: directories not needed in the worker image.
-# backend/alembic is excluded because the worker must NOT run migrations;
-# including it in the image tempts operators to run `alembic upgrade head`
-# from the wrong container.
-backend/alembic/
+# NOTE: backend/alembic/ is NOT excluded here — the shared build context means
+# excluding it also strips migrations from the backend image, breaking
+# backend-init (`alembic upgrade head`). The worker simply never invokes alembic.
 # The frontend app and static website have no worker runtime dependency.
 frontend/
 website/
