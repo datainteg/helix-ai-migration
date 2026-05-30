@@ -23,12 +23,11 @@ router = APIRouter(tags=["invitations"])
 
 
 # Roles a non-super-admin caller is allowed to grant via invitation.
-# Non-admin system roles a member can be invited as. MUST match real role names
-# in auth_service.SYSTEM_ROLES — create_invitation resolves the Role by name, so
-# a name with no matching Role row would orphan the invite on accept.
-# `admin` and `super_admin` are intentionally excluded — promoting someone to
-# admin must go through role assignment after they join, not an invite.
-_INVITABLE_ROLES = {"viewer", "project_manager", "architect", "data_engineer", "qa_engineer"}
+# Admin roles can't be granted via invite — promotion happens via role
+# assignment after the user joins. Any OTHER role that actually exists in the
+# org (system OR custom) is invitable; the endpoint validates against the org's
+# real roles so admin-created custom roles work automatically.
+_NON_INVITABLE_ROLES = {"admin", "super_admin"}
 
 
 class InviteRequest(BaseModel):
@@ -38,12 +37,11 @@ class InviteRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def _restrict_role(cls, v: str) -> str:
-        v = (v or "").strip().lower()
-        if v not in _INVITABLE_ROLES:
-            raise ValueError(
-                f"role must be one of {sorted(_INVITABLE_ROLES)}; "
-                "admin / super_admin require platform-admin promotion"
-            )
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("role is required")
+        if v.lower() in _NON_INVITABLE_ROLES:
+            raise ValueError("admin / super_admin can't be invited — assign the role after the user joins")
         return v
 
 
@@ -76,6 +74,18 @@ async def invite_user(
 ):
     membership = resolve_active_membership(db, user_id)
     org_id = str(membership.organization_id)
+
+    # Validate the requested role against the org's REAL roles (system + custom),
+    # so admin-created custom roles are invitable. Admin roles already blocked.
+    from app.models.identity import Role
+    role_exists = (
+        db.query(Role)
+        .filter(Role.organization_id == org_id, Role.name == data.role)
+        .first()
+    )
+    if not role_exists:
+        raise HTTPException(status_code=400, detail=f"Unknown role '{data.role}' for this organization")
+
     user = get_current_user(db, user_id)  # for inviter's display name
     raw_token = create_invitation(db, org_id, user_id, data.email, data.role)
 

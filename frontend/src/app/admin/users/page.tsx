@@ -20,9 +20,6 @@ import {
   type Member, type RoleInfo, type Invitation,
 } from "@/lib/admin/rbac";
 
-// Roles the backend allows for invites (admin/super_admin require promotion).
-const INVITABLE = ["viewer", "project_manager", "architect", "data_engineer", "qa_engineer"];
-
 export default function UsersPage() {
   const { can } = useAuth();
   const canWrite = can("admin:users:write");
@@ -165,6 +162,7 @@ export default function UsersPage() {
 
       {showInvite && (
         <InviteModal
+          roles={roles}
           onClose={() => setShowInvite(false)}
           onInvited={async () => { setShowInvite(false); setOk("Invitation sent."); await load(); }}
         />
@@ -173,9 +171,12 @@ export default function UsersPage() {
   );
 }
 
-function InviteModal({ onClose, onInvited }: { onClose: () => void; onInvited: () => void }) {
+function InviteModal({ roles, onClose, onInvited }: { roles: RoleInfo[]; onClose: () => void; onInvited: () => void }) {
+  // Any real org role except admin/super_admin (which need post-join assignment).
+  // Includes custom roles an admin created — they appear here automatically.
+  const invitable = roles.filter((r) => !["admin", "super_admin"].includes(r.name));
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("viewer");
+  const [role, setRole] = useState(invitable.find((r) => r.name === "viewer")?.name ?? invitable[0]?.name ?? "viewer");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -204,9 +205,9 @@ function InviteModal({ onClose, onInvited }: { onClose: () => void; onInvited: (
         <label className="flex flex-col gap-1.5">
           <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Role</span>
           <select value={role} onChange={(e) => setRole(e.target.value)} className="h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring">
-            {INVITABLE.map((r) => <option key={r} value={r}>{r}</option>)}
+            {invitable.map((r) => <option key={r.id} value={r.name}>{r.name}{r.is_system ? "" : " (custom)"}</option>)}
           </select>
-          <span className="text-[11.5px] text-ink-4">Admin roles must be assigned after the user joins.</span>
+          <span className="text-[11.5px] text-ink-4">Includes your custom roles. Admin roles must be assigned after the user joins.</span>
         </label>
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
