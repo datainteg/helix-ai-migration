@@ -10,14 +10,13 @@
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Check,
   File as FileIcon,
-  MoreHorizontal,
-  Pause,
   Play,
   RefreshCw,
-  X,
+  ExternalLink,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -94,15 +93,24 @@ export default function AgentsPage() {
   const { token } = useAuth();
   const [realRuns, setRealRuns] = useState<ApiWorkflowRun[] | null>(null);
   const [loadError, setLoadError] = useState<string>("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadRuns = () => {
+    if (!token) return Promise.resolve();
+    setRefreshing(true);
+    return listOrgWorkflowRuns(token, 100)
+      .then((rows) => { setRealRuns(rows); setLoadError(""); })
+      .catch((e: unknown) => { setRealRuns([]); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load workflow runs"); })
+      .finally(() => setRefreshing(false));
+  };
 
   useEffect(() => {
     if (!token) return;
-    let cancelled = false;
-    listOrgWorkflowRuns(token, 100)
-      .then((rows) => { if (!cancelled) setRealRuns(rows); })
-      .catch((e: unknown) => { if (!cancelled) { setRealRuns([]); setLoadError((e instanceof Error ? e.message : null) ?? "Failed to load workflow runs"); } });
-    return () => { cancelled = true; };
+    void loadRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  const refresh = () => { void loadRuns(); };
 
   const displayRuns: WorkflowRun[] = (realRuns ?? []).map((r) => ({
     id: r.workflow_id,
@@ -110,7 +118,7 @@ export default function AgentsPage() {
     status: r.status,
     started: r.created_at ? new Date(r.created_at).toLocaleTimeString() : "—",
     mode: r.mode,
-    steps: "—",
+    steps: "—",      // populated for the selected run from its step detail
     duration: "—",
   }));
 
@@ -154,7 +162,8 @@ export default function AgentsPage() {
       eyebrow="BMAD MULTI-AGENT ORCHESTRATION"
       title="Agent workflows"
       metric={metricLine}
-      description="Live view of the 13-node BMAD migration pipeline. Mary → John → Sally → Winston → Amelia → Paige."
+      description="Live view of the 13-step BMAD migration pipeline, driven by 6 agents — Mary, John, Sally, Winston, Amelia, Paige."
+      crumbs={["Agents"]}
       actions={
         <>
           <Tabs
@@ -165,8 +174,7 @@ export default function AgentsPage() {
               { id: "phases", label: "Phases" },
             ]}
           />
-          <Button variant="outline"><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
-          <Button variant="primary"><Play className="h-3 w-3" /> Start workflow</Button>
+          <Button variant="outline" onClick={refresh} loading={refreshing}><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
         </>
       }
     >
@@ -263,15 +271,15 @@ function LinearView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun 
               </div>
               <div className="text-[12px] text-ink-3 mt-1">
                 Started <span className="font-mono">{run?.started ?? "—"}</span> · Mode{" "}
-                <span className="font-mono">{run?.mode ?? "—"}</span> · Duration{" "}
-                <span className="font-mono">{run?.duration ?? "—"}</span>
+                <span className="font-mono">{run?.mode ?? "—"}</span> · Steps{" "}
+                <span className="font-mono">{nodes ? `${nodes.filter((n) => n.status === "completed").length}/${nodes.length}` : "—"}</span>
               </div>
             </div>
-            <div className="flex gap-1.5">
-              <Button variant="outline" size="sm"><Pause className="h-3 w-3" /> Pause</Button>
-              <Button variant="outline" size="sm"><X className="h-3 w-3" /> Cancel</Button>
-              <Button variant="ghost" size="icon" aria-label="More actions"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
-            </div>
+            {run?.project && (
+              <Link href={`/projects/${run.project}`}>
+                <Button variant="outline" size="sm"><ExternalLink className="h-3 w-3" /> View project</Button>
+              </Link>
+            )}
           </div>
 
           {/* The pipeline */}
@@ -512,10 +520,11 @@ function PhasesView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun 
               {run && <StatusBadge status={run.status} />}
             </div>
           </div>
-          <div className="flex gap-1.5">
-            <Button variant="outline" size="sm"><Pause className="h-3 w-3" /> Pause</Button>
-            <Button variant="outline" size="sm"><X className="h-3 w-3" /> Cancel</Button>
-          </div>
+          {run?.project && (
+            <Link href={`/projects/${run.project}`}>
+              <Button variant="outline" size="sm"><ExternalLink className="h-3 w-3" /> View project</Button>
+            </Link>
+          )}
         </div>
       </Card>
 
