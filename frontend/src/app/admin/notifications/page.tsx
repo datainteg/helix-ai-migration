@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Mail, Bell } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Button, Chip, Tabs, ErrorBanner, LoadingState, EmptyState, SearchInput, StatusBadge, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
 import {
   fetchRules, upsertRule, fetchNotifications,
@@ -74,10 +74,10 @@ export default function NotificationsAdminPage() {
   }, [q, history]);
 
   return (
-    <AppShell
+    <AdminShell
       title="Notifications"
       subtitle="Choose which events notify your team, the thresholds that trigger them, and the delivery channels."
-      crumbs={["Notifications"]}
+      page="Notifications"
       actions={<Button variant="outline" onClick={() => void load()}><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>}
     >
       {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
@@ -157,7 +157,7 @@ export default function NotificationsAdminPage() {
           )}
         </Card>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

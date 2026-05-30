@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Mail, Trash2, ShieldCheck } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Avatar, StatusBadge, Chip, Button, LoadingState, EmptyState, ErrorBanner, Modal, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -71,10 +71,10 @@ export default function UsersPage() {
   const pending = invites.filter((i) => i.status === "pending");
 
   return (
-    <AppShell
+    <AdminShell
       title="Users"
       subtitle="Manage organization members, assign roles, and invite teammates."
-      crumbs={["Users"]}
+      page="Users"
       actions={canWrite ? <Button onClick={() => setShowInvite(true)}><Plus className="h-4 w-4" /> Invite user</Button> : undefined}
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
@@ -169,7 +169,7 @@ export default function UsersPage() {
           onInvited={async () => { setShowInvite(false); setOk("Invitation sent."); await load(); }}
         />
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

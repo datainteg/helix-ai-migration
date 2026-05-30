@@ -9,15 +9,15 @@
  */
 
 import { Wrench, Upload, PackageCheck, ShieldCheck } from "lucide-react";
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Chip } from "@/components/ui";
 
 export default function CustomConnectorsPage() {
   return (
-    <AppShell
+    <AdminShell
       title="Custom Connectors"
       subtitle="Build, upload, and manage your own source/target connectors via the Helix connector SDK."
-      crumbs={["Custom Connectors"]}
+      page="Custom Connectors"
       actions={<Chip tone="default">Planned</Chip>}
     >
       <Card padding="lg">
@@ -44,7 +44,7 @@ export default function CustomConnectorsPage() {
           {" "}<a href="/admin/connectors" className="text-[var(--con-brand)] hover:underline">Connector Management</a>.
         </p>
       </Card>
-    </AppShell>
+    </AdminShell>
   );
 }
 

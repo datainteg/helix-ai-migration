@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { Check, Lock, Plus, Trash2, Pencil, ShieldCheck } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Chip, Button, ErrorBanner, LoadingState, EmptyState, Modal, ConfirmModal, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -69,10 +69,10 @@ export default function RolesPage() {
   const allPerms = data?.permissions ?? [];
 
   return (
-    <AppShell
+    <AdminShell
       title="Roles & Permissions"
       subtitle="System roles are protected. Create custom roles and toggle their permissions to fit your team."
-      crumbs={["Roles"]}
+      page="Roles"
       actions={!forbidden && canWrite ? <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New role</Button> : undefined}
     >
       {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
@@ -160,7 +160,7 @@ export default function RolesPage() {
         busy={busy}
         confirmLabel="Delete role"
       />
-    </AppShell>
+    </AdminShell>
   );
 }
 

@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { Save, RefreshCw, AlertTriangle, ShieldCheck, Info, Download, TrendingUp } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Button, Chip, ErrorBanner, LoadingState, Sparkline, ProgressBar, EmptyState, Tabs, Donut, MetricCell, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
@@ -109,10 +109,10 @@ export default function CostLimitsPage() {
   ];
 
   return (
-    <AppShell
+    <AdminShell
       title="Cost Limits"
       subtitle="Govern LLM spend: org-wide caps, per-agent and per-project budgets, and usage analytics. Hard caps refuse new workflows; soft caps warn only."
-      crumbs={["Cost Limits"]}
+      page="Cost Limits"
       actions={<Button variant="outline" onClick={() => void refresh()}><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>}
     >
       {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
@@ -206,7 +206,7 @@ export default function CostLimitsPage() {
       ) : (
         <UsageTab usage={usage} />
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

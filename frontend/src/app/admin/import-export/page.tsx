@@ -9,7 +9,7 @@
  */
 
 import { Upload, Download, FileText, FileSpreadsheet } from "lucide-react";
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Button, Chip } from "@/components/ui";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -27,10 +27,10 @@ async function download(path: string, filename: string) {
 
 export default function ImportExportPage() {
   return (
-    <AppShell
+    <AdminShell
       title="Import / Export"
       subtitle="Move projects, plans, and configurations between Helix instances. Available exports are listed below."
-      crumbs={["Import / Export"]}
+      page="Import / Export"
     >
       <Card title="Available exports" description="These data exports are available today.">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -66,7 +66,7 @@ export default function ImportExportPage() {
           </div>
         </div>
       </Card>
-    </AppShell>
+    </AdminShell>
   );
 }
 

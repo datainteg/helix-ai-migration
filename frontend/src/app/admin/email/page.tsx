@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { Save, Send, ShieldCheck, AlertTriangle, Mail } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Button, Chip, Tabs, ErrorBanner, LoadingState } from "@/components/ui";
 import {
   fetchEmailSettings, saveEmailSettings, testEmailSettings,
@@ -111,10 +111,10 @@ export default function EmailSettingsPage() {
   const inputCls = "w-full h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring";
 
   return (
-    <AppShell
+    <AdminShell
       title="Email / SMTP"
       subtitle="Configure the mail transport used for notifications, invitations, and password resets — then send a test to verify it works."
-      crumbs={["Email"]}
+      page="Email / SMTP"
       actions={
         <Chip tone={saved?.enabled && (saved?.smtp_host || saved?.sendgrid_api_key_set) ? "ok" : "default"} dot>
           {saved?.enabled && (saved?.smtp_host || saved?.sendgrid_api_key_set) ? "Active" : "Not configured"}
@@ -199,7 +199,7 @@ export default function EmailSettingsPage() {
           </Card>
         </div>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

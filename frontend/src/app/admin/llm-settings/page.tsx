@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useCallback, useId, useState } from "react";
 import { Plus, Check, X, BrainCircuit } from "lucide-react";
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { LLMIcon } from "@/components/icons";
 import { Card, Button, StatusBadge, ErrorBanner, LoadingState, EmptyState } from "@/components/ui";
 
@@ -226,9 +226,9 @@ export default function LLMSettingsPage() {
   const apiKeyRequired = !KEYLESS_PROVIDERS.has(form.provider_type);
 
   return (
-    <AppShell
+    <AdminShell
       title="LLM Providers"
-      crumbs={["LLM Providers"]}
+      page="LLM Providers"
       subtitle="Configure and manage AI providers, models, and routing for your migration agents."
       actions={
         <Button
@@ -441,7 +441,7 @@ export default function LLMSettingsPage() {
           </table>
         </Card>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, Fragment } from "react";
 import { Save, Check } from "lucide-react";
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { LLMIcon, AgentIcon } from "@/components/icons";
 import { Card, Button, Chip, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
@@ -153,9 +153,9 @@ export default function AgentMappingPage() {
   };
 
   return (
-    <AppShell
+    <AdminShell
       title="Agent Model Mapping"
-      crumbs={["Agent Mapping"]}
+      page="Agent Model Mapping"
       subtitle="Route each agent to a provider and model. Simple mode applies one model to all BMAD agents; the Ask Helix Help agent is always routed on its own."
       actions={
         <Button onClick={handleSave} loading={saving}>
@@ -312,6 +312,6 @@ export default function AgentMappingPage() {
           </tbody>
         </table>
       </Card>
-    </AppShell>
+    </AdminShell>
   );
 }

@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { Check, Minus, Plug } from "lucide-react";
 
-import { AppShell } from "@/components/layout";
+import { AdminShell } from "@/components/layout";
 import { Card, Chip, ErrorBanner, LoadingState, EmptyState, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -49,10 +49,10 @@ export default function ConnectorsAdminPage() {
   const custom = (rows ?? []).filter((c) => c.mode === "custom");
 
   return (
-    <AppShell
+    <AdminShell
       title="Connector Management"
       subtitle="Source and target connectors supported by this deployment, and the capabilities each one provides."
-      crumbs={["Connectors"]}
+      page="Connector Management"
       actions={rows ? <Chip tone="brand" dot>{rows.length} connectors</Chip> : undefined}
     >
       {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
@@ -66,7 +66,7 @@ export default function ConnectorsAdminPage() {
           {custom.length > 0 && <CapTable title="Custom connectors" rows={custom} />}
         </>
       )}
-    </AppShell>
+    </AdminShell>
   );
 }
 
