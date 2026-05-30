@@ -25,6 +25,8 @@ from app.api.encryption import router as encryption_router
 from app.api.invitations import router as invitations_router
 from app.api.webhooks import router as webhooks_router
 from app.api.usage import router as usage_router
+from app.api.notifications import router as notifications_router
+from app.api.email_settings import router as email_settings_router
 from app.api.superadmin import router as superadmin_router
 from app.api.users import router as users_router
 from app.api.sprints import router as sprints_router
@@ -39,6 +41,7 @@ from app.api.workflow_ops import router as workflow_ops_router
 from app.api.marketplace import router as marketplace_router
 from app.api.knowledge import router as knowledge_router
 from app.api.migrations import router as migrations_router
+from app.api.assistant import router as assistant_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -204,6 +207,8 @@ _DEMO_WRITE_ALLOWLIST = {
     "/api/v1/auth/logout",
     "/api/v1/auth/demo-login",
     "/api/v1/auth/sse-ticket",
+    # The Help agent is a POST but writes no domain data — let demo users chat.
+    "/api/v1/assistant/ask",
 }
 
 
@@ -379,6 +384,8 @@ app.include_router(encryption_router, prefix="/api/v1")
 app.include_router(invitations_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(email_settings_router, prefix="/api/v1")
 app.include_router(superadmin_router, prefix="/api/v1/superadmin")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(sprints_router, prefix="/api/v1")
@@ -393,6 +400,7 @@ app.include_router(workflow_ops_router, prefix="/api/v1")
 app.include_router(marketplace_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(migrations_router, prefix="/api/v1")
+app.include_router(assistant_router, prefix="/api/v1")
 
 
 @app.get("/")

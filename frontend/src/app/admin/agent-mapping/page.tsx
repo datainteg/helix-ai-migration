@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Fragment } from "react";
 import { Save, Check } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { LLMIcon, AgentIcon } from "@/components/icons";
@@ -10,15 +10,22 @@ import { useAuth } from "@/lib/auth-context";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // Mirrors backend AGENT_TYPES in backend/app/services/llm_router_service.py.
-// Six official BMAD agents — codes match _bmad/config.toml.
-const AGENT_TYPES: { id: string; name: string; role: string }[] = [
-  { id: "bmad-agent-analyst",     name: "Mary — Business Analyst",        role: "Analysis" },
-  { id: "bmad-agent-tech-writer", name: "Paige — Technical Writer",       role: "Documentation" },
-  { id: "bmad-agent-pm",          name: "John — Product Manager",         role: "Planning" },
-  { id: "bmad-agent-ux-designer", name: "Sally — UX Designer",            role: "UX" },
-  { id: "bmad-agent-architect",   name: "Winston — System Architect",     role: "Architecture" },
-  { id: "bmad-agent-dev",         name: "Amelia — Senior Software Engineer", role: "Implementation" },
+// Six BMAD agents (codes match _bmad/config.toml) + the Helix Help agent.
+type AgentDef = { id: string; name: string; role: string; group: "bmad" | "assistant"; hint?: string };
+const AGENT_TYPES: AgentDef[] = [
+  { id: "bmad-agent-analyst",     name: "Mary — Business Analyst",        role: "Analysis",       group: "bmad" },
+  { id: "bmad-agent-tech-writer", name: "Paige — Technical Writer",       role: "Documentation",  group: "bmad" },
+  { id: "bmad-agent-pm",          name: "John — Product Manager",         role: "Planning",       group: "bmad" },
+  { id: "bmad-agent-ux-designer", name: "Sally — UX Designer",            role: "UX",             group: "bmad" },
+  { id: "bmad-agent-architect",   name: "Winston — System Architect",     role: "Architecture",   group: "bmad" },
+  { id: "bmad-agent-dev",         name: "Amelia — Senior Software Engineer", role: "Implementation", group: "bmad" },
+  { id: "assistant",              name: "Ask Helix — Help agent",         role: "In-app guide",   group: "assistant", hint: "Backs the “Ask Helix” popup. A cheap, fast model is ideal here." },
 ];
+
+// The Help agent is routed independently — it must never be swept up by
+// simple-mode propagation (which copies the analyst model to every BMAD agent).
+const BMAD_AGENTS = AGENT_TYPES.filter((a) => a.group === "bmad");
+const ASSISTANT_AGENT = AGENT_TYPES.find((a) => a.group === "assistant")!;
 
 interface LLMProvider {
   id: string;
@@ -110,15 +117,19 @@ export default function AgentMappingPage() {
     setError("");
     setSavedAt(null);
     try {
-      // In simple mode, propagate the analyst mapping to every agent.
+      // In simple mode, propagate the analyst mapping to every BMAD agent.
+      // The Help agent (assistant) is always routed by its own mapping so
+      // admins can keep a cheaper/faster model behind the popup.
       const payload: AgentMapping[] = [];
       const baseMapping = mode === "simple" ? mappings["bmad-agent-analyst"] : null;
-      AGENT_TYPES.forEach((a) => {
+      BMAD_AGENTS.forEach((a) => {
         const m = mode === "simple" && baseMapping
           ? { ...baseMapping, agent_type: a.id }
           : mappings[a.id];
         if (m && m.provider_id) payload.push(m);
       });
+      const asst = mappings[ASSISTANT_AGENT.id];
+      if (asst && asst.provider_id) payload.push({ ...asst, agent_type: ASSISTANT_AGENT.id });
       if (payload.length === 0) {
         throw new Error("No mappings to save — pick a provider for at least one agent.");
       }
@@ -144,7 +155,7 @@ export default function AgentMappingPage() {
   return (
     <AdminShell
       title="Agent Model Mapping"
-      subtitle="Route each BMAD agent to a provider and model. Simple mode: one model for all. Advanced: per-agent control."
+      subtitle="Route each agent to a provider and model. Simple mode applies one model to all BMAD agents; the Ask Helix Help agent is always routed on its own."
       actions={
         <Button onClick={handleSave} loading={saving}>
           {savedAt ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
@@ -191,19 +202,34 @@ export default function AgentMappingPage() {
             </tr>
           </thead>
           <tbody>
-            {AGENT_TYPES.map((a) => {
+            {AGENT_TYPES.map((a, idx) => {
               const map = mappings[a.id];
-              const disabled = mode === "simple" && a.id !== "bmad-agent-analyst";
+              // Simple mode locks the BMAD rows to the analyst's model, but the
+              // Help agent always stays editable (it's routed independently).
+              const disabled = mode === "simple" && a.group === "bmad" && a.id !== "bmad-agent-analyst";
               const selectedProvider = providers.find((p) => p.id === map?.provider_id);
+              // Group separator before the first assistant row.
+              const startsAssistantGroup = a.group === "assistant" && AGENT_TYPES[idx - 1]?.group !== "assistant";
               return (
-                <tr key={a.id} className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
+                <Fragment key={a.id}>
+                {startsAssistantGroup && (
+                  <tr className="bg-surface-hi">
+                    <td colSpan={7} className="px-4 py-2 text-[10.5px] uppercase tracking-[0.08em] font-mono text-ink-4 border-b border-hx">
+                      Help agent · independent of BMAD routing
+                    </td>
+                  </tr>
+                )}
+                <tr className="border-b border-hx last:border-b-0 hover:bg-surface-hi">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <AgentIcon name={a.id} size={20} />
-                      <span className="font-medium text-ink">{a.name}</span>
+                      <div className="min-w-0">
+                        <span className="font-medium text-ink">{a.name}</span>
+                        {a.hint && <div className="text-[11px] text-ink-4 mt-0.5">{a.hint}</div>}
+                      </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3"><Chip tone="brand">{a.role}</Chip></td>
+                  <td className="px-4 py-3"><Chip tone={a.group === "assistant" ? "default" : "brand"}>{a.role}</Chip></td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       {selectedProvider && (
@@ -279,6 +305,7 @@ export default function AgentMappingPage() {
                   </td>
                   <td className="px-4 py-3"><Chip tone={map?.provider_id ? "ok" : "warn"} dot>{map?.provider_id ? "Mapped" : "Unset"}</Chip></td>
                 </tr>
+                </Fragment>
               );
             })}
           </tbody>

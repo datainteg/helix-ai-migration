@@ -13,6 +13,8 @@ import {
   ScrollText,
   Bell,
   Upload,
+  DollarSign,
+  Mail,
 } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { Card, Chip, MetricCard } from "@/components/ui";
@@ -30,15 +32,17 @@ interface Tile {
 
 const TILES: Tile[] = [
   { href: "/admin/users", icon: Users, label: "Users", desc: "Manage accounts, invites, and access." },
-  { href: "/admin/roles", icon: Lock, label: "Roles", desc: "Configure RBAC roles and permissions.", comingSoon: true },
+  { href: "/admin/roles", icon: Lock, label: "Roles", desc: "Built-in RBAC roles and permissions." },
   { href: "/admin/llm-settings", icon: BrainCircuit, label: "LLM Providers", desc: "OpenAI · Claude · Gemini · local." },
   { href: "/admin/agent-mapping", icon: Network, label: "Agent Model Mapping", desc: "Route agents to providers and models." },
-  { href: "/admin/connectors", icon: Plug, label: "Connector Management", desc: "First-party connector status & config.", comingSoon: true },
-  { href: "/admin/custom-connectors", icon: Wrench, label: "Custom Connectors", desc: "Pluggable connector SDK & deployments.", comingSoon: true },
+  { href: "/admin/cost-limits", icon: DollarSign, label: "Cost Limits", desc: "Per-org daily & monthly LLM spend caps." },
+  { href: "/admin/email", icon: Mail, label: "Email / SMTP", desc: "Mail transport setup + test connection." },
+  { href: "/admin/connectors", icon: Plug, label: "Connector Management", desc: "Supported connectors & capabilities." },
+  { href: "/admin/custom-connectors", icon: Wrench, label: "Custom Connectors", desc: "Pluggable connector SDK & deployments." },
   { href: "/admin/system-health", icon: HeartPulse, label: "System Health", desc: "Backend, DB, Redis, Temporal, worker." },
   { href: "/admin/audit-logs", icon: ScrollText, label: "Audit Logs", desc: "Security and activity events." },
-  { href: "/admin/notifications", icon: Bell, label: "Notifications", desc: "Alert rules and delivery channels.", comingSoon: true },
-  { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Projects, plans, configurations.", comingSoon: true },
+  { href: "/admin/notifications", icon: Bell, label: "Notifications", desc: "Alert rules and delivery channels." },
+  { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Data exports; project bundles planned." },
 ];
 
 // Em dash placeholder while loading or when a metric is unavailable (e.g. the

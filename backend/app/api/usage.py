@@ -1,6 +1,10 @@
 """Rate limit + API usage dashboard endpoint."""
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -9,13 +13,24 @@ from app.auth.dependencies import require_permission, resolve_active_org_id
 from app.auth.jwt import get_current_user_id
 from app.models.observability import AuditLog
 from app.models.cost import OrgCostLimit
-from app.services.cost_service import usage_summary, daily_cost, get_cost_limit
+from app.services.cost_service import (
+    usage_summary, daily_cost, get_cost_limit,
+    list_budgets, upsert_budget, delete_budget, known_agents,
+)
 from app.api.audit import write_audit
 
 router = APIRouter(tags=["usage"])
 
 
 class CostLimitUpdate(BaseModel):
+    daily_usd_cap: float = Field(default=0.0, ge=0.0)
+    monthly_usd_cap: float = Field(default=0.0, ge=0.0)
+    enforcement: str = Field(default="hard", pattern="^(hard|soft)$")
+
+
+class CostBudgetUpdate(BaseModel):
+    scope: str = Field(pattern="^(agent|project)$")
+    scope_key: str = Field(min_length=1, max_length=100)
     daily_usd_cap: float = Field(default=0.0, ge=0.0)
     monthly_usd_cap: float = Field(default=0.0, ge=0.0)
     enforcement: str = Field(default="hard", pattern="^(hard|soft)$")
@@ -92,6 +107,107 @@ def update_cost_limit(
         "enforcement": limit.enforcement,
         "configured": True,
     }
+
+
+def _budget_dict(b) -> dict:
+    return {
+        "scope": b.scope,
+        "scope_key": b.scope_key,
+        "daily_usd_cap": b.daily_usd_cap,
+        "monthly_usd_cap": b.monthly_usd_cap,
+        "enforcement": b.enforcement,
+    }
+
+
+@router.get("/usage/budgets")
+def get_budgets(
+    scope: str | None = None,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Per-agent / per-project spend budgets for the active org."""
+    if scope is not None and scope not in ("agent", "project"):
+        raise HTTPException(status_code=400, detail="scope must be 'agent' or 'project'")
+    org_id = resolve_active_org_id(db, user_id)
+    return [_budget_dict(b) for b in list_budgets(db, org_id, scope)]
+
+
+@router.put("/usage/budgets")
+def put_budget(
+    data: CostBudgetUpdate,
+    request: Request,
+    user_id: str = Depends(require_permission("admin:llm:write")),
+    db: Session = Depends(get_db),
+):
+    """Create or update a per-agent / per-project budget. Caps of 0 disable
+    that window for the scope."""
+    org_id = resolve_active_org_id(db, user_id)
+    try:
+        row = upsert_budget(
+            db, org_id,
+            scope=data.scope, scope_key=data.scope_key,
+            daily_usd_cap=data.daily_usd_cap, monthly_usd_cap=data.monthly_usd_cap,
+            enforcement=data.enforcement,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    write_audit(db, org_id=org_id, actor_id=user_id, action="cost_budget_updated",
+                entity_type="cost_budget", entity_id=row.id,
+                meta=data.model_dump(), request=request)
+    return _budget_dict(row)
+
+
+@router.delete("/usage/budgets", status_code=204)
+def remove_budget(
+    scope: str,
+    scope_key: str,
+    request: Request,
+    user_id: str = Depends(require_permission("admin:llm:write")),
+    db: Session = Depends(get_db),
+):
+    org_id = resolve_active_org_id(db, user_id)
+    if not delete_budget(db, org_id, scope, scope_key):
+        raise HTTPException(status_code=404, detail="budget not found")
+    write_audit(db, org_id=org_id, actor_id=user_id, action="cost_budget_deleted",
+                entity_type="cost_budget", entity_id=f"{scope}:{scope_key}", request=request)
+
+
+@router.get("/usage/agents")
+def get_known_agents(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Known (AGENT_TYPES) ∪ observed agent codes — for the budget picker."""
+    org_id = resolve_active_org_id(db, user_id)
+    return {"agents": known_agents(db, org_id)}
+
+
+@router.get("/usage/llm/export.csv")
+def export_usage_csv(
+    days: int = 30,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Download per-agent usage as CSV for the trailing window."""
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    org_id = resolve_active_org_id(db, user_id)
+    summary = usage_summary(db, org_id, days=days)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["agent", "cost_usd", "input_tokens", "output_tokens", "call_count"])
+    for a in summary["by_agent"]:
+        w.writerow([a["agent"], a["cost_usd"], a["input_tokens"], a["output_tokens"], a["call_count"]])
+    w.writerow([])
+    w.writerow(["TOTAL", summary["total_cost_usd"], summary["input_tokens"], summary["output_tokens"], ""])
+    buf.seek(0)
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="helix-usage-{days}d.csv"'},
+    )
 
 
 @router.get("/admin/usage")

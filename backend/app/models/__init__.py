@@ -16,7 +16,9 @@ from app.models.sprint import (  # noqa: F401
     SprintTaskHistory,
 )
 from app.models.cutover import MigrationCutover  # noqa: F401
-from app.models.cost import LLMUsageRecord, OrgCostLimit  # noqa: F401
+from app.models.cost import LLMUsageRecord, OrgCostLimit, CostBudget  # noqa: F401
+from app.models.notification import Notification, NotificationRule  # noqa: F401
+from app.models.email_settings import EmailSettings  # noqa: F401
 from app.models.schema_snapshot import SourceSchemaSnapshot  # noqa: F401
 from app.models.knowledge import KnowledgeDoc  # noqa: F401
 from app.models.encryption import OrgDataEncryptionKey  # noqa: F401

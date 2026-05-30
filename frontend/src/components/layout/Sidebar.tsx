@@ -19,6 +19,8 @@ import {
   Settings,
   Search,
   DollarSign,
+  Bell,
+  Mail,
   LogOut,
   X,
 } from "lucide-react";
@@ -38,7 +40,7 @@ type NavItem = {
 };
 
 const PRIMARY: NavItem[] = [
-  { label: "Command Center",     href: "/dashboard",            icon: LayoutDashboard, shortcut: "1" },
+  { label: "Dashboard",          href: "/dashboard",            icon: LayoutDashboard, shortcut: "1" },
   { label: "Projects",           href: "/projects",             icon: FolderKanban,    shortcut: "2" },
   { label: "Agents",             href: "/agents",               icon: Bot,             shortcut: "3", live: true },
   { label: "Validation",         href: "/validation",           icon: ShieldCheck,     shortcut: "4" },
@@ -57,7 +59,9 @@ const RESOURCES: NavItem[] = [
 
 const ADMIN: NavItem[] = [
   { label: "Administration",     href: "/admin",                icon: Settings },
-  { label: "Cost limits",        href: "/admin/cost-limits",    icon: DollarSign },
+  { label: "Cost Limits",        href: "/admin/cost-limits",    icon: DollarSign },
+  { label: "Notifications",      href: "/admin/notifications",  icon: Bell },
+  { label: "Email / SMTP",       href: "/admin/email",          icon: Mail },
 ];
 
 function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
@@ -234,10 +238,13 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname() || "";
-  const isActive = (href: string) =>
-    href === "/dashboard"
-      ? pathname === "/dashboard" || pathname === "/"
-      : pathname.startsWith(href);
+  const isActive = (href: string) => {
+    if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
+    // "/admin" must match exactly, otherwise it lights up alongside its
+    // sub-pages (e.g. /admin/cost-limits) which have their own nav entries.
+    if (href === "/admin") return pathname === "/admin";
+    return pathname.startsWith(href);
+  };
 
   // Close drawer on Escape and lock body scroll while open.
   useEffect(() => {

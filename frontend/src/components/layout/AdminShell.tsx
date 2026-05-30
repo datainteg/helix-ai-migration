@@ -14,6 +14,7 @@ import {
   ScrollText,
   Bell,
   Upload,
+  Mail,
 } from "lucide-react";
 import { AppShell } from "./AppShell";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ const ADMIN_NAV = [
   { label: "System Health", href: "/admin/system-health", icon: HeartPulse },
   { label: "Audit Logs", href: "/admin/audit-logs", icon: ScrollText },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
+  { label: "Email / SMTP", href: "/admin/email", icon: Mail },
   { label: "Import / Export", href: "/admin/import-export", icon: Upload },
 ];
 

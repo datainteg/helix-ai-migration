@@ -51,16 +51,45 @@ async def start_bmad_planning_workflow(
     Returns a dict shaped like `HelixBMADResult.to_dict()` plus `result` for the
     local-fallback case (which carries the full LangGraph state).
     """
-    # Cost guardrail — refuse start when the org has breached its USD cap in
-    # hard-enforcement mode. Soft mode logs but allows.
+    # Cost guardrail — refuse start when the org has breached its USD cap, or
+    # when a per-agent / per-project budget is in hard-breach. Soft mode logs +
+    # notifies but allows. Notifications are best-effort (never block the run).
     if organization_id and db is not None:
         try:
-            from app.services.cost_service import check_within_cap
+            from app.services.cost_service import check_within_cap, check_all_budgets
+            from app.services import notification_service as ns
+            from datetime import datetime, timezone
+
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            def _notify( ntype, severity, title, body):
+                try:
+                    ns.emit(db, org_id=organization_id, type=ntype, severity=severity,
+                            title=title, body=body, link="/admin/cost-limits",
+                            dedupe_key=f"{ntype}:{organization_id}:{today}")
+                except Exception:  # noqa: BLE001
+                    logger.debug("cost notification emit failed", exc_info=True)
+
+            # Org-wide cap.
             allowed, reason = check_within_cap(db, organization_id)
             if not allowed:
+                _notify("cost.cap_breached", "error", "Org cost cap reached",
+                        f"New workflows are being refused: {reason}")
                 raise RuntimeError(f"Cost cap exceeded for org {organization_id}: {reason}")
             if reason:
+                _notify("cost.cap_breached", "warning", "Org cost cap reached (soft)", reason)
                 logger.warning("Cost cap soft-breach for org=%s: %s", organization_id, reason)
+
+            # Per-agent / per-project budgets.
+            breaches = check_all_budgets(db, organization_id)
+            hard = [b for b in breaches if b["enforcement"] == "hard"]
+            for b in breaches:
+                _notify("budget.cap_breached", "error" if b["enforcement"] == "hard" else "warning",
+                        f"Budget reached: {b['scope']} {b['scope_key']}", b["reason"])
+            if hard:
+                raise RuntimeError("Budget exceeded: " + "; ".join(b["reason"] for b in hard))
+            for b in breaches:
+                logger.warning("Budget soft-breach org=%s: %s", organization_id, b["reason"])
         except RuntimeError:
             raise
         except Exception as exc:  # noqa: BLE001

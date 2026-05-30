@@ -1,16 +1,18 @@
 """LLM cost tracking models.
 
-Two tables:
+Tables:
   llm_usage_records   one row per LLM call (token counts + computed $)
   org_cost_limits     per-org guardrails (daily + monthly USD cap)
+  cost_budgets        per-agent / per-project guardrails (same cap mechanism)
 
 Every BMAD step writes a usage row through `cost_service.record_usage`. The
 dashboard + per-project drill-down read aggregates from this table; the
 workflow service consults it before starting a new run so a workflow that
-would breach the org cap is rejected up-front.
+would breach the org cap (or a per-agent / per-project budget) is rejected
+up-front.
 """
 
-from sqlalchemy import Column, String, DateTime, Integer, Float, ForeignKey
+from sqlalchemy import Column, String, DateTime, Integer, Float, ForeignKey, UniqueConstraint
 
 from app.models.base import BaseModel
 
@@ -46,3 +48,26 @@ class OrgCostLimit(BaseModel):
     # Soft mode: emit warning event but allow workflow to proceed. Hard mode
     # (default): refuse workflow start once the cap is exceeded.
     enforcement = Column(String(20), default="hard", nullable=False)
+
+
+class CostBudget(BaseModel):
+    """Per-agent or per-project spend cap. Same daily/monthly + hard/soft
+    semantics as OrgCostLimit, scoped to one agent or one project.
+
+    `scope` is "agent" or "project"; `scope_key` is the agent_type code
+    (matches LLMUsageRecord.agent_name / LLMAgentMapping.agent_type) or the
+    project_id. Evaluated at workflow start alongside the org cap.
+    """
+
+    __tablename__ = "cost_budgets"
+
+    organization_id = Column(String(36), nullable=False, index=True)
+    scope = Column(String(20), nullable=False)       # "agent" | "project"
+    scope_key = Column(String(100), nullable=False)  # agent_type code or project_id
+    daily_usd_cap = Column(Float, default=0.0, nullable=False)
+    monthly_usd_cap = Column(Float, default=0.0, nullable=False)
+    enforcement = Column(String(20), default="hard", nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "scope", "scope_key", name="uq_cost_budget_org_scope_key"),
+    )

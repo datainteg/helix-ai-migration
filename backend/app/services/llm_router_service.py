@@ -16,8 +16,11 @@ class LLMProviderType(str, Enum):
 
 SUPPORTED_PROVIDERS = [p.value for p in LLMProviderType]
 
-# BMAD agent codes — single source of truth, matches the 6 personas declared in
-# `_bmad/config.toml`. LLMAgentMapping rows use these codes as `agent_type`.
+# Agent codes — single source of truth. The 6 BMAD personas match
+# `_bmad/config.toml`; `assistant` is the in-app Help agent (Ask Helix).
+# LLMAgentMapping rows use these codes as `agent_type`. An admin can map any of
+# these to a specific provider+model; unmapped agents fall back to the org's
+# default provider/model (see resolve_routing).
 AGENT_TYPES = [
     "bmad-agent-analyst",        # Mary    — Business Analyst
     "bmad-agent-tech-writer",    # Paige   — Technical Writer
@@ -25,6 +28,7 @@ AGENT_TYPES = [
     "bmad-agent-ux-designer",    # Sally   — UX Designer
     "bmad-agent-architect",      # Winston — System Architect
     "bmad-agent-dev",            # Amelia  — Senior Software Engineer
+    "assistant",                 # Helix Help agent (the "Ask Helix" popup)
 ]
 
 

@@ -17,7 +17,29 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-async def send_email(*, to: str, subject: str, html_body: str, text_body: str | None = None) -> None:
+async def send_email(*, to: str, subject: str, html_body: str, text_body: str | None = None,
+                     db=None, organization_id: str | None = None) -> None:
+    """Send an email.
+
+    When a `db` session is supplied, the org's admin-configured email settings
+    (DB row) are preferred over the .env config; otherwise the .env config is
+    used. This keeps existing call sites working while letting admins configure
+    SMTP from the UI.
+    """
+    # Prefer DB-backed config when we have a session + org.
+    if db is not None and organization_id is not None:
+        try:
+            from app.services.email_settings_service import resolve_email_config, send_with_config
+            cfg = resolve_email_config(db, organization_id)
+            if not cfg.enabled or (not cfg.smtp_host and not cfg.sendgrid_api_key):
+                logger.info("EMAIL_DISABLED (org=%s) to=%s subject=%s", organization_id, to, subject)
+                return
+            await send_with_config(cfg, to=to, subject=subject, html_body=html_body, text_body=text_body)
+            return
+        except Exception:
+            logger.exception("DB email config send failed; falling back to env config")
+
+    # Env-based fallback (original behaviour).
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_DISABLED to=%s subject=%s", to, subject)
         return

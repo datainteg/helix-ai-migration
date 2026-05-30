@@ -21,7 +21,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.cost import LLMUsageRecord, OrgCostLimit
+from app.models.cost import LLMUsageRecord, OrgCostLimit, CostBudget
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +239,9 @@ def usage_summary(db: Session, organization_id: str, days: int = 30) -> dict:
         base.with_entities(
             LLMUsageRecord.agent_name,
             func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0),
+            func.coalesce(func.sum(LLMUsageRecord.input_tokens), 0),
+            func.coalesce(func.sum(LLMUsageRecord.output_tokens), 0),
+            func.count(LLMUsageRecord.id),
         )
         .filter(LLMUsageRecord.agent_name.isnot(None))
         .group_by(LLMUsageRecord.agent_name)
@@ -264,7 +267,14 @@ def usage_summary(db: Session, organization_id: str, days: int = 30) -> dict:
             {"provider": p, "cost_usd": round(float(c), 4)} for p, c in by_provider
         ],
         "by_agent": [
-            {"agent": a, "cost_usd": round(float(c), 4)} for a, c in by_agent
+            {
+                "agent": a,
+                "cost_usd": round(float(c), 4),
+                "input_tokens": int(it or 0),
+                "output_tokens": int(ot or 0),
+                "call_count": int(n or 0),
+            }
+            for a, c, it, ot, n in by_agent
         ],
         "by_project": [
             {"project_id": pid, "cost_usd": round(float(c), 4)} for pid, c in by_project
@@ -315,3 +325,134 @@ def check_within_cap(db: Session, organization_id: str) -> tuple[bool, Optional[
     if limit.enforcement == "soft":
         return True, reason
     return False, reason
+
+
+# --------------------------- per-agent / per-project budgets ---------------------------
+
+_VALID_SCOPES = ("agent", "project")
+
+
+def list_budgets(db: Session, organization_id: str, scope: Optional[str] = None) -> list[CostBudget]:
+    q = db.query(CostBudget).filter(CostBudget.organization_id == organization_id)
+    if scope:
+        q = q.filter(CostBudget.scope == scope)
+    return q.order_by(CostBudget.scope, CostBudget.scope_key).all()
+
+
+def upsert_budget(
+    db: Session,
+    organization_id: str,
+    *,
+    scope: str,
+    scope_key: str,
+    daily_usd_cap: float,
+    monthly_usd_cap: float,
+    enforcement: str,
+) -> CostBudget:
+    if scope not in _VALID_SCOPES:
+        raise ValueError(f"scope must be one of {_VALID_SCOPES}")
+    if enforcement not in ("hard", "soft"):
+        raise ValueError("enforcement must be 'hard' or 'soft'")
+    if daily_usd_cap < 0 or monthly_usd_cap < 0:
+        raise ValueError("caps must be non-negative")
+    row = (
+        db.query(CostBudget)
+        .filter(
+            CostBudget.organization_id == organization_id,
+            CostBudget.scope == scope,
+            CostBudget.scope_key == scope_key,
+        )
+        .first()
+    )
+    if row is None:
+        row = CostBudget(organization_id=organization_id, scope=scope, scope_key=scope_key)
+        db.add(row)
+    row.daily_usd_cap = daily_usd_cap
+    row.monthly_usd_cap = monthly_usd_cap
+    row.enforcement = enforcement
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_budget(db: Session, organization_id: str, scope: str, scope_key: str) -> bool:
+    row = (
+        db.query(CostBudget)
+        .filter(
+            CostBudget.organization_id == organization_id,
+            CostBudget.scope == scope,
+            CostBudget.scope_key == scope_key,
+        )
+        .first()
+    )
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
+
+
+def known_agents(db: Session, organization_id: str) -> list[str]:
+    """AGENT_TYPES ∪ agent_names actually observed in this org's usage."""
+    from app.services.llm_router_service import AGENT_TYPES
+
+    observed = (
+        db.query(LLMUsageRecord.agent_name)
+        .filter(LLMUsageRecord.organization_id == organization_id)
+        .filter(LLMUsageRecord.agent_name.isnot(None))
+        .distinct()
+        .all()
+    )
+    names = set(AGENT_TYPES) | {a for (a,) in observed if a}
+    return sorted(names)
+
+
+def check_all_budgets(db: Session, organization_id: str) -> list[dict]:
+    """Return the list of budget breaches for this org, evaluated now.
+
+    One grouped scan per (scope × window) instead of a query per budget, so
+    cost is independent of how many budgets are configured. Each breach is
+    {scope, scope_key, window, spend, cap, enforcement, reason}.
+    """
+    budgets = list_budgets(db, organization_id)
+    if not budgets:
+        return []
+
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def _spend_by(col, since) -> dict:
+        rows = (
+            db.query(col, func.coalesce(func.sum(LLMUsageRecord.cost_usd), 0.0))
+            .filter(LLMUsageRecord.organization_id == organization_id)
+            .filter(LLMUsageRecord.created_at >= since)
+            .filter(col.isnot(None))
+            .group_by(col)
+            .all()
+        )
+        return {k: float(v or 0.0) for k, v in rows}
+
+    spend = {
+        ("agent", "daily"): _spend_by(LLMUsageRecord.agent_name, day_start),
+        ("agent", "monthly"): _spend_by(LLMUsageRecord.agent_name, month_start),
+        ("project", "daily"): _spend_by(LLMUsageRecord.project_id, day_start),
+        ("project", "monthly"): _spend_by(LLMUsageRecord.project_id, month_start),
+    }
+
+    breaches: list[dict] = []
+    for b in budgets:
+        for window, cap in (("daily", b.daily_usd_cap), ("monthly", b.monthly_usd_cap)):
+            if cap and cap > 0:
+                used = spend.get((b.scope, window), {}).get(b.scope_key, 0.0)
+                if used >= cap:
+                    breaches.append({
+                        "scope": b.scope,
+                        "scope_key": b.scope_key,
+                        "window": window,
+                        "spend": round(used, 4),
+                        "cap": cap,
+                        "enforcement": b.enforcement,
+                        "reason": f"{b.scope} {b.scope_key} {window} ${used:.2f} ≥ ${cap:.2f} cap",
+                    })
+    return breaches

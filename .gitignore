@@ -34,3 +34,8 @@ frontend/Helix Figma Frontend/
 
 # TS incremental build cache
 frontend/tsconfig.tsbuildinfo
+
+# Local agent tooling / settings (not part of the project)
+.claude/
+.agents/
+skills-lock.json

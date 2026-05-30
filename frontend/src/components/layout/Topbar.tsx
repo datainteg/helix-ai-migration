@@ -1,7 +1,9 @@
 "use client";
 
-import { Menu, Sparkles } from "lucide-react";
+import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AskHelix } from "./AskHelix";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 interface TopbarProps {
   /** Breadcrumb items, in order. Last item is shown as the active label. */
@@ -55,17 +57,10 @@ export function Topbar({ crumbs = [], extras, onMobileMenuClick }: TopbarProps) 
       {/* Right actions */}
       <div className="flex items-center gap-1.5">
         {extras}
-        {/* UI-021: the notification feature is not wired yet, and the global
-            ⌘J "Ask Helix" shortcut has no handler. Rather than advertise dead
-            affordances we drop the clickable Bell and the ⌘J Kbd hint until
-            those features ship. */}
-        <button
-          type="button"
-          className="hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 border border-hx-2 rounded-md bg-surface text-ink-2 text-[11.5px] hover:bg-app-2 transition-colors"
-        >
-          <Sparkles className="h-[13px] w-[13px] text-[var(--con-brand)]" />
-          <span>Ask Helix</span>
-        </button>
+        <NotificationBell />
+        {/* The Ask Helix Help agent — opens a themed chat popup that guides
+            users on how Helix works (see AskHelix.tsx). */}
+        <AskHelix />
       </div>
     </header>
   );

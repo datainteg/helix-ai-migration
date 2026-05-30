@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * /dashboard — Migration Command Center.
+ * /dashboard — Dashboard.
  *
  * The metric strip is hydrated from /api/v1/dashboard/stats and the LLM spend
  * row from /api/v1/usage/llm. Sections without a backing endpoint render a
@@ -58,7 +58,7 @@ export default function DashboardPage() {
           : undefined
       }
       description="Live operational view of all enterprise migrations, validations, and recon outcomes."
-      crumbs={["Command Center"]}
+      crumbs={["Dashboard"]}
       actions={
         <>
           <Button variant="outline">

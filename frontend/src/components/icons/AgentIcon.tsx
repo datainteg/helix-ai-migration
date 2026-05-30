@@ -18,6 +18,7 @@ import {
   MdEdit,
   MdSmartToy,
   MdPerson,
+  MdAutoAwesome,
 } from "react-icons/md";
 
 type AgentKey =
@@ -27,6 +28,7 @@ type AgentKey =
   | "winston" | "architect" | "bmad-agent-architect"
   | "amelia" | "dev" | "bmad-agent-dev"
   | "paige" | "tech-writer" | "bmad-agent-tech-writer"
+  | "assistant"
   | "system" | "human";
 
 const ROLE: Record<AgentKey, { icon: IconType; bg: string; fg: string; label: string }> = {
@@ -53,6 +55,8 @@ const ROLE: Record<AgentKey, { icon: IconType; bg: string; fg: string; label: st
   paige:                      { icon: MdEdit,           bg: "#FEE2E2", fg: "#B91C1C", label: "Tech Writer" },
   "tech-writer":              { icon: MdEdit,           bg: "#FEE2E2", fg: "#B91C1C", label: "Tech Writer" },
   "bmad-agent-tech-writer":   { icon: MdEdit,           bg: "#FEE2E2", fg: "#B91C1C", label: "Tech Writer" },
+
+  assistant:                  { icon: MdAutoAwesome,    bg: "#EEF0FF", fg: "#4F46E5", label: "Help Agent" },
 
   system:                     { icon: MdSmartToy,       bg: "#E4E4E7", fg: "#27272A", label: "System" },
   human:                      { icon: MdPerson,         bg: "#F4F4F5", fg: "#27272A", label: "Human" },
