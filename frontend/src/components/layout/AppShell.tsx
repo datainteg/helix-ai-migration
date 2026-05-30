@@ -32,10 +32,25 @@ export function AppShell({
   actions,
   fullBleed,
 }: AppShellProps) {
-  // Normalize crumb shape for the topbar trail (string labels only)
-  const trailLabels: string[] = (crumbs || []).map((c) =>
-    typeof c === "string" ? c : c.label
-  );
+  // Normalize crumbs into {label, href} for the topbar. A bare string for a
+  // known top-level section auto-links to its route, so existing pages that
+  // pass e.g. ["Projects", projectName] get a clickable "Projects" parent for
+  // free. The last crumb is the active page and stays unlinked.
+  const SECTION_HREFS: Record<string, string> = {
+    Projects: "/projects",
+    Agents: "/agents",
+    Validation: "/validation",
+    Reconciliation: "/reconciliation",
+    Dashboard: "/dashboard",
+    Connectors: "/connectors",
+    Admin: "/admin",
+  };
+  const rawCrumbs = crumbs || [];
+  const trailCrumbs = rawCrumbs.map((c, i) => {
+    if (typeof c !== "string") return c;
+    const isLast = i === rawCrumbs.length - 1;
+    return { label: c, href: !isLast ? SECTION_HREFS[c] : undefined };
+  });
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -77,7 +92,7 @@ export function AppShell({
 
       <div className="flex flex-col min-w-0">
         <Topbar
-          crumbs={trailLabels}
+          crumbs={trailCrumbs}
           onMobileMenuClick={() => setMobileNavOpen(true)}
         />
         <main id="main-content" className="flex-1 bg-app" tabIndex={-1}>

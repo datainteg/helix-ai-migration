@@ -190,7 +190,7 @@ export default function ProjectDetailPage() {
       eyebrow={eyebrow}
       title={displayName}
       metric={metric}
-      crumbs={["Projects", shortId]}
+      crumbs={["Projects", displayName]}
       actions={
         <>
           <Button variant="outline">
