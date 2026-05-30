@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
+import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 import { AppIcon, AgentIcon } from "@/components/icons";
 import {
   Avatar,
@@ -156,6 +157,9 @@ export default function ProjectDetailPage() {
 
   const displayName = project?.name || "Untitled project";
   const shortId = String(id).slice(0, 8);
+  // Register id → name so breadcrumbs (here + deep sub-pages) show the project
+  // name instead of the raw id.
+  useRegisterCrumbLabel(String(id), project?.name);
   const createdLabel = project?.created_at
     ? new Date(project.created_at).toLocaleDateString(undefined, {
         month: "short", day: "numeric", year: "numeric",
@@ -190,7 +194,6 @@ export default function ProjectDetailPage() {
       eyebrow={eyebrow}
       title={displayName}
       metric={metric}
-      crumbs={["Projects", displayName]}
       actions={
         <>
           <Button variant="outline">

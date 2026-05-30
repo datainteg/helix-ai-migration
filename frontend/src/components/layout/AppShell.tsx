@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
+import type { Crumb } from "./Topbar";
+import { useAutoCrumbs } from "@/lib/breadcrumbs";
 import { Topbar } from "./Topbar";
 import { PageHero } from "./PageHero";
 import { cn } from "@/lib/utils";
@@ -32,25 +34,29 @@ export function AppShell({
   actions,
   fullBleed,
 }: AppShellProps) {
-  // Normalize crumbs into {label, href} for the topbar. A bare string for a
-  // known top-level section auto-links to its route, so existing pages that
-  // pass e.g. ["Projects", projectName] get a clickable "Projects" parent for
-  // free. The last crumb is the active page and stays unlinked.
+  // Breadcrumbs: a page may pass explicit `crumbs`; otherwise we derive a
+  // generic, fully-linked trail from the URL path (useAutoCrumbs) so every
+  // route — including deep ones like /projects/<id>/sprints — gets
+  // Helix › Projects › <name> › Sprints with each segment clickable.
   const SECTION_HREFS: Record<string, string> = {
-    Projects: "/projects",
-    Agents: "/agents",
-    Validation: "/validation",
-    Reconciliation: "/reconciliation",
-    Dashboard: "/dashboard",
-    Connectors: "/connectors",
-    Admin: "/admin",
+    Projects: "/projects", Agents: "/agents", Validation: "/validation",
+    Reconciliation: "/reconciliation", Dashboard: "/dashboard",
+    Connectors: "/connectors", Admin: "/admin",
   };
-  const rawCrumbs = crumbs || [];
-  const trailCrumbs = rawCrumbs.map((c, i) => {
-    if (typeof c !== "string") return c;
-    const isLast = i === rawCrumbs.length - 1;
-    return { label: c, href: !isLast ? SECTION_HREFS[c] : undefined };
-  });
+  const autoCrumbs = useAutoCrumbs();
+  let trailCrumbs: Crumb[];
+  if (crumbs && crumbs.length > 0) {
+    trailCrumbs = crumbs.map((c, i) => {
+      if (typeof c !== "string") return c;
+      const isLast = i === crumbs.length - 1;
+      return { label: c, href: !isLast ? SECTION_HREFS[c] : undefined };
+    });
+  } else {
+    // Auto trail: last segment is the active page (drop its href).
+    trailCrumbs = autoCrumbs.map((c, i) =>
+      i === autoCrumbs.length - 1 ? { label: c.label } : c
+    );
+  }
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -104,7 +110,7 @@ export function AppShell({
               subtitle={subtitle}
               metric={metric}
               actions={actions}
-              crumbs={crumbs}
+              crumbs={trailCrumbs}
             />
           )}
           <div className={cn(fullBleed ? "" : "px-4 sm:px-6 lg:px-10 py-6")}>

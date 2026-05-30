@@ -132,7 +132,6 @@ export default function SprintDashboardPage() {
       <AppShell
         eyebrow={`SPRINTS · ${projectId}`}
         title="Sprint dashboard"
-        crumbs={["Projects", projectId, "Sprints", "Dashboard"]}
       >
         <LoadingState />
       </AppShell>
@@ -144,7 +143,6 @@ export default function SprintDashboardPage() {
       <AppShell
         eyebrow={`SPRINTS · ${projectId}`}
         title="Sprint dashboard"
-        crumbs={["Projects", projectId, "Sprints", "Dashboard"]}
         actions={
           <Button variant="outline" onClick={() => setShowNewSprint(true)}>
             <Plus className="h-4 w-4" /> New sprint
@@ -191,7 +189,6 @@ export default function SprintDashboardPage() {
       eyebrow={`SPRINTS · ${projectId}`}
       title="Sprint dashboard"
       description="Active sprint progress, multi-sprint roadmap, and operational risk in one view."
-      crumbs={["Projects", projectId, "Sprints", "Dashboard"]}
       actions={
         <>
           <Button variant="outline">
