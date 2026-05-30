@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
   getWorkflowDetail,
   subscribeToWorkflow,
+  listProjectWorkflowRuns,
   type WorkflowDetail,
   type WorkflowStep,
 } from "@/lib/workflows/api";
@@ -92,6 +93,25 @@ export default function ProjectMigrationPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // 2b. Surface the latest EXISTING migration run for this project on load, so a
+  // previously-generated (or seeded) migration is visible without re-running.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    listProjectWorkflowRuns(token, String(id), 50)
+      .then((runs) => {
+        if (cancelled) return;
+        const migs = runs.filter((r) => (r.workflow_id || "").startsWith("mig-"));
+        if (migs.length > 0) setActiveWorkflowId((cur) => cur ?? migs[0].workflow_id);
+      })
+      .catch(() => {
+        /* no existing runs / not reachable — the configure card still renders */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, id]);
 
   // 3. Seed run detail when a workflow becomes active.
   useEffect(() => {
