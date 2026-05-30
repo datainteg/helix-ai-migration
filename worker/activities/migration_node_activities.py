@@ -783,15 +783,343 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Cost-bounding cap for reconciliation: comparing row counts on every table of a
+# large source would blow the activity timeout, so we reconcile at most the
+# first N tables and flag `truncated=True` so the report/return note the clip.
+_MAX_RECON_TABLES = 25
+
+
+def _reconciler_failure(errors: list[str], summary: str) -> dict[str, Any]:
+    """Standard-shape failure result for the reconciler node."""
+    return {
+        "agent": "reconciler",
+        "skill": "migration-reconcile",
+        "success": False,
+        "mode": "reconcile",
+        "errors": errors,
+        "artifact_path": None,
+        "parsed": {
+            "summary": summary,
+            "verified_pct": 0.0,
+            "tables_checked": 0,
+            "matched": 0,
+            "mismatched": 0,
+            "errors_count": 0,
+            "recon_run_id": None,
+            "truncated": False,
+        },
+    }
+
+
+def _collect_recon_tables(model: dict[str, Any]) -> tuple[list[tuple[str, str]], bool]:
+    """Flatten the source model into (schema, table) pairs, capped at the limit.
+
+    Returns (pairs, truncated). `truncated` is True if either the snapshot was
+    already partial or the cap clipped the table list here.
+    """
+    pairs: list[tuple[str, str]] = []
+    truncated = bool(model.get("truncated"))
+    for schema in model.get("schemas") or []:
+        schema_name = schema.get("schema") or ""
+        for table in schema.get("tables") or []:
+            pairs.append((schema_name, table.get("table") or ""))
+
+    if len(pairs) > _MAX_RECON_TABLES:
+        pairs = pairs[:_MAX_RECON_TABLES]
+        truncated = True
+    return pairs, truncated
+
+
+async def _reconcile_counts(
+    source_type: str,
+    source_config: dict[str, Any],
+    target_type: str,
+    target_cfg: dict[str, Any],
+    pairs: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Per-table source/target row-count comparison via the connector service.
+
+    Deterministic, read-only: only `connector_service.get_row_count` is used.
+    Each side's count is independently best-effort — a failure on either side
+    records that side as None (and the row as an "error") rather than aborting
+    the whole reconciliation.
+    """
+    from app.services import connector_service
+
+    rows: list[dict[str, Any]] = []
+    for schema_name, table_name in pairs:
+        try:
+            src_res = await connector_service.get_row_count(
+                source_type, source_config, schema_name, table_name
+            )
+            src_count: int | None = src_res.row_count
+        except Exception as exc:  # noqa: BLE001 — one bad table must not abort
+            logger.warning(
+                "reconciler: source row count failed for %s.%s: %s",
+                schema_name,
+                table_name,
+                exc,
+            )
+            src_count = None
+
+        try:
+            tgt_res = await connector_service.get_row_count(
+                target_type, target_cfg, schema_name, table_name
+            )
+            tgt_count: int | None = tgt_res.row_count
+        except Exception as exc:  # noqa: BLE001 — one bad table must not abort
+            logger.warning(
+                "reconciler: target row count failed for %s.%s: %s",
+                schema_name,
+                table_name,
+                exc,
+            )
+            tgt_count = None
+
+        both_known = src_count is not None and tgt_count is not None
+        matched = both_known and src_count == tgt_count
+        mismatch = abs(src_count - tgt_count) if both_known else None
+
+        rows.append(
+            {
+                "schema": schema_name,
+                "table": table_name,
+                "source_count": src_count,
+                "target_count": tgt_count,
+                "matched": matched,
+                "mismatch": mismatch,
+                "error": not both_known,
+            }
+        )
+    return rows
+
+
+def _persist_recon(
+    input_data: dict[str, Any],
+    source_ref: str,
+    target_ref: str,
+    rows: list[dict[str, Any]],
+) -> str | None:
+    """Persist one ReconRun + one ReconResult per table. Best-effort.
+
+    Returns the ReconRun id, or None if persistence failed — a DB error
+    degrades the node to artifact-only (logged warning), NOT an activity
+    failure.
+    """
+    try:
+        from worker.db.session import SessionLocal
+        from app.models.validation import ReconRun, ReconResult
+
+        db = SessionLocal()
+        try:
+            run = ReconRun(
+                project_id=input_data.get("project_id"),
+                source_ref=source_ref,
+                target_ref=target_ref,
+                status="completed",
+                error_message=None,
+            )
+            # ReconRun has no organization_id column today; set it only if a
+            # future migration adds one (keeps this forward-compatible).
+            if hasattr(ReconRun, "organization_id"):
+                run.organization_id = input_data.get("organization_id")
+            db.add(run)
+            db.flush()  # populate run.id for the FK below
+            run_id = run.id
+
+            for row in rows:
+                db.add(
+                    ReconResult(
+                        run_id=run_id,
+                        result_type="row_count",
+                        summary=(
+                            f"{row['schema']}.{row['table']}: "
+                            f"source={row['source_count']} target={row['target_count']}"
+                        ),
+                        # mismatch_count is nullable BigInteger; store the diff
+                        # when both counts are known, else NULL (error row).
+                        mismatch_count=row["mismatch"],
+                        details_ref=None,
+                    )
+                )
+            db.commit()
+            return run_id
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        logger.warning("reconciler: recon persistence failed: %s", exc)
+        return None
+
+
+def _write_recon_artifact(
+    project_id: str,
+    summary: str,
+    verified_pct: float,
+    rows: list[dict[str, Any]],
+    matched: int,
+    mismatched: int,
+    errors_count: int,
+) -> str | None:
+    """Write the reconciliation-report artifact (markdown). Best-effort; None on failure."""
+    try:
+        from agents.runtime.artifact_store import write_artifact
+
+        lines = [
+            "# Reconciliation Report\n",
+            "Deterministic per-table row-count comparison produced by the "
+            "`reconciler` migration agent (no LLM).\n",
+            "## Summary\n",
+            summary + "\n",
+            f"- Verified: **{verified_pct}%**",
+            f"- Tables checked: {len(rows)}",
+            f"- Matched: {matched}",
+            f"- Mismatched: {mismatched}",
+            f"- Errors: {errors_count}\n",
+            "## Per-table counts\n",
+            "| Schema | Table | Source rows | Target rows | Status |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for row in rows:
+            if row["error"]:
+                status = "error"
+            elif row["matched"]:
+                status = "matched"
+            else:
+                status = "mismatch"
+            src = "?" if row["source_count"] is None else row["source_count"]
+            tgt = "?" if row["target_count"] is None else row["target_count"]
+            schema = str(row["schema"]).replace("|", "\\|")
+            table = str(row["table"]).replace("|", "\\|")
+            lines.append(f"| {schema} | {table} | {src} | {tgt} | {status} |")
+        if not rows:
+            lines.append("| _(no tables)_ | | | | |")
+
+        body = "\n".join(lines) + "\n"
+        artifact = write_artifact(
+            project_id=project_id,
+            agent_code="reconciler",
+            skill="migration-reconcile",
+            filename="reconciliation-report",
+            body=body,
+            frontmatter={
+                "verified_pct": verified_pct,
+                "tables_checked": len(rows),
+                "matched": matched,
+                "mismatched": mismatched,
+                "errors_count": errors_count,
+            },
+            phase="implementation",
+        )
+        return str(artifact.path)
+    except Exception as exc:  # noqa: BLE001 — artifact write is best-effort
+        logger.warning("reconciler: artifact write failed: %s", exc)
+        return None
+
+
 @activity.defn
 def reconciler_activity(input_data: dict[str, Any]) -> dict[str, Any]:
-    logger.info("migration: reconciler (echo) for project=%s", input_data.get("project_id"))
-    return _echo(
-        "reconciler",
-        "migration-reconcile",
-        {
-            "summary": "echo: reconciliation complete",
-            "verified_pct": 100.0,
-            "tables_checked": 0,
-        },
+    project_id = input_data.get("project_id")
+    logger.info("migration: reconciler (reconcile) for project=%s", project_id)
+
+    # 1. Load the latest source-schema snapshot.
+    model = _load_latest_source_model(project_id)
+    if model is None:
+        return _reconciler_failure(
+            ["no source schema snapshot found"],
+            "reconciliation skipped: no source schema snapshot found",
+        )
+
+    # 2. Resolve source + target endpoints. With no target config we reconcile
+    #    against the source config so the mechanics are exercised end-to-end.
+    source_type = input_data.get("source_connector_type")
+    source_config = input_data.get("source_config")
+    target_cfg = input_data.get("target_config") or input_data.get("source_config")
+    target_type = (
+        input_data.get("target_connector_type")
+        or input_data.get("source_connector_type")
     )
+    target_provided = bool(input_data.get("target_config"))
+
+    # 3. Build the (bounded) list of (schema, table) to compare.
+    pairs, truncated = _collect_recon_tables(model)
+
+    # 4. Fan out the read-only row-count comparison, wrapped so Temporal keeps
+    #    heartbeating during the (possibly >60s) blocking connector calls. A
+    #    hard failure here (e.g. cannot connect to source at all) is a real
+    #    activity failure.
+    try:
+        from worker.activities.bmad_node_activities import _run_with_heartbeats
+
+        rows = _run_with_heartbeats(
+            lambda: asyncio.run(
+                _reconcile_counts(
+                    source_type, source_config, target_type, target_cfg, pairs
+                )
+            ),
+            "reconciler",
+        )
+    except Exception as exc:  # noqa: BLE001 — connection / fan-out failure
+        logger.exception("reconciler: reconciliation failed for project=%s", project_id)
+        return _reconciler_failure(
+            [str(exc)],
+            f"reconciliation failed: {exc}",
+        )
+
+    # 5. Aggregate.
+    total = len(rows)
+    matched = sum(1 for r in rows if r["matched"])
+    errors_count = sum(1 for r in rows if r["error"])
+    # A mismatch is a row where both counts are known but unequal (not an error).
+    mismatched = sum(1 for r in rows if not r["matched"] and not r["error"])
+
+    # 6. verified_pct = % of checked tables whose source/target counts matched.
+    verified_pct = round(100.0 * matched / total, 2) if total else 0.0
+
+    # 7. Persist one ReconRun + one ReconResult per table (best-effort).
+    recon_run_id = _persist_recon(
+        input_data, str(source_type), str(target_type), rows
+    )
+
+    summary = (
+        f"Reconciled {total} table(s): {matched} matched, {mismatched} "
+        f"mismatched, {errors_count} error(s); verified {verified_pct}%"
+    )
+    if not target_provided:
+        summary += " (target config not provided; compared against source)"
+    if truncated:
+        summary += " (truncated)"
+
+    # 8. Write the reconciliation-report artifact (best-effort).
+    artifact_path = (
+        _write_recon_artifact(
+            str(project_id),
+            summary,
+            verified_pct,
+            rows,
+            matched,
+            mismatched,
+            errors_count,
+        )
+        if project_id
+        else None
+    )
+
+    # 9. Return the standard result shape.
+    return {
+        "agent": "reconciler",
+        "skill": "migration-reconcile",
+        "success": True,
+        "mode": "reconcile",
+        "errors": [],
+        "artifact_path": artifact_path,
+        "parsed": {
+            "summary": summary,
+            "verified_pct": verified_pct,
+            "tables_checked": total,
+            "matched": matched,
+            "mismatched": mismatched,
+            "errors_count": errors_count,
+            "recon_run_id": recon_run_id,
+            "truncated": truncated,
+        },
+    }
