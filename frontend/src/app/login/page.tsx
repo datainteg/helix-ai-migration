@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { HelixLogo } from "@/components/layout/HelixLogo";
-import { Button, ErrorBanner } from "@/components/ui";
 
 export default function LoginPage() {
   const { login, demoLogin } = useAuth();
@@ -13,7 +12,6 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
-  // Baked at build time; the button only renders when the deploy opts in.
   const demoEnabled = process.env.NEXT_PUBLIC_DEMO_ENABLED === "true";
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,43 +39,53 @@ export default function LoginPage() {
     }
   };
 
+  const inputCls =
+    "w-full h-11 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 text-[13.5px] text-white " +
+    "placeholder-white/30 outline-none transition focus:border-indigo-400/60 focus:bg-white/[0.06] " +
+    "focus:ring-2 focus:ring-indigo-500/20";
+
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-app">
-      <div className="hidden lg:flex flex-col justify-between bg-indigo-cyan text-white p-12 relative overflow-hidden">
-        <div className="absolute inset-0 hx-grid-bg opacity-10 pointer-events-none" />
-        <Link href="/" className="relative z-10 inline-flex items-center gap-2.5 text-white">
-          <HelixLogo size={32} />
-          <span className="font-semibold text-[17px] tracking-tight">Helix Migration</span>
-        </Link>
-        <div className="relative z-10 max-w-md">
-          <p className="text-[13px] font-medium uppercase tracking-wider text-white/70">Open-source · Self-hosted</p>
-          <h1 className="mt-3 text-[34px] font-semibold tracking-tight leading-tight">
-            Sign in to your migration command center.
-          </h1>
-          <p className="mt-4 text-white/80 text-[14px] leading-relaxed">
-            Multi-agent workflows. Real-time validation & recon. Developer-grade audit trail.
-          </p>
-        </div>
-        <div className="relative z-10 text-[12px] text-white/70">© 2026 Helix Migration · Apache 2.0</div>
-      </div>
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#06060f] px-4">
+      {/* Premium glow mesh */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(55% 45% at 50% -5%, rgba(79,70,229,0.35), transparent 70%)," +
+            "radial-gradient(40% 40% at 85% 100%, rgba(6,182,212,0.18), transparent 70%)," +
+            "radial-gradient(40% 40% at 10% 90%, rgba(124,58,237,0.16), transparent 70%)",
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 hx-grid-bg opacity-[0.05]" />
+      {/* soft top vignette */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-      <div className="flex items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-sm">
-          <div className="lg:hidden mb-6">
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <HelixLogo size={28} />
-              <span className="font-semibold text-[16px] tracking-tight text-ink">Helix Migration</span>
-            </Link>
+      <div className="relative z-10 w-full max-w-[400px]">
+        {/* Brand */}
+        <div className="flex flex-col items-center mb-7">
+          <div className="grid place-items-center h-12 w-12 rounded-2xl bg-white/[0.06] border border-white/10 shadow-lg shadow-black/40">
+            <HelixLogo size={26} />
           </div>
+          <span className="mt-3.5 text-white font-semibold text-[17px] tracking-tight">Helix Migration</span>
+          <span className="mt-1 text-[11.5px] uppercase tracking-[0.18em] text-white/35">
+            Open-source · Self-hosted
+          </span>
+        </div>
 
-          <h2 className="text-[24px] font-semibold tracking-tight text-ink">Welcome back</h2>
-          <p className="text-[13.5px] text-ink-3 mt-1">Sign in to continue to your migrations.</p>
+        {/* Glass card */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.045] backdrop-blur-2xl shadow-[0_24px_70px_-20px_rgba(0,0,0,0.8)] p-7">
+          <h2 className="text-[22px] font-semibold tracking-tight text-white">Welcome back</h2>
+          <p className="text-[13px] text-white/45 mt-1">Sign in to your migration command center.</p>
 
-          {error && <div className="mt-5"><ErrorBanner message={error} onDismiss={() => setError("")} /></div>}
+          {error && (
+            <div className="mt-5 rounded-lg border border-red-400/25 bg-red-500/10 px-3.5 py-2.5 text-[12.5px] text-red-200">
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
-              <label htmlFor="email" className="block text-[12.5px] font-medium text-ink-2 mb-1.5">
+              <label htmlFor="email" className="block text-[12px] font-medium text-white/55 mb-1.5">
                 Email
               </label>
               <input
@@ -86,18 +94,14 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="admin@example.com"
-                className="w-full h-10 rounded-lg border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
+                placeholder="you@company.com"
+                className={inputCls}
               />
             </div>
             <div>
-              {/* UI-036 — the password-reset flow has no page yet, so we drop the
-                  dead "Forgot?" link rather than advertise an href="#" no-op. */}
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="password" className="block text-[12.5px] font-medium text-ink-2">
-                  Password
-                </label>
-              </div>
+              <label htmlFor="password" className="block text-[12px] font-medium text-white/55 mb-1.5">
+                Password
+              </label>
               <input
                 id="password"
                 type="password"
@@ -105,43 +109,47 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full h-10 rounded-lg border border-hx bg-surface px-3.5 text-[13.5px] focus-ring"
+                className={inputCls}
               />
             </div>
-            <Button type="submit" loading={loading} className="w-full !h-11">
-              Sign In
-            </Button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-11 rounded-lg bg-gradient-to-r from-indigo-500 to-cyan-500 text-white text-[14px] font-semibold shadow-lg shadow-indigo-500/25 transition hover:from-indigo-400 hover:to-cyan-400 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {loading ? "Signing in…" : "Sign In"}
+            </button>
           </form>
 
           {demoEnabled && (
-            <div className="mt-4">
-              <div className="flex items-center gap-3 my-4">
-                <div className="h-px flex-1 bg-hx" />
-                <span className="text-[11px] uppercase tracking-wider text-ink-3">or</span>
-                <div className="h-px flex-1 bg-hx" />
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <div className="h-px flex-1 bg-white/10" />
+                <span className="text-[10.5px] uppercase tracking-wider text-white/30">or</span>
+                <div className="h-px flex-1 bg-white/10" />
               </div>
-              <Button
+              <button
                 type="button"
-                variant="outline"
-                loading={demoLoading}
                 onClick={handleDemo}
-                className="w-full !h-11"
+                disabled={demoLoading}
+                className="w-full h-11 rounded-lg border border-white/15 bg-white/[0.03] text-white text-[13.5px] font-medium transition hover:bg-white/[0.07] hover:border-white/25 active:scale-[0.99] disabled:opacity-60"
               >
-                Login with Demo User
-              </Button>
-              <p className="mt-2 text-[11.5px] text-ink-3 text-center">
+                {demoLoading ? "Signing in…" : "Login with Demo User"}
+              </button>
+              <p className="mt-2.5 text-[11.5px] text-white/35 text-center">
                 Read-only sandbox with sample data — no account needed.
               </p>
-            </div>
+            </>
           )}
-
-          <p className="mt-6 text-[12.5px] text-ink-3 text-center">
-            New to Helix?{" "}
-            <Link href="/setup/first-admin" className="text-helix-600 hover:underline font-medium">
-              First-admin setup
-            </Link>
-          </p>
         </div>
+
+        <p className="mt-6 text-[12px] text-white/35 text-center">
+          New to Helix?{" "}
+          <Link href="/setup/first-admin" className="text-indigo-300 hover:text-indigo-200 font-medium">
+            First-admin setup
+          </Link>
+        </p>
+        <p className="mt-2 text-[11px] text-white/25 text-center">© 2026 Helix Migration · Apache-2.0</p>
       </div>
     </div>
   );
