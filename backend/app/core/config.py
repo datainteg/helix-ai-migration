@@ -1,4 +1,5 @@
 import secrets
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "extra": "ignore",
+        "populate_by_name": True,
     }
 
     APP_NAME: str = "Helix Migration"
@@ -96,20 +98,41 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     OTEL_ENDPOINT: str = ""
 
-    # Email (SMTP or SendGrid)
+    # Email (SMTP or SendGrid).
+    # The documented .env keys (SMTP_USERNAME / SMTP_FROM_EMAIL / SMTP_FROM_NAME
+    # / SMTP_USE_TLS) differ from the field names the code reads, so each field
+    # accepts BOTH names via AliasChoices — otherwise an operator who fills in
+    # every documented SMTP var still got email silently disabled. EMAIL_ENABLED
+    # is derived from SMTP_HOST in model_post_init (no separate flag needed).
     EMAIL_ENABLED: bool = False
-    EMAIL_FROM: str = "noreply@helix-migration.app"
-    EMAIL_FROM_NAME: str = "Helix Migration"
-    SMTP_HOST: str = "localhost"
+    EMAIL_FROM: str = Field(
+        default="noreply@helix-migration.app",
+        validation_alias=AliasChoices("EMAIL_FROM", "SMTP_FROM_EMAIL"),
+    )
+    EMAIL_FROM_NAME: str = Field(
+        default="Helix Migration",
+        validation_alias=AliasChoices("EMAIL_FROM_NAME", "SMTP_FROM_NAME"),
+    )
+    SMTP_HOST: str = ""
     SMTP_PORT: int = 587
-    SMTP_USER: str = ""
+    SMTP_USER: str = Field(
+        default="",
+        validation_alias=AliasChoices("SMTP_USER", "SMTP_USERNAME"),
+    )
     SMTP_PASSWORD: str = ""
-    SMTP_TLS: bool = True
+    SMTP_TLS: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("SMTP_TLS", "SMTP_USE_TLS"),
+    )
     SENDGRID_API_KEY: str = ""  # If set, uses SendGrid instead of SMTP
     FRONTEND_URL: str = "http://localhost:3000"
 
     def model_post_init(self, _context) -> None:
         """Validate security-critical settings in production."""
+        # Single source of truth for email delivery: enabled iff an SMTP host is
+        # configured. Operators set SMTP_HOST in .env; no separate EMAIL_ENABLED.
+        if not self.EMAIL_ENABLED and self.SMTP_HOST.strip():
+            self.EMAIL_ENABLED = True
         if self.APP_ENV == "production":
             insecure_defaults = []
             # Legacy "change_me" strings must never reach prod.

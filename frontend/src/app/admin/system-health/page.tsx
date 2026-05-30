@@ -7,7 +7,7 @@ import { AdminShell } from "@/components/layout";
 import { Card, MetricCard, StatusBadge, Button, LoadingState } from "@/components/ui";
 
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface ComponentStatus {
   component: string;

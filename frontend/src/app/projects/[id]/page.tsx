@@ -35,7 +35,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // ─── Types ───────────────────────────────────────────────────
 

@@ -22,7 +22,7 @@ import {
   useTweaks,
 } from "@/lib/theme-store";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const SYNC_DEBOUNCE_MS = 500;
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

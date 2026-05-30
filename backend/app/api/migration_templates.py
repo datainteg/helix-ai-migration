@@ -222,6 +222,7 @@ def clone_template(
         row = ValidationRule(
             project_id=project.id,
             rule_type=rule["rule_type"],
+            target_ref=rule.get("target_ref", ""),
             definition=rule.get("definition", ""),
         )
         db.add(row)

@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { fetchDashboardStats, type DashboardStats } from "@/lib/dashboard/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 import {
   AlertTriangle,
   Download,

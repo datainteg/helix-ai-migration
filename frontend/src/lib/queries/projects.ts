@@ -36,14 +36,9 @@ export function useCreateProject() {
   });
 }
 
-export function useRequirements(projectId: string) {
-  const api = useApi();
-  return useQuery({
-    queryKey: projectKeys.requirements(projectId),
-    queryFn: () => api.get<RequirementResponse[]>(`/api/v1/projects/${projectId}/requirements`),
-    enabled: !!projectId,
-  });
-}
+// No `useRequirements` list hook: the backend serves only POST
+// /projects/{id}/requirements (no GET list route — a GET 405s). Add a backend
+// GET route before reintroducing a list query here.
 
 export function useCreateRequirement(projectId: string) {
   const api = useApi();

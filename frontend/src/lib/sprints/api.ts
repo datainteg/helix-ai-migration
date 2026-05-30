@@ -19,7 +19,7 @@ import type {
   SprintTask, VelocityPoint,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // SC-010: auth now rides on the HttpOnly `helix_token` cookie (sent via
 // `credentials: "include"`), not an Authorization header. The `token` params

@@ -36,7 +36,7 @@ import { AppIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
 import { formatRelative as formatRelativeUtil } from "@/lib/utils";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface APIProject {
   id: string;

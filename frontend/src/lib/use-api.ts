@@ -2,7 +2,7 @@
 
 import { useAuth } from "./auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface ApiClient {
   get: <T>(path: string) => Promise<T>;

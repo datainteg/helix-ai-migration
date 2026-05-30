@@ -148,7 +148,7 @@ function SearchTrigger() {
   );
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 /**
  * UI-041 — bind the footer status pill to the real /api/v1/system/health summary

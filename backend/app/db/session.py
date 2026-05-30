@@ -66,18 +66,30 @@ else:
     read_engine = engine
     ReadSessionLocal = SessionLocal
 
-# Async engine — uses asyncpg driver. DATABASE_URL uses psycopg2 scheme;
-# swap to asyncpg for the async engine only.
+# Async engine — uses the asyncpg driver. Built LAZILY so that merely importing
+# this module does NOT require asyncpg to be installed. The Temporal worker
+# imports app.models (which imports this module) for the shared ORM classes but
+# runs purely sync (psycopg2); creating the asyncpg engine at import time made
+# `from app.models... import ...` raise ModuleNotFoundError: asyncpg in the
+# worker. The engine is now created on first async request instead.
 _async_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-async_engine = create_async_engine(
-    _async_url,
-    pool_pre_ping=True,
-    pool_size=_POOL_SIZE,
-    max_overflow=_MAX_OVERFLOW,
-    pool_timeout=_POOL_TIMEOUT,
-    pool_recycle=_POOL_RECYCLE,
-)
-AsyncSessionLocal = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+_async_engine = None
+_AsyncSessionLocal = None
+
+
+def _get_async_sessionmaker():
+    global _async_engine, _AsyncSessionLocal
+    if _AsyncSessionLocal is None:
+        _async_engine = create_async_engine(
+            _async_url,
+            pool_pre_ping=True,
+            pool_size=_POOL_SIZE,
+            max_overflow=_MAX_OVERFLOW,
+            pool_timeout=_POOL_TIMEOUT,
+            pool_recycle=_POOL_RECYCLE,
+        )
+        _AsyncSessionLocal = async_sessionmaker(_async_engine, class_=AsyncSession, expire_on_commit=False)
+    return _AsyncSessionLocal
 
 
 class Base(DeclarativeBase):
@@ -112,5 +124,5 @@ def get_read_db():
 
 
 async def get_async_db():
-    async with AsyncSessionLocal() as session:
+    async with _get_async_sessionmaker()() as session:
         yield session

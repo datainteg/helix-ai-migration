@@ -3,7 +3,7 @@
  * and `/api/v1/projects/{project_id}/agent-workflows` (project-scoped).
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface WorkflowRun {
   workflow_id: string;

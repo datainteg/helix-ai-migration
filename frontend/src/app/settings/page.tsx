@@ -38,7 +38,7 @@ const PRESET_COLORS = [
 
 const FONT_PRESETS = [11.5, 13.5, 15, 16];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function SettingsPage() {
   const { user, token, logout } = useAuth();

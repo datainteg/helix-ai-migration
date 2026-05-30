@@ -162,19 +162,21 @@ async def replay_workflow(
     # in audit metadata + the requirement_text, and let the operator paste
     # them as additional context.
     from app.services.workflow_service import start_bmad_planning_workflow
-    import asyncio
 
     # Overrides flow as a dict keyed by agent_code. The executor reads them
     # via state["prompt_overrides"][agent_code] and appends to the system
     # prompt as "Operator override (replay)" — no requirement_text mangling.
-    new_run = asyncio.run(start_bmad_planning_workflow(
+    # AWAIT (not asyncio.run): this handler already runs on the event loop, and
+    # asyncio.run() raises "cannot be called from a running event loop" — the
+    # same bug already fixed in integrations.py. Matches agent_workflows.start.
+    new_run = await start_bmad_planning_workflow(
         project_id=parent.project_id,
         requirement_id=parent.requirement_id or "",
         organization_id=org_id,
         requirement_text=data.requirement_text or "",
         db=db,
         prompt_overrides=safe_overrides or None,
-    ))
+    )
 
     # Audit captures the full sanitised overrides so an operator can see
     # exactly what the LLM saw — not just the agent codes.

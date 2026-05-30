@@ -7,7 +7,7 @@ import { AdminShell } from "@/components/layout";
 import { Card, Avatar, StatusBadge, Chip, Button, LoadingState, EmptyState, ErrorBanner } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface User {
   id: string;

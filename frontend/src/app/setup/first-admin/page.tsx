@@ -43,7 +43,7 @@ import { HelixLogo } from "@/components/layout/HelixLogo";
 import { LLMIcon, AgentIcon } from "@/components/icons";
 import { Button, Chip, ErrorBanner } from "@/components/ui";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // ─── Step manifest ────────────────────────────────────────────────────
 

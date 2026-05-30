@@ -7,7 +7,7 @@ import { LLMIcon, AgentIcon } from "@/components/icons";
 import { Card, Button, Chip, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // Mirrors backend AGENT_TYPES in backend/app/services/llm_router_service.py.
 // Six official BMAD agents — codes match _bmad/config.toml.

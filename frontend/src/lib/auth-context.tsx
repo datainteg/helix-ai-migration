@@ -32,7 +32,7 @@ interface FirstAdminData {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);

@@ -7,7 +7,7 @@ import { AdminShell } from "@/components/layout";
 import { LLMIcon } from "@/components/icons";
 import { Card, Button, StatusBadge, ErrorBanner, LoadingState, EmptyState } from "@/components/ui";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Provider {
   id: string;

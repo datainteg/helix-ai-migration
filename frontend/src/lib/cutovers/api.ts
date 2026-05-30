@@ -5,7 +5,7 @@
  * explicit POSTs; the backend rejects illegal moves with 409.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export type CutoverState =
   | "bulk"

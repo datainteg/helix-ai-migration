@@ -211,6 +211,7 @@ def _persist_started_workflow(db: Session | None, started: HelixBMADResult, heli
             run_id=started.run_id,
             status="started",
             mode="temporal",
+            run_uuid=helix.workflow_run_id,
         )
     except SQLAlchemyError as exc:
         logger.warning("Failed to persist started workflow: %s", exc)
@@ -230,6 +231,7 @@ def _upsert_workflow_run(
     run_id: str,
     status: str,
     mode: str,
+    run_uuid: str | None = None,
 ) -> WorkflowRun:
     """C-001: insert-or-update a workflow_run keyed by (workflow_id, org).
 
@@ -269,6 +271,7 @@ def _upsert_workflow_run(
         run_id=run_id,
         status=status,
         mode=mode,
+        run_uuid=run_uuid,
     )
 
 
@@ -289,6 +292,7 @@ def _persist_workflow_result(db: Session | None, result: HelixBMADResult, helix:
             run_id=result.run_id,
             status=result.status,
             mode=result.mode,
+            run_uuid=helix.workflow_run_id,
         )
 
         agent_order = [
@@ -378,8 +382,14 @@ def create_workflow_run(
     run_id: str,
     status: str = "pending",
     mode: str = "local_fallback",
+    run_uuid: str | None = None,
 ) -> WorkflowRun:
+    # `run_uuid` pins WorkflowRun.id to the same UUID the Temporal worker stamps
+    # onto every WorkflowStep.workflow_run_id (helix.workflow_run_id, carried in
+    # the workflow input). Without it the row got BaseModel's random default id,
+    # so every step insert violated workflow_steps.workflow_run_id_fkey.
     run = WorkflowRun(
+        **({"id": run_uuid} if run_uuid else {}),
         organization_id=organization_id,
         project_id=project_id,
         requirement_id=requirement_id,
