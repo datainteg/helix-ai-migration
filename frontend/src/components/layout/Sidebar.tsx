@@ -209,21 +209,22 @@ function UserFooter() {
   const name = user?.name || user?.email || "Signed in";
   const role = user ? "Member" : "Sign in";
   return (
-    <div className="flex items-center gap-2.5 px-1 py-2 mt-1 border-t border-hx">
-      <Avatar name={name} size={26} />
-      <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-medium text-ink truncate">{name}</div>
-        <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
+    <div className="mt-1 border-t border-hx pt-2">
+      <div className="flex items-center gap-2.5 px-1 py-1.5">
+        <Avatar name={name} size={26} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-medium text-ink truncate">{name}</div>
+          <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
+        </div>
       </div>
       {user && (
         <button
           type="button"
           onClick={logout}
-          aria-label="Sign out"
-          title="Sign out"
-          className="p-1.5 rounded-md text-ink-4 hover:text-ink hover:bg-surface-hi focus-ring"
+          className="mt-1 w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-md border border-hx-2 bg-surface text-[12px] font-medium text-ink-2 hover:bg-app-2 hover:text-ink focus-ring transition-colors"
         >
-          <LogOut className="h-4 w-4" />
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
         </button>
       )}
     </div>
