@@ -31,7 +31,7 @@ check_port() {
   local p="$1"
   if command -v ss >/dev/null 2>&1; then
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}\$"; then
-      warn "Port ${p} already bound on host. Set HELIX_BIND_HOST or change *_HOST_PORT in .env."
+      warn "Port ${p} already bound on host. Change BACKEND_HOST_PORT / FRONTEND_HOST_PORT in .env (or BACKEND_BIND / FRONTEND_BIND to change the interface)."
     fi
   elif command -v lsof >/dev/null 2>&1; then
     if lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then

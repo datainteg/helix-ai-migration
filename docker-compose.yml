@@ -263,7 +263,11 @@ services:
     ports:
       - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_HOST_PORT:-3000}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Runtime copy (the browser bundle bakes this at BUILD time — see
+      # docker-compose.build.yml). Empty = relative same-origin.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      # In-network target the Next.js server proxies /api/* to.
+      BACKEND_PROXY_URL: ${BACKEND_PROXY_URL:-http://helix-backend:8000}
     init: true
     depends_on:
       backend:

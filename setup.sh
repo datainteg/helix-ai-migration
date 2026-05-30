@@ -418,37 +418,42 @@ else
   fi
 fi
 
-BACKEND_PORT_VAL="${BACKEND_HOST_PORT:-8000}"
-if [ -n "$DOMAIN" ]; then
-  # TLS deploy: assume the reverse proxy terminates 443 and proxies /api/*
-  NEXT_PUBLIC_API_URL_VAL="https://${DOMAIN}"
+# NEXT_PUBLIC_API_URL: default is EMPTY (relative, same-origin). The browser
+# calls /api/* on the frontend origin and it is proxied to the backend — by the
+# Next.js rewrite for a plain stack, or by Caddy for a TLS domain. Relative works
+# for BOTH, keeps the HttpOnly SameSite cookie same-origin, and needs no IP.
+# We NEVER clobber a value the operator set by hand (split-host deploys); we only
+# seed when the key is unset or empty.
+existing_npau=$(grep -E '^NEXT_PUBLIC_API_URL=' .env | head -1 | cut -d= -f2- || true)
+if [ -n "$existing_npau" ]; then
+  log "Keeping operator-set NEXT_PUBLIC_API_URL=${existing_npau}"
 else
-  NEXT_PUBLIC_API_URL_VAL="http://${PUBLIC_HOST}:${BACKEND_PORT_VAL}"
+  if ! grep -qE '^NEXT_PUBLIC_API_URL=' .env; then
+    printf '\nNEXT_PUBLIC_API_URL=\n' >> .env
+  fi
+  log "NEXT_PUBLIC_API_URL left empty (relative same-origin /api proxy)."
 fi
-log "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL_VAL}"
-if grep -q '^NEXT_PUBLIC_API_URL=' .env; then
-  sed -i.bak "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL_VAL}|" .env && rm -f .env.bak
-else
-  printf '\nNEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL_VAL" >> .env
-fi
-export NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL_VAL"
+export NEXT_PUBLIC_API_URL="$existing_npau"
 
-# CORS_ORIGINS must match the frontend's origin or browser preflight rejects
-# every API call. Derive from NEXT_PUBLIC_API_URL — drop the path component.
-FRONTEND_ORIGIN_VAL="$NEXT_PUBLIC_API_URL_VAL"
-if [ -n "$DOMAIN" ]; then
-  # TLS deploy: include both apex and www to be safe.
-  CORS_ORIGINS_VAL="[\"https://${DOMAIN}\"]"
+# CORS_ORIGINS: with same-origin routing CORS is usually unnecessary, but we seed
+# a sensible allowlist when the operator left it empty. Like above, an
+# operator-curated value is preserved, never overwritten.
+existing_cors=$(grep -E '^CORS_ORIGINS=' .env | head -1 | cut -d= -f2- || true)
+if [ -n "$existing_cors" ] && [ "$existing_cors" != "[]" ]; then
+  log "Keeping operator-set CORS_ORIGINS=${existing_cors}"
 else
-  # Dev/local: include localhost variants to cover ssh-tunnel and direct cases.
-  CORS_ORIGINS_VAL="[\"${FRONTEND_ORIGIN_VAL}\",\"http://localhost:3000\",\"http://127.0.0.1:3000\"]"
+  if [ -n "$DOMAIN" ]; then
+    CORS_ORIGINS_VAL="[\"https://${DOMAIN}\"]"
+  else
+    CORS_ORIGINS_VAL="[\"http://localhost:3000\",\"http://127.0.0.1:3000\"]"
+  fi
+  if grep -qE '^CORS_ORIGINS=' .env; then
+    sed -i.bak "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${CORS_ORIGINS_VAL}|" .env && rm -f .env.bak
+  else
+    printf '\nCORS_ORIGINS=%s\n' "$CORS_ORIGINS_VAL" >> .env
+  fi
+  log "Seeded CORS_ORIGINS=${CORS_ORIGINS_VAL}"
 fi
-if grep -q '^CORS_ORIGINS=' .env; then
-  sed -i.bak "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${CORS_ORIGINS_VAL}|" .env && rm -f .env.bak
-else
-  printf '\nCORS_ORIGINS=%s\n' "$CORS_ORIGINS_VAL" >> .env
-fi
-log "CORS_ORIGINS=${CORS_ORIGINS_VAL}"
 
 # ── 2c. Pre-seed first-admin credentials (consumed by wave-3 bootstrap CLI)
 if [ -n "$ADMIN_EMAIL" ] || [ -n "$ADMIN_PASSWORD" ]; then

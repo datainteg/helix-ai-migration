@@ -206,17 +206,22 @@ if ($Domain) {
     }
 }
 
-$BackendPortVal = if ($env:BACKEND_HOST_PORT) { $env:BACKEND_HOST_PORT } else { "8000" }
-if ($Domain) {
-    $NextPublicApiUrl = "https://$Domain"
+# NEXT_PUBLIC_API_URL: default EMPTY (relative, same-origin). The browser calls
+# /api/* on the frontend origin, proxied to the backend (Next rewrite locally,
+# Caddy for a TLS domain). Relative works for both and keeps the cookie
+# same-origin. Never clobber an operator-set value; only seed when unset/empty.
+$existingNpau = (((Get-Content .env) | Where-Object { $_ -match '^NEXT_PUBLIC_API_URL=' } | Select-Object -First 1) -replace '^NEXT_PUBLIC_API_URL=', '')
+if ($existingNpau) {
+    Write-Step "Keeping operator-set NEXT_PUBLIC_API_URL=$existingNpau"
+    $NextPublicApiUrl = $existingNpau
 } else {
-    $NextPublicApiUrl = "http://${PublicHost}:$BackendPortVal"
+    Write-Step "NEXT_PUBLIC_API_URL left empty (relative same-origin /api proxy)."
+    $NextPublicApiUrl = ""
+    $lines = (Get-Content .env) | Where-Object { $_ -notmatch '^NEXT_PUBLIC_API_URL=' }
+    $lines += "NEXT_PUBLIC_API_URL="
+    # Force UTF-8 *without* BOM so python-dotenv/compose can parse the file.
+    [System.IO.File]::WriteAllLines((Resolve-Path .env), $lines, (New-Object System.Text.UTF8Encoding($false)))
 }
-Write-Step "NEXT_PUBLIC_API_URL=$NextPublicApiUrl"
-$lines = (Get-Content .env) | Where-Object { $_ -notmatch '^NEXT_PUBLIC_API_URL=' }
-$lines += "NEXT_PUBLIC_API_URL=$NextPublicApiUrl"
-# Force UTF-8 *without* BOM so python-dotenv/compose can parse the file.
-[System.IO.File]::WriteAllLines((Resolve-Path .env), $lines, (New-Object System.Text.UTF8Encoding($false)))
 $env:NEXT_PUBLIC_API_URL = $NextPublicApiUrl
 
 # ── 2c. First-admin pre-seed ─────────────────────────────────────────
