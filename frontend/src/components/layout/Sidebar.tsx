@@ -169,11 +169,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
  * "operational" without evidence.
  */
 function SystemStatus() {
-  const { token } = useAuth();
+  const { token, role, isSuperAdmin } = useAuth();
+  const isAdmin = isSuperAdmin || role === "admin";
   const [state, setState] = useState<"unknown" | "ok" | "degraded">("unknown");
 
   useEffect(() => {
-    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
+    // /system/health is admin-only (require_admin). Only fetch + show this pill
+    // for admins; non-admins would 403 and see a perpetual "unknown" linking to
+    // a page they can't open.
+    if (!isAdmin) return;
     let cancelled = false;
     fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
@@ -186,7 +190,9 @@ function SystemStatus() {
       })
       .catch(() => { if (!cancelled) setState("unknown"); });
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, isAdmin]);
+
+  if (!isAdmin) return null;
 
   const dotColor =
     state === "ok" ? "var(--con-ok)" :

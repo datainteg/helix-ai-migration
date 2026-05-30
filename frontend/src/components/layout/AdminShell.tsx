@@ -33,7 +33,7 @@ const ADMIN_NAV = [
   { label: "Email / SMTP", href: "/admin/email", icon: Mail, perm: "admin:llm:read" },
   { label: "Connector Management", href: "/admin/connectors", icon: Plug, perm: "admin:llm:read" },
   { label: "Custom Connectors", href: "/admin/custom-connectors", icon: Wrench, perm: "admin:llm:read" },
-  { label: "System Health", href: "/admin/system-health", icon: HeartPulse, perm: "admin:audit:read" },
+  { label: "System Health", href: "/admin/system-health", icon: HeartPulse, adminOnly: true },
   { label: "Audit Logs", href: "/admin/audit-logs", icon: ScrollText, perm: "admin:audit:read" },
   { label: "Import / Export", href: "/admin/import-export", icon: Upload, perm: "admin:audit:read" },
 ];
@@ -50,8 +50,9 @@ interface Props {
 
 export function AdminShell({ children, title, subtitle, actions, page }: Props) {
   const pathname = usePathname() || "";
-  const { can } = useAuth();
-  const items = ADMIN_NAV.filter((i) => !i.perm || can(i.perm));
+  const { can, role, isSuperAdmin } = useAuth();
+  const isAdmin = isSuperAdmin || role === "admin";
+  const items = ADMIN_NAV.filter((i) => (i.adminOnly ? isAdmin : (!i.perm || can(i.perm))));
 
   const isActive = (href: string) =>
     href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);

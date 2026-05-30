@@ -29,6 +29,9 @@ interface Tile {
   desc: string;
   /** When set, the tile is shown only if the user holds this permission. */
   perm?: string;
+  /** When true, only the admin/super_admin role sees it (matches a backend
+   * require_admin gate — e.g. /system/health). */
+  adminOnly?: boolean;
   /** When true, tile is non-navigable and shown with a "Coming soon" chip. */
   comingSoon?: boolean;
 }
@@ -42,7 +45,7 @@ const TILES: Tile[] = [
   { href: "/admin/email", icon: Mail, label: "Email / SMTP", desc: "Mail transport setup + test connection.", perm: "admin:llm:read" },
   { href: "/admin/connectors", icon: Plug, label: "Connector Management", desc: "Supported connectors & capabilities.", perm: "admin:llm:read" },
   { href: "/admin/custom-connectors", icon: Wrench, label: "Custom Connectors", desc: "Pluggable connector SDK & deployments.", perm: "admin:llm:read" },
-  { href: "/admin/system-health", icon: HeartPulse, label: "System Health", desc: "Backend, DB, Redis, Temporal, worker.", perm: "admin:audit:read" },
+  { href: "/admin/system-health", icon: HeartPulse, label: "System Health", desc: "Backend, DB, Redis, Temporal, worker.", adminOnly: true },
   { href: "/admin/audit-logs", icon: ScrollText, label: "Audit Logs", desc: "Security and activity events.", perm: "admin:audit:read" },
   { href: "/admin/notifications", icon: Bell, label: "Notifications", desc: "Alert rules and delivery channels.", perm: "admin:llm:read" },
   { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Data exports; project bundles planned.", perm: "admin:audit:read" },
@@ -53,9 +56,11 @@ const TILES: Tile[] = [
 const DASH = "—";
 
 export default function AdminHomePage() {
-  const { can } = useAuth();
-  // Only show tiles the user can actually open (server still enforces).
-  const tiles = TILES.filter((t) => !t.perm || can(t.perm));
+  const { can, role, isSuperAdmin } = useAuth();
+  const isAdmin = isSuperAdmin || role === "admin";
+  // Only show tiles the user can actually open (server still enforces). adminOnly
+  // tiles require the admin role (matches a backend require_admin gate).
+  const tiles = TILES.filter((t) => (t.adminOnly ? isAdmin : (!t.perm || can(t.perm))));
   // Real headline metrics — each sourced from a backend endpoint that exists
   // (confirmed against /openapi.json). null = still loading or unavailable; we
   // render "—" rather than any placeholder value.
