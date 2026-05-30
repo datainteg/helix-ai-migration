@@ -14,6 +14,7 @@ import { Plus, Mail, Trash2, ShieldCheck } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { Card, Avatar, StatusBadge, Chip, Button, LoadingState, EmptyState, ErrorBanner, Modal, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 import {
   fetchMembers, changeMemberRole, fetchRoles, fetchInvitations, inviteUser, revokeInvitation,
   type Member, type RoleInfo, type Invitation,
@@ -23,6 +24,8 @@ import {
 const INVITABLE = ["viewer", "project_manager", "architect", "data_engineer", "qa_engineer"];
 
 export default function UsersPage() {
+  const { can } = useAuth();
+  const canWrite = can("admin:users:write");
   const [members, setMembers] = useState<Member[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
   const [invites, setInvites] = useState<Invitation[]>([]);
@@ -72,7 +75,7 @@ export default function UsersPage() {
       title="Users"
       subtitle="Manage organization members, assign roles, and invite teammates."
       crumbs={["Users"]}
-      actions={<Button onClick={() => setShowInvite(true)}><Plus className="h-4 w-4" /> Invite user</Button>}
+      actions={canWrite ? <Button onClick={() => setShowInvite(true)}><Plus className="h-4 w-4" /> Invite user</Button> : undefined}
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
       {ok && (
@@ -107,7 +110,7 @@ export default function UsersPage() {
                           </div>
                         </TD>
                         <TD>
-                          {m.is_super_admin ? (
+                          {m.is_super_admin || !canWrite ? (
                             <Chip tone="brand">{m.role}</Chip>
                           ) : (
                             <select

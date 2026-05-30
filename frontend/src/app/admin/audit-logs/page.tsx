@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { Download, Search } from "lucide-react";
-import { AdminShell } from "@/components/layout";
+import { AppShell } from "@/components/layout";
 import { Card, Chip, LoadingState, EmptyState, Button, Avatar } from "@/components/ui";
 import { formatDate, formatTime } from "@/lib/utils";
 
@@ -35,8 +35,9 @@ export default function AuditLogsPage() {
     action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
-    <AdminShell
+    <AppShell
       title="Audit Logs"
+      crumbs={["Audit Logs"]}
       subtitle="Security and activity events across the platform, with full attribution."
       actions={<Button variant="outline"><Download className="h-4 w-4" /> Export CSV</Button>}
     >
@@ -97,6 +98,6 @@ export default function AuditLogsPage() {
           </table>
         </Card>
       )}
-    </AdminShell>
+    </AppShell>
   );
 }

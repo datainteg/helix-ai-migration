@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { Card, Chip, MetricCard } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -26,23 +27,25 @@ interface Tile {
   icon: typeof Users;
   label: string;
   desc: string;
+  /** When set, the tile is shown only if the user holds this permission. */
+  perm?: string;
   /** When true, tile is non-navigable and shown with a "Coming soon" chip. */
   comingSoon?: boolean;
 }
 
 const TILES: Tile[] = [
-  { href: "/admin/users", icon: Users, label: "Users", desc: "Manage accounts, invites, and access." },
-  { href: "/admin/roles", icon: Lock, label: "Roles", desc: "Built-in RBAC roles and permissions." },
-  { href: "/admin/llm-settings", icon: BrainCircuit, label: "LLM Providers", desc: "OpenAI · Claude · Gemini · local." },
-  { href: "/admin/agent-mapping", icon: Network, label: "Agent Model Mapping", desc: "Route agents to providers and models." },
-  { href: "/admin/cost-limits", icon: DollarSign, label: "Cost Limits", desc: "Per-org daily & monthly LLM spend caps." },
-  { href: "/admin/email", icon: Mail, label: "Email / SMTP", desc: "Mail transport setup + test connection." },
-  { href: "/admin/connectors", icon: Plug, label: "Connector Management", desc: "Supported connectors & capabilities." },
-  { href: "/admin/custom-connectors", icon: Wrench, label: "Custom Connectors", desc: "Pluggable connector SDK & deployments." },
-  { href: "/admin/system-health", icon: HeartPulse, label: "System Health", desc: "Backend, DB, Redis, Temporal, worker." },
-  { href: "/admin/audit-logs", icon: ScrollText, label: "Audit Logs", desc: "Security and activity events." },
-  { href: "/admin/notifications", icon: Bell, label: "Notifications", desc: "Alert rules and delivery channels." },
-  { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Data exports; project bundles planned." },
+  { href: "/admin/users", icon: Users, label: "Users", desc: "Manage accounts, invites, and access.", perm: "admin:users:read" },
+  { href: "/admin/roles", icon: Lock, label: "Roles", desc: "RBAC roles and permissions.", perm: "admin:roles:read" },
+  { href: "/admin/llm-settings", icon: BrainCircuit, label: "LLM Providers", desc: "OpenAI · Claude · Gemini · local.", perm: "admin:llm:read" },
+  { href: "/admin/agent-mapping", icon: Network, label: "Agent Model Mapping", desc: "Route agents to providers and models.", perm: "admin:llm:read" },
+  { href: "/admin/cost-limits", icon: DollarSign, label: "Cost Limits", desc: "Per-org daily & monthly LLM spend caps.", perm: "admin:llm:read" },
+  { href: "/admin/email", icon: Mail, label: "Email / SMTP", desc: "Mail transport setup + test connection.", perm: "admin:llm:read" },
+  { href: "/admin/connectors", icon: Plug, label: "Connector Management", desc: "Supported connectors & capabilities.", perm: "admin:llm:read" },
+  { href: "/admin/custom-connectors", icon: Wrench, label: "Custom Connectors", desc: "Pluggable connector SDK & deployments.", perm: "admin:llm:read" },
+  { href: "/admin/system-health", icon: HeartPulse, label: "System Health", desc: "Backend, DB, Redis, Temporal, worker.", perm: "admin:audit:read" },
+  { href: "/admin/audit-logs", icon: ScrollText, label: "Audit Logs", desc: "Security and activity events.", perm: "admin:audit:read" },
+  { href: "/admin/notifications", icon: Bell, label: "Notifications", desc: "Alert rules and delivery channels.", perm: "admin:llm:read" },
+  { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Data exports; project bundles planned.", perm: "admin:audit:read" },
 ];
 
 // Em dash placeholder while loading or when a metric is unavailable (e.g. the
@@ -50,6 +53,9 @@ const TILES: Tile[] = [
 const DASH = "—";
 
 export default function AdminHomePage() {
+  const { can } = useAuth();
+  // Only show tiles the user can actually open (server still enforces).
+  const tiles = TILES.filter((t) => !t.perm || can(t.perm));
   // Real headline metrics — each sourced from a backend endpoint that exists
   // (confirmed against /openapi.json). null = still loading or unavailable; we
   // render "—" rather than any placeholder value.
@@ -119,7 +125,7 @@ export default function AdminHomePage() {
 
       <Card title="Quick access" description="Most-used administration surfaces.">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {TILES.map((t) => {
+          {tiles.map((t) => {
             const Icon = t.icon;
             const body = (
               <div className="flex items-start gap-3">

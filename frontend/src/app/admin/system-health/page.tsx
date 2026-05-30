@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { HeartPulse, RefreshCcw } from "lucide-react";
-import { AdminShell } from "@/components/layout";
+import { AppShell } from "@/components/layout";
 import { Card, MetricCard, StatusBadge, Button, LoadingState } from "@/components/ui";
 
 
@@ -35,8 +35,9 @@ export default function SystemHealthPage() {
   const issues = data.length - healthy;
 
   return (
-    <AdminShell
+    <AppShell
       title="System Health"
+      crumbs={["System Health"]}
       subtitle="Live status of backend, database, queue, worker, and connector components."
       actions={<Button variant="outline"><RefreshCcw className="h-4 w-4" /> Refresh</Button>}
     >
@@ -80,6 +81,6 @@ export default function SystemHealthPage() {
           </div>
         </Card>
       )}
-    </AdminShell>
+    </AppShell>
   );
 }

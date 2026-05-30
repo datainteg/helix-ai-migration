@@ -13,6 +13,7 @@ import { Check, Lock, Plus, Trash2, Pencil, ShieldCheck } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
 import { Card, Chip, Button, ErrorBanner, LoadingState, EmptyState, Modal, ConfirmModal, Table, THead, TBody, TR, TH, TD } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 import {
   fetchRoles, createRole, updateRolePermissions, deleteRole,
   type RoleInfo, type RolesResponse,
@@ -25,6 +26,8 @@ const ROLE_LABELS: Record<string, string> = {
 const label = (n: string) => ROLE_LABELS[n] ?? n;
 
 export default function RolesPage() {
+  const { can } = useAuth();
+  const canWrite = can("admin:roles:write");
   const [data, setData] = useState<RolesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -70,7 +73,7 @@ export default function RolesPage() {
       title="Roles & Permissions"
       subtitle="System roles are protected. Create custom roles and toggle their permissions to fit your team."
       crumbs={["Roles"]}
-      actions={!forbidden ? <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New role</Button> : undefined}
+      actions={!forbidden && canWrite ? <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New role</Button> : undefined}
     >
       {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
       {ok && (
@@ -97,9 +100,9 @@ export default function RolesPage() {
                 </div>
                 <div className="mt-3 flex gap-1.5">
                   <Button size="sm" variant="outline" onClick={() => setEditing(r)}>
-                    {r.is_system ? <>View</> : <><Pencil className="h-3.5 w-3.5" /> Edit</>}
+                    {r.is_system || !canWrite ? <>View</> : <><Pencil className="h-3.5 w-3.5" /> Edit</>}
                   </Button>
-                  {!r.is_system && (
+                  {!r.is_system && canWrite && (
                     <Button size="sm" variant="ghost" onClick={() => setConfirmDel(r)}><Trash2 className="h-3.5 w-3.5" /></Button>
                   )}
                 </div>
@@ -139,6 +142,7 @@ export default function RolesPage() {
       {(editing || creating) && (
         <RoleEditor
           role={editing}
+          canWrite={canWrite}
           allPerms={allPerms}
           onClose={() => { setEditing(null); setCreating(false); }}
           onSaved={async (msg) => { setEditing(null); setCreating(false); setOk(msg); await load(); }}
@@ -160,14 +164,15 @@ export default function RolesPage() {
   );
 }
 
-function RoleEditor({ role, allPerms, onClose, onSaved, onError }: {
+function RoleEditor({ role, canWrite, allPerms, onClose, onSaved, onError }: {
   role: RoleInfo | null;
+  canWrite: boolean;
   allPerms: string[];
   onClose: () => void;
   onSaved: (msg: string) => void;
   onError: (m: string) => void;
 }) {
-  const readOnly = !!role?.is_system;
+  const readOnly = !!role?.is_system || !canWrite;
   const [name, setName] = useState(role?.name ?? "");
   const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
   const [saving, setSaving] = useState(false);

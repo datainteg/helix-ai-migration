@@ -37,6 +37,8 @@ type NavItem = {
   count?: number;
   live?: boolean;
   shortcut?: string;
+  /** When set, the link is only shown if the user holds this permission. */
+  perm?: string;
 };
 
 const PRIMARY: NavItem[] = [
@@ -58,10 +60,10 @@ const RESOURCES: NavItem[] = [
 ];
 
 const ADMIN: NavItem[] = [
-  { label: "Administration",     href: "/admin",                icon: Settings },
-  { label: "Cost Limits",        href: "/admin/cost-limits",    icon: DollarSign },
-  { label: "Notifications",      href: "/admin/notifications",  icon: Bell },
-  { label: "Email / SMTP",       href: "/admin/email",          icon: Mail },
+  { label: "Administration",     href: "/admin",                icon: Settings,    perm: "admin:users:read" },
+  { label: "Cost Limits",        href: "/admin/cost-limits",    icon: DollarSign,  perm: "admin:llm:read" },
+  { label: "Notifications",      href: "/admin/notifications",  icon: Bell,        perm: "admin:llm:read" },
+  { label: "Email / SMTP",       href: "/admin/email",          icon: Mail,        perm: "admin:llm:read" },
 ];
 
 function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
@@ -239,6 +241,11 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname() || "";
+  const { can } = useAuth();
+  // Permission-gated nav: hide links the user can't access (server still
+  // enforces). Items without a `perm` are always shown.
+  const visible = (items: NavItem[]) => items.filter((i) => !i.perm || can(i.perm));
+  const adminItems = visible(ADMIN);
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
     // "/admin" must match exactly, otherwise it lights up alongside its
@@ -292,7 +299,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
       <nav aria-label="Primary" className="flex-1 overflow-y-auto pb-3">
         <NavGroup items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} />
         <NavGroup label="Resources" items={RESOURCES} isActive={isActive} onNavigate={onMobileClose} />
-        <NavGroup label="System" items={ADMIN} isActive={isActive} onNavigate={onMobileClose} />
+        {adminItems.length > 0 && (
+          <NavGroup label="System" items={adminItems} isActive={isActive} onNavigate={onMobileClose} />
+        )}
       </nav>
 
       {/* Status + user */}

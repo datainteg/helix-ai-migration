@@ -13,6 +13,14 @@ interface AuthState {
    * NEVER put into an Authorization header anymore. */
   token: string | null;
   user: { email: string; name: string } | null;
+  /** Effective permission codes for the active org (super-admins get all). */
+  permissions: string[];
+  /** Active org role name (e.g. "admin", "viewer"), or null. */
+  role: string | null;
+  isSuperAdmin: boolean;
+  /** True if the user holds `permission` (super-admins always true). Use to
+   * hide controls the user can't use. Server still enforces per endpoint. */
+  can: (permission: string) => boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Log in as the read-only demo user (no credentials). Backend-gated by
    * ALLOW_DEMO_LOGIN; the button is gated by NEXT_PUBLIC_DEMO_ENABLED. */
@@ -39,8 +47,28 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<{ email: string; name: string } | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [role, setRole] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  // Pull the user's effective role + permissions for UI gating.
+  const refreshPermissions = async (): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/me/permissions`, { credentials: "include" });
+      if (res.ok) {
+        const d = await res.json();
+        setPermissions(Array.isArray(d.permissions) ? d.permissions : []);
+        setRole(d.role ?? null);
+        setIsSuperAdmin(!!d.is_super_admin);
+        return;
+      }
+    } catch { /* ignore */ }
+    setPermissions([]); setRole(null); setIsSuperAdmin(false);
+  };
+
+  const can = (permission: string) => isSuperAdmin || permissions.includes(permission);
 
   // SC-010: the auth token lives in an HttpOnly cookie that JS can't read, so
   // we can no longer gate on localStorage. Authentication state is derived from
@@ -54,12 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setUser({ email: data.email, name: data.name });
+        void refreshPermissions();
         return true;
       }
     } catch {
       /* network error — treat as unauthenticated */
     }
     setUser(null);
+    setPermissions([]); setRole(null); setIsSuperAdmin(false);
     return false;
   };
 
@@ -128,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* best-effort: cookie expires at the JWT TTL even if this fails */
     });
     setUser(null);
+    setPermissions([]); setRole(null); setIsSuperAdmin(false);
     router.push("/login");
   };
 
@@ -147,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const token = user ? "cookie-session" : null;
 
   return (
-    <AuthContext.Provider value={{ token, user, login: loginFn, demoLogin, setupFirstAdmin, setSession, logout, loading }}>
+    <AuthContext.Provider value={{ token, user, permissions, role, isSuperAdmin, can, login: loginFn, demoLogin, setupFirstAdmin, setSession, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

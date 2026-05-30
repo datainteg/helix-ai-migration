@@ -151,6 +151,30 @@ def current_user(user_id: str = Depends(get_current_user_id), db: Session = Depe
     return get_current_user(db, user_id)
 
 
+@router.get("/auth/me/permissions")
+def current_user_permissions(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """The signed-in user's effective role + permission codes for the active
+    org. Drives permission-based UI gating on the frontend. Super-admins get
+    the full catalogue. Auth/authorization is still enforced server-side per
+    endpoint — this is for hiding controls the user can't use."""
+    from app.auth.dependencies import resolve_active_membership, _role_for_membership
+    from app.services.auth_service import SYSTEM_PERMISSIONS
+
+    user = get_current_user(db, user_id)
+    if user.is_super_admin:
+        return {"role": "super_admin", "is_super_admin": True, "permissions": list(SYSTEM_PERMISSIONS)}
+    try:
+        membership = resolve_active_membership(db, user_id)
+        role = _role_for_membership(db, membership)
+        return {
+            "role": role.name,
+            "is_super_admin": False,
+            "permissions": sorted(p.code for p in role.permissions),
+        }
+    except Exception:
+        return {"role": None, "is_super_admin": False, "permissions": []}
+
+
 @router.post("/auth/logout")
 def user_logout(request: Request, response: Response, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     # SC-010: revoke whichever token authenticated this request (header OR
