@@ -58,6 +58,16 @@ export function getWorkflowDetail(token: string | null, workflowId: string): Pro
   return get<WorkflowDetail>(`/api/v1/agent-workflows/${workflowId}`, token);
 }
 
+export interface WorkflowArtifactContent {
+  path: string;
+  content: string;
+}
+
+/** Read one artifact's raw content (markdown) produced by a workflow step. */
+export function getWorkflowArtifact(token: string | null, workflowId: string, path: string): Promise<WorkflowArtifactContent> {
+  return get<WorkflowArtifactContent>(`/api/v1/agent-workflows/${workflowId}/artifact-content?path=${encodeURIComponent(path)}`, token);
+}
+
 interface SseStepFrame { type: "step"; step: WorkflowStep }
 interface SseDoneFrame { type: "done"; status: string }
 interface SseTimeoutFrame { type: "timeout" }

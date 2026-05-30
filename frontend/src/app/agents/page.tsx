@@ -28,11 +28,14 @@ import {
   StatusBadge,
   Tabs,
   ErrorBanner,
+  Modal,
 } from "@/components/ui";
+import { Markdown } from "@/components/ui/Markdown";
 import { useAuth } from "@/lib/auth-context";
 import {
   listOrgWorkflowRuns,
   getWorkflowDetail,
+  getWorkflowArtifact,
   type WorkflowRun as ApiWorkflowRun,
   type WorkflowStep as ApiWorkflowStep,
 } from "@/lib/workflows/api";
@@ -46,7 +49,8 @@ interface PipelineNodeData {
   label: string;
   agent: string;
   status: NodeStatus;
-  artifact: string | null;
+  artifact: string | null;       // display name (last path segment)
+  artifactPath: string | null;   // full path, for fetching content
 }
 
 interface WorkflowRun {
@@ -84,6 +88,7 @@ function stepsToNodes(steps: ApiWorkflowStep[]): PipelineNodeData[] {
     agent: s.agent_name,
     status: nodeStatus(s.status),
     artifact: artifactName(s.artifact_path),
+    artifactPath: s.artifact_path ?? null,
   }));
 }
 
@@ -153,6 +158,12 @@ export default function AgentsPage() {
     return () => { cancelled = true; };
   }, [token, selectedRun]);
 
+  // Artifact viewer modal — opens the raw content for a clicked artifact.
+  const [artifactView, setArtifactView] = useState<{ name: string; path: string } | null>(null);
+  const openArtifact = (node: PipelineNodeData) => {
+    if (node.artifactPath) setArtifactView({ name: node.artifact ?? node.artifactPath, path: node.artifactPath });
+  };
+
   const awaitingCount = displayRuns.filter((r) => r.status === "awaiting" || r.status === "awaiting_approval" || r.status === "pending").length;
   const failedCount = displayRuns.filter((r) => r.status === "failed" || r.status === "rejected" || r.status === "expired").length;
   const metricLine = `${displayRuns.length} runs · ${awaitingCount} awaiting · ${failedCount} failed`;
@@ -189,12 +200,47 @@ export default function AgentsPage() {
             />
           </Card>
         ) : layout === "phases" ? (
-          <PhasesView run={run} runs={displayRuns} nodes={nodes} stepsError={stepsError} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+          <PhasesView run={run} runs={displayRuns} nodes={nodes} stepsError={stepsError} selectedRun={selectedRun} setSelectedRun={setSelectedRun} onOpenArtifact={openArtifact} />
         ) : (
-          <LinearView run={run} runs={displayRuns} nodes={nodes} stepsError={stepsError} selectedRun={selectedRun} setSelectedRun={setSelectedRun} />
+          <LinearView run={run} runs={displayRuns} nodes={nodes} stepsError={stepsError} selectedRun={selectedRun} setSelectedRun={setSelectedRun} onOpenArtifact={openArtifact} />
         )}
       </div>
+
+      {artifactView && (
+        <ArtifactViewer
+          workflowId={selectedRun}
+          name={artifactView.name}
+          path={artifactView.path}
+          token={token}
+          onClose={() => setArtifactView(null)}
+        />
+      )}
     </AppShell>
+  );
+}
+
+function ArtifactViewer({ workflowId, name, path, token, onClose }: { workflowId: string; name: string; path: string; token: string | null; onClose: () => void }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    getWorkflowArtifact(token, workflowId, path)
+      .then((r) => { if (!cancelled) setContent(r.content); })
+      .catch((e: unknown) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load artifact"); });
+    return () => { cancelled = true; };
+  }, [token, workflowId, path]);
+  return (
+    <Modal open onClose={onClose} title={name} width="lg">
+      {err ? (
+        <ErrorBanner message={err} />
+      ) : content === null ? (
+        <div className="py-8 text-center text-[12.5px] text-ink-4">Loading artifact…</div>
+      ) : (
+        <div className="max-h-[60vh] overflow-auto rounded-lg border border-hx bg-app-2 p-3">
+          <Markdown text={content} />
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -220,9 +266,10 @@ interface ViewProps {
   stepsError: string;
   selectedRun: string;
   setSelectedRun: (id: string) => void;
+  onOpenArtifact: (node: PipelineNodeData) => void;
 }
 
-function LinearView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun }: ViewProps) {
+function LinearView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun, onOpenArtifact }: ViewProps) {
   const artifacts = (nodes ?? []).filter((n) => n.artifact);
 
   return (
@@ -348,14 +395,16 @@ function LinearView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun 
               {artifacts.map((n, i, arr) => (
                 <button
                   key={n.id}
-                  className="grid items-center gap-2.5 py-[7px] text-left bg-transparent"
+                  onClick={() => onOpenArtifact(n)}
+                  disabled={!n.artifactPath}
+                  className="grid items-center gap-2.5 py-[7px] text-left bg-transparent rounded-md hover:bg-app-2 px-1.5 -mx-1.5 disabled:opacity-60 disabled:cursor-default transition-colors"
                   style={{
                     gridTemplateColumns: "16px 1fr auto",
                     borderBottom: i === arr.length - 1 ? "none" : "1px solid var(--con-line)",
                   }}
                 >
                   <FileIcon className="h-3.5 w-3.5 text-ink-4" />
-                  <span className="font-mono text-[11.5px] text-ink-2">{n.artifact}</span>
+                  <span className="font-mono text-[11.5px] text-ink-2 hover:text-ink truncate">{n.artifact}</span>
                   <span className="inline-flex items-center gap-1 text-[10.5px] text-ink-4">
                     <AgentIcon name={n.agent} size={14} /> {n.agent}
                   </span>
@@ -470,7 +519,7 @@ function PipelineNode({ node, index }: { node: PipelineNodeData; index: number }
 
 // ─── Phases view ────────────────────────────────────────────────────
 
-function PhasesView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun }: ViewProps) {
+function PhasesView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun, onOpenArtifact }: ViewProps) {
   const artifacts = (nodes ?? []).filter((n) => n.artifact);
 
   return (
@@ -595,14 +644,16 @@ function PhasesView({ run, runs, nodes, stepsError, selectedRun, setSelectedRun 
               {artifacts.map((n, i, arr) => (
                 <button
                   key={n.id}
-                  className="grid items-center gap-2.5 py-1.5 text-left bg-transparent"
+                  onClick={() => onOpenArtifact(n)}
+                  disabled={!n.artifactPath}
+                  className="grid items-center gap-2.5 py-1.5 text-left bg-transparent rounded-md hover:bg-app-2 px-1.5 -mx-1.5 disabled:opacity-60 disabled:cursor-default transition-colors"
                   style={{
                     gridTemplateColumns: "16px 1fr auto",
                     borderBottom: i === arr.length - 1 ? "none" : "1px solid var(--con-line)",
                   }}
                 >
                   <FileIcon className="h-3 w-3 text-ink-4" />
-                  <span className="font-mono text-[11px] text-ink-2">{n.artifact}</span>
+                  <span className="font-mono text-[11px] text-ink-2 truncate">{n.artifact}</span>
                   <span className="text-[10px] text-ink-4">{n.agent}</span>
                 </button>
               ))}
