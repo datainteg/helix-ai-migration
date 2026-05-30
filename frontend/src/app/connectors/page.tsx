@@ -4,7 +4,6 @@ import React, { useEffect, useId, useState } from "react";
 import {
   Plus,
   Code,
-  X,
   Check,
   Play,
   RefreshCw,
@@ -111,6 +110,12 @@ interface Provider {
   category: string;
   color: string;
   letter: string;
+}
+
+// Shape returned by GET /api/v1/projects (only the fields this page uses).
+interface ProjectSummary {
+  id: string;
+  name: string;
 }
 
 const PROVIDER_CATALOG: Provider[] = [
@@ -325,7 +330,15 @@ function ConnectorCard({ c, onClick }: { c: ConnectorRow; onClick: () => void })
   );
 }
 
-function Field({ field }: { field: FormField }) {
+function Field({
+  field,
+  value,
+  onChange,
+}: {
+  field: FormField;
+  value?: string;
+  onChange?: (id: string, value: string) => void;
+}) {
   // useId guarantees a unique htmlFor/id pair even when the same Field
   // is rendered in two places. focus-ring class restores the missing focus
   // outline that the inline `outline: none` style was removing.
@@ -364,7 +377,8 @@ function Field({ field }: { field: FormField }) {
           className="focus-ring"
           style={baseStyle}
           placeholder={field.placeholder}
-          defaultValue={field.defaultValue}
+          value={value ?? ""}
+          onChange={(e) => onChange?.(field.id, e.target.value)}
           rows={4}
         />
       ) : field.type === "select" ? (
@@ -372,7 +386,8 @@ function Field({ field }: { field: FormField }) {
           id={inputId}
           className="focus-ring"
           style={baseStyle}
-          defaultValue={field.defaultValue}
+          value={value ?? ""}
+          onChange={(e) => onChange?.(field.id, e.target.value)}
         >
           {(field.options || []).map((o) => (
             <option key={o} value={o}>
@@ -403,7 +418,8 @@ function Field({ field }: { field: FormField }) {
           className="focus-ring"
           style={baseStyle}
           placeholder={field.placeholder}
-          defaultValue={field.defaultValue}
+          value={value ?? ""}
+          onChange={(e) => onChange?.(field.id, e.target.value)}
         />
       )}
     </div>
@@ -431,75 +447,153 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
   const [provider, setProvider] = useState<Provider | null>(initialProvider);
   const [testState, setTestState] = useState<TestState>("idle");
 
+  // Controlled form values for every credential field, keyed by field id.
+  const [values, setValues] = useState<Record<string, string>>({});
+  // Projects this user can attach the connection to (GET /api/v1/projects).
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectId, setProjectId] = useState<string>("");
+  // Whether the connection is registered as a source or a target.
+  const [role, setRole] = useState<"source" | "target">("source");
+  // Real test result from POST /api/v1/connectors/test.
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string>("");
+
   const fields: FormField[] = provider ? FIELDS_FOR(provider.key) : [];
 
-  const runTest = () => {
+  // Seed controlled values from each field's defaultValue whenever the
+  // selected provider changes (so dropdowns/ports start with sane values).
+  useEffect(() => {
+    if (!provider) {
+      setValues({});
+      return;
+    }
+    const seeded: Record<string, string> = {};
+    for (const f of FIELDS_FOR(provider.key)) {
+      if (f.defaultValue !== undefined) seeded[f.id] = String(f.defaultValue);
+    }
+    setValues(seeded);
+    setTestState("idle");
+    setTestResult(null);
+    setSaveError("");
+  }, [provider]);
+
+  // Load the user's projects when the modal opens (cookie auth).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/projects`, { credentials: "include" })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<ProjectSummary[]>;
+      })
+      .then((list) => {
+        if (cancelled) return;
+        const safe = Array.isArray(list) ? list : [];
+        setProjects(safe);
+        setProjectId((prev) => prev || (safe[0]?.id ?? ""));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const setValue = (id: string, value: string) =>
+    setValues((prev) => ({ ...prev, [id]: value }));
+
+  // The config payload is every controlled value except the human "name".
+  const configFromValues = (): Record<string, string> => {
+    const { name: _name, ...rest } = values;
+    void _name;
+    return rest;
+  };
+
+  const connectionName = (values.name ?? "").trim();
+  const canSubmit = projectId !== "" && connectionName !== "";
+
+  const runTest = async () => {
+    if (!provider || !projectId) return;
     setTestState("testing");
-    setTimeout(() => {
-      setTestState(Math.random() > 0.15 ? "ok" : "fail");
-    }, 1400);
+    setTestResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/connectors/test`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          connector_type: provider.key,
+          config: configFromValues(),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { success?: boolean; message?: string; detail?: string }
+        | null;
+      if (!res.ok) {
+        const message =
+          data?.message ||
+          data?.detail ||
+          (res.status === 401
+            ? "Not authenticated — please log in again."
+            : `Test failed (HTTP ${res.status})`);
+        setTestResult({ success: false, message });
+        setTestState("fail");
+        return;
+      }
+      const success = Boolean(data?.success);
+      setTestResult({ success, message: data?.message || (success ? "Connection succeeded." : "Connection failed.") });
+      setTestState(success ? "ok" : "fail");
+    } catch (e: unknown) {
+      setTestResult({ success: false, message: e instanceof Error ? e.message : "Network error" });
+      setTestState("fail");
+    }
+  };
+
+  const saveConnection = async () => {
+    if (!provider || !canSubmit || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const endpoint = role === "source" ? "sources" : "targets";
+      const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/${endpoint}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: connectionName,
+          connector_type: provider.key,
+          config: configFromValues(),
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as
+          | { message?: string; detail?: string }
+          | null;
+        const message =
+          data?.message ||
+          data?.detail ||
+          (res.status === 401
+            ? "Not authenticated — please log in again."
+            : `Couldn't save connection (HTTP ${res.status})`);
+        setSaveError(message);
+        return;
+      }
+      onClose();
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const steps = [
     { id: 0, label: "Provider" },
     { id: 1, label: "Credentials" },
     { id: 2, label: "Test & save" },
-  ];
-
-  type CheckState = "ok" | "fail" | "running" | "skip" | "pending" | "idle";
-
-  const checks: { name: string; state: CheckState; detail: string }[] = [
-    { name: "Network reachability", state: "ok", detail: "TCP handshake · 12 ms" },
-    {
-      name: "Credentials accepted",
-      state:
-        testState === "idle"
-          ? "idle"
-          : testState === "testing"
-            ? "running"
-            : "ok",
-      detail: "Auth method: password",
-    },
-    {
-      name: "Permissions",
-      state:
-        testState === "ok"
-          ? "ok"
-          : testState === "fail"
-            ? "fail"
-            : testState === "testing"
-              ? "running"
-              : "idle",
-      detail: "SELECT on warehouse.* · OK",
-    },
-    {
-      name: "Schema discovery",
-      state:
-        testState === "ok"
-          ? "ok"
-          : testState === "fail"
-            ? "skip"
-            : testState === "testing"
-              ? "pending"
-              : "idle",
-      detail:
-        testState === "ok"
-          ? "12 schemas, 412 tables found"
-          : "pending previous step",
-    },
-    {
-      name: "Row-count probe",
-      state:
-        testState === "ok"
-          ? "ok"
-          : testState === "fail"
-            ? "skip"
-            : "idle",
-      detail:
-        testState === "ok"
-          ? "warehouse.GL_LEDGER: 12,408,221 rows"
-          : "pending previous step",
-    },
   ];
 
   // Render through the Modal primitive so we inherit dialog semantics,
@@ -695,8 +789,105 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
                 }}
               >
                 {fields.map((f) => (
-                  <Field key={f.id} field={f} />
+                  <Field
+                    key={f.id}
+                    field={f}
+                    value={values[f.id]}
+                    onChange={setValue}
+                  />
                 ))}
+              </div>
+
+              {/* Project + role: where this connection is registered and
+                  whether it acts as a source or a target. */}
+              <div
+                className="grid"
+                style={{
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginTop: 12,
+                }}
+              >
+                <div>
+                  <label
+                    className="block text-ink-2"
+                    style={{ fontSize: 11.5, fontWeight: 500, marginBottom: 5 }}
+                  >
+                    Project
+                  </label>
+                  {projects.length === 0 ? (
+                    <div
+                      className="flex items-center"
+                      style={{ fontSize: 11.5, height: 36, gap: 6 }}
+                    >
+                      <span className="text-ink-3">No projects yet.</span>
+                      <a
+                        href="/projects/new"
+                        style={{ fontWeight: 500, color: "var(--con-brand)" }}
+                      >
+                        Create a project first →
+                      </a>
+                    </div>
+                  ) : (
+                    <select
+                      className="focus-ring"
+                      value={projectId}
+                      onChange={(e) => setProjectId(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: 36,
+                        padding: "0 12px",
+                        background: "var(--con-surface)",
+                        border: "1px solid var(--con-line-2)",
+                        borderRadius: 7,
+                        fontSize: 12.5,
+                        fontFamily: "Geist, sans-serif",
+                        color: "var(--con-ink-1)",
+                      }}
+                    >
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label
+                    className="block text-ink-2"
+                    style={{ fontSize: 11.5, fontWeight: 500, marginBottom: 5 }}
+                  >
+                    Register as
+                  </label>
+                  <div className="flex" style={{ gap: 6, height: 36 }}>
+                    {(["source", "target"] as const).map((r) => (
+                      <button
+                        type="button"
+                        key={r}
+                        onClick={() => setRole(r)}
+                        className="flex-1 capitalize cursor-pointer focus-ring"
+                        style={{
+                          borderRadius: 7,
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          background:
+                            role === r
+                              ? "var(--con-surface-hi)"
+                              : "var(--con-surface)",
+                          border:
+                            role === r
+                              ? "1px solid var(--con-ink-1)"
+                              : "1px solid var(--con-line-2)",
+                          color:
+                            role === r ? "var(--con-ink-1)" : "var(--con-ink-3)",
+                        }}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div
                 className="flex items-start bg-app border border-hx"
@@ -741,142 +932,116 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
                     className="font-mono text-ink-4"
                     style={{ fontSize: 11 }}
                   >
-                    Acme Production · db.example.com:5432/warehouse
+                    {connectionName || "Untitled connection"} · {role}
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-col" style={{ gap: 8 }}>
-                {checks.map((check, i) => {
-                  const icon =
-                    check.state === "ok" ? (
-                      <Check size={11} />
-                    ) : check.state === "fail" ? (
-                      <X size={11} />
-                    ) : check.state === "running" ? (
-                      <span
-                        className="animate-spin"
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          border: "1.5px solid var(--con-brand)",
-                          borderRightColor: "transparent",
-                        }}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: "50%",
-                          background: "var(--con-ink-5)",
-                        }}
-                      />
-                    );
-                  const color =
-                    check.state === "ok"
-                      ? "var(--con-ok)"
-                      : check.state === "fail"
-                        ? "var(--con-err)"
-                        : check.state === "running"
-                          ? "var(--con-brand)"
-                          : check.state === "skip"
-                            ? "var(--con-ink-5)"
-                            : "var(--con-ink-4)";
-                  return (
-                    <div
-                      key={i}
-                      className="grid items-center"
-                      style={{
-                        gridTemplateColumns: "20px 200px 1fr 80px",
-                        gap: 12,
-                        padding: "8px 10px",
-                        background:
-                          check.state === "fail"
-                            ? "var(--con-err-soft)"
-                            : "var(--con-surface)",
-                        border: "1px solid",
-                        borderColor:
-                          check.state === "fail"
-                            ? "#FCA5A5"
-                            : "var(--con-line)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div
-                        className="grid place-items-center"
-                        style={{ color }}
-                      >
-                        {icon}
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 12.5,
-                          fontWeight: 500,
-                          color:
-                            check.state === "skip"
-                              ? "var(--con-ink-5)"
-                              : "var(--con-ink-1)",
-                        }}
-                      >
-                        {check.name}
-                      </span>
-                      <span
-                        className="font-mono text-ink-3"
-                        style={{ fontSize: 11 }}
-                      >
-                        {check.detail}
-                      </span>
-                      <span
-                        className="font-mono uppercase"
-                        style={{
-                          fontSize: 10.5,
-                          color,
-                          textAlign: "right",
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        {check.state}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
+              {/* Real test result panel: idle / testing / success / failure. */}
+              {testState === "idle" && (
+                <div
+                  className="flex items-center bg-surface"
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid var(--con-line)",
+                    borderRadius: 8,
+                    gap: 9,
+                  }}
+                >
+                  <Info size={14} className="text-ink-4" />
+                  <span
+                    className="text-ink-3"
+                    style={{ fontSize: 12.5 }}
+                  >
+                    Run a test to verify the connection before saving.
+                  </span>
+                </div>
+              )}
+              {testState === "testing" && (
+                <div
+                  className="flex items-center bg-surface"
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid var(--con-line)",
+                    borderRadius: 8,
+                    gap: 9,
+                  }}
+                >
+                  <span
+                    className="animate-spin"
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: "1.5px solid var(--con-brand)",
+                      borderRightColor: "transparent",
+                    }}
+                  />
+                  <span
+                    className="text-ink-2"
+                    style={{ fontSize: 12.5, fontWeight: 500 }}
+                  >
+                    Testing connection…
+                  </span>
+                </div>
+              )}
               {testState === "ok" && (
                 <div
                   className="flex items-center bg-ok-soft"
                   style={{
-                    marginTop: 14,
                     padding: "10px 12px",
                     border: "1px solid #86EFAC",
                     borderRadius: 8,
                     gap: 9,
                   }}
                 >
-                  <Check size={14} className="text-ok" />
+                  <Check size={14} className="text-ok" style={{ flexShrink: 0 }} />
                   <span
                     className="text-ok"
                     style={{ fontSize: 12.5, fontWeight: 500 }}
                   >
-                    Connection ready · 12 schemas discovered
+                    {testResult?.message || "Connection succeeded."}
                   </span>
-                  <button
-                    type="button"
-                    className="bg-transparent border-0 text-ok"
-                    style={{
-                      marginLeft: "auto",
-                      fontSize: 11.5,
-                      cursor: "pointer",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Browse schemas →
-                  </button>
                 </div>
               )}
               {testState === "fail" && (
+                <div
+                  className="flex items-start bg-err-soft"
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid #FCA5A5",
+                    borderRadius: 8,
+                    gap: 9,
+                  }}
+                >
+                  <AlertTriangle
+                    size={14}
+                    className="text-err"
+                    style={{ marginTop: 1, flexShrink: 0 }}
+                  />
+                  <div className="flex-1">
+                    <div
+                      className="text-err"
+                      style={{ fontSize: 12.5, fontWeight: 500 }}
+                    >
+                      Connection test failed
+                    </div>
+                    <div
+                      className="font-mono text-err"
+                      style={{
+                        fontSize: 11,
+                        marginTop: 3,
+                        opacity: 0.85,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {testResult?.message || "The connector could not be reached."}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {saveError && (
                 <div
                   className="flex items-start bg-err-soft"
                   style={{
@@ -890,25 +1055,13 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
                   <AlertTriangle
                     size={14}
                     className="text-err"
-                    style={{ marginTop: 1 }}
+                    style={{ marginTop: 1, flexShrink: 0 }}
                   />
-                  <div className="flex-1">
-                    <div
-                      className="text-err"
-                      style={{ fontSize: 12.5, fontWeight: 500 }}
-                    >
-                      Permission check failed
-                    </div>
-                    <div
-                      className="font-mono text-err"
-                      style={{
-                        fontSize: 11,
-                        marginTop: 3,
-                        opacity: 0.85,
-                      }}
-                    >
-                      ERROR 42501: permission denied for schema warehouse
-                    </div>
+                  <div
+                    className="text-err"
+                    style={{ fontSize: 12.5, fontWeight: 500 }}
+                  >
+                    {saveError}
                   </div>
                 </div>
               )}
@@ -941,10 +1094,8 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
               <Button
                 variant="outline"
                 size="md"
-                onClick={() => {
-                  setStep(2);
-                  runTest();
-                }}
+                disabled={!canSubmit}
+                onClick={() => setStep(2)}
               >
                 Skip test
               </Button>
@@ -953,26 +1104,34 @@ function ConnectModal({ open, modal, onClose }: ConnectModalProps) {
               <Button
                 variant="primary"
                 size="md"
+                disabled={!canSubmit}
                 onClick={() => {
                   setStep(2);
-                  runTest();
+                  void runTest();
                 }}
               >
                 <Play size={11} /> Test connection
               </Button>
             )}
-            {step === 2 && testState !== "ok" && (
+            {step === 2 && (
               <Button
                 variant="outline"
                 size="md"
-                onClick={runTest}
+                disabled={!canSubmit || saving}
+                onClick={() => void runTest()}
                 loading={testState === "testing"}
               >
                 <RefreshCw size={12} /> Re-test
               </Button>
             )}
-            {step === 2 && testState === "ok" && (
-              <Button variant="primary" size="md" onClick={onClose}>
+            {step === 2 && (
+              <Button
+                variant="primary"
+                size="md"
+                disabled={!canSubmit || saving}
+                loading={saving}
+                onClick={() => void saveConnection()}
+              >
                 <Check size={11} /> Save connection
               </Button>
             )}
