@@ -333,7 +333,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose, collapsed = false, 
 
       {/* Nav */}
       <nav aria-label="Primary" className={cn("flex-1 overflow-y-auto pb-3", compact && "pt-2")}>
-        <NavGroup items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
+        <NavGroup label="Platform" items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
         <NavGroup label="Resources" items={RESOURCES} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
         {adminItems.length > 0 && (
           <NavGroup label="System" items={adminItems} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
