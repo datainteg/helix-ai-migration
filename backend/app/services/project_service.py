@@ -44,10 +44,13 @@ def _project_to_response(project: Project) -> ProjectResponse:
 
 
 def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate) -> ProjectResponse:
+    # Explicit owner from the form wins; otherwise the creator owns it.
+    resolved_owner = data.owner_id or owner_id
     project = Project(
-        organization_id=org_id, owner_id=owner_id, name=data.name,
+        organization_id=org_id, owner_id=resolved_owner, name=data.name,
         description=data.description, risk_level=data.risk_level,
         migration_type=data.migration_type, environment=data.environment,
+        status=data.status or "draft",
     )
     db.add(project)
     db.flush()  # get project.id for the connection rows
@@ -68,6 +71,31 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     db.commit()
     db.refresh(project)
     return _project_to_response(project)
+
+
+def force_delete_project(db: Session, project_id: str) -> None:
+    """ADMIN hard delete: permanently remove a project and ALL child rows
+    (FK-ordered). Irreversible. Callers must authorize (admin-only)."""
+    from sqlalchemy import text
+    # children of workflow_runs / recon_runs / validation_runs first
+    db.execute(text("delete from workflow_steps where workflow_run_id in (select id from workflow_runs where project_id=:p)"), {"p": project_id})
+    db.execute(text("delete from recon_results where run_id in (select id from recon_runs where project_id=:p)"), {"p": project_id})
+    db.execute(text("delete from validation_results where run_id in (select id from validation_runs where project_id=:p)"), {"p": project_id})
+    # column → table → schema metadata tree
+    db.execute(text("delete from columns where table_id in (select t.id from tables t join schemas s on t.schema_id=s.id where s.project_id=:p)"), {"p": project_id})
+    db.execute(text("delete from tables where schema_id in (select id from schemas where project_id=:p)"), {"p": project_id})
+    for t in (
+        "workflow_runs", "recon_runs", "validation_runs", "validation_rules",
+        "schemas", "source_schema_snapshots", "source_connections",
+        "target_connections", "migration_requirements", "subprojects",
+    ):
+        try:
+            db.execute(text(f"delete from {t} where project_id=:p"), {"p": project_id})
+        except Exception:
+            db.rollback()  # table may not exist in this deployment; continue
+            raise
+    db.execute(text("delete from projects where id=:p"), {"p": project_id})
+    db.commit()
 
 
 def list_projects(db: Session, org_id: str, include_archived: bool = False) -> list[ProjectResponse]:

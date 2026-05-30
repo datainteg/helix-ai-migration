@@ -20,6 +20,7 @@ import {
   listMigrationTemplates,
   type TemplateSummary,
 } from "@/lib/migration-templates/api";
+import { fetchProjectMembers, type OrgMember } from "@/lib/projects/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -48,15 +49,19 @@ export default function NewProjectPage() {
   const [sourceSystem, setSourceSystem] = useState("");
   const [targetSystem, setTargetSystem] = useState("");
   const [environment, setEnvironment] = useState("dev");
+  const [ownerId, setOwnerId] = useState("");   // "" = me (creator)
+  const [status, setStatus] = useState("draft");
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [members, setMembers] = useState<OrgMember[]>([]);
 
   useEffect(() => {
     if (!token) return;
     listMigrationTemplates(token).then(setTemplates).catch(() => setTemplates([]));
+    fetchProjectMembers().then(setMembers).catch(() => setMembers([]));
   }, [token]);
 
   const handleTemplate = async (tplId: string) => {
@@ -105,6 +110,8 @@ export default function NewProjectPage() {
           source_system: sourceSystem || undefined,
           target_system: targetSystem || undefined,
           environment,
+          owner_id: ownerId || undefined,
+          status,
         }),
       });
       if (!res.ok) {
@@ -280,6 +287,34 @@ export default function NewProjectPage() {
               <Chip tone="brand" dot>Tip</Chip>{" "}
               Production runs require a second-signer approval gate before any
               destructive write.
+            </div>
+          </Card>
+
+          <Card title="Ownership & status" description="Assign the project owner and its initial status.">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Owner">
+                <select
+                  value={ownerId}
+                  onChange={(e) => setOwnerId(e.target.value)}
+                  className="w-full h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring"
+                >
+                  <option value="">Me (creator)</option>
+                  {members.map((m) => (
+                    <option key={m.user_id} value={m.user_id}>{m.name || m.email}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Initial status">
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className="w-full h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring"
+                >
+                  {["draft", "running", "awaiting", "completed", "failed", "archived"].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </Field>
             </div>
           </Card>
 

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import resolve_active_org_id
+from app.auth.dependencies import resolve_active_org_id, require_permission, user_has_role
 from app.schemas.project import (
     ProjectCreate, ProjectResponse,
     SubProjectCreate, SubProjectResponse,
@@ -48,7 +49,7 @@ def _org_id(user_id: str, db: Session) -> str:
 # ── Projects ──
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
-def api_create_project(request: Request, data: ProjectCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def api_create_project(request: Request, data: ProjectCreate, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     org_id = _org_id(user_id, db)
     result = create_project(db, org_id, user_id, data)
     write_audit(db, org_id=org_id, actor_id=user_id, action="project_created", entity_type="project", entity_id=result.id, request=request)
@@ -157,13 +158,28 @@ def api_projects_summary(
     return out
 
 
+@router.get("/projects/members")
+def api_project_members(user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
+    """Active org members for the project owner picker (project:write — so PMs
+    can assign owners, not just admins)."""
+    from app.models.identity import OrganizationMember, User
+    org_id = _org_id(user_id, db)
+    rows = (
+        db.query(User.id, User.name, User.email)
+        .join(OrganizationMember, OrganizationMember.user_id == User.id)
+        .filter(OrganizationMember.organization_id == org_id, OrganizationMember.status == "active")
+        .all()
+    )
+    return [{"user_id": uid, "name": name, "email": email} for uid, name, email in rows]
+
+
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def api_get_project(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return get_project(db, _org_id(user_id, db), project_id)
 
 
 @router.patch("/projects/{project_id}/archive", response_model=ProjectResponse)
-def api_archive_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def api_archive_project(project_id: str, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     from app.services.project_service import ensure_project_access
     from app.models.project import Project
     org_id = _org_id(user_id, db)
@@ -177,7 +193,7 @@ def api_archive_project(project_id: str, request: Request, user_id: str = Depend
 
 
 @router.patch("/projects/{project_id}/restore", response_model=ProjectResponse)
-def api_restore_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def api_restore_project(project_id: str, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     from app.services.project_service import ensure_project_access
     from app.models.project import Project
     org_id = _org_id(user_id, db)
@@ -190,8 +206,42 @@ def api_restore_project(project_id: str, request: Request, user_id: str = Depend
     return p
 
 
+class ProjectUpdate(BaseModel):
+    owner_id: str | None = None
+    status: str | None = None
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+def api_update_project(project_id: str, data: ProjectUpdate, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
+    """Update a project's owner and/or status (project:write)."""
+    from app.services.project_service import ensure_project_access, _project_to_response
+    from app.models.project import Project
+    from app.models.identity import OrganizationMember
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if data.owner_id is not None:
+        # Owner must be an active member of this org.
+        m = (
+            db.query(OrganizationMember)
+            .filter(OrganizationMember.organization_id == org_id, OrganizationMember.user_id == data.owner_id, OrganizationMember.status == "active")
+            .first()
+        )
+        if not m:
+            raise HTTPException(status_code=400, detail="Owner must be an active member of this organization")
+        p.owner_id = data.owner_id
+    if data.status is not None:
+        if data.status not in ("draft", "running", "awaiting", "completed", "failed", "archived"):
+            raise HTTPException(status_code=400, detail="Invalid status")
+        p.status = data.status
+    db.commit()
+    db.refresh(p)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_updated", entity_type="project", entity_id=project_id, meta=data.model_dump(exclude_none=True), request=request)
+    return _project_to_response(p)
+
+
 @router.delete("/projects/{project_id}", status_code=204)
-def api_delete_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def api_delete_project(project_id: str, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     """Soft-delete: sets status to 'deleted'. Data retained for audit trail."""
     from app.services.project_service import ensure_project_access
     from app.models.project import Project
@@ -201,6 +251,20 @@ def api_delete_project(project_id: str, request: Request, user_id: str = Depends
     p.status = "deleted"
     db.commit()
     write_audit(db, org_id=org_id, actor_id=user_id, action="project_deleted", entity_type="project", entity_id=project_id, request=request)
+
+
+@router.delete("/projects/{project_id}/force", status_code=204)
+def api_force_delete_project(project_id: str, request: Request, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """ADMIN-ONLY hard delete: permanently removes the project and all of its
+    child data (runs, steps, recon, validation, connections, schema, etc.).
+    Irreversible — distinct from the soft-delete above."""
+    if not user_has_role(db, user_id, {"super_admin", "admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can force-delete a project")
+    from app.services.project_service import ensure_project_access, force_delete_project
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    force_delete_project(db, project_id)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="project_force_deleted", entity_type="project", entity_id=project_id, request=request)
 
 
 # ── SubProjects ──

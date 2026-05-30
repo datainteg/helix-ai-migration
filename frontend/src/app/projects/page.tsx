@@ -8,13 +8,14 @@
  * surfaced as em-dashes — replace as the backend grows.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Download,
   Plus,
   ArrowUpRight,
   ArrowRight,
+  MoreHorizontal,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -29,10 +30,13 @@ import {
   SkeletonTable,
   StatusBadge,
   Tabs,
+  ConfirmModal,
+  ErrorBanner,
 } from "@/components/ui";
 import { AppIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
 import { formatRelative as formatRelativeUtil } from "@/lib/utils";
+import { archiveProject, deleteProject, forceDeleteProject } from "@/lib/projects/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -67,13 +71,20 @@ const PAGE_SIZE = 50;
 type Filter = "all" | "running" | "awaiting" | "completed" | "failed" | "draft";
 
 export default function ProjectsPage() {
-  const { token } = useAuth();
+  const { token, can, role, isSuperAdmin } = useAuth();
+  const canWrite = can("project:write");
+  const isAdmin = isSuperAdmin || role === "admin";
   const [projects, setProjects] = useState<APIProject[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  const [confirmForce, setConfirmForce] = useState<APIProject | null>(null);
+  const [actionErr, setActionErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = () => setReloadKey((k) => k + 1);
 
   useEffect(() => {
     setLoading(true);
@@ -97,7 +108,7 @@ export default function ProjectsPage() {
       })
       .catch(() => { setProjects([]); setTotal(0); })
       .finally(() => setLoading(false));
-  }, [token, offset]);
+  }, [token, offset, reloadKey]);
 
   const counts = {
     all: projects.length,
@@ -143,6 +154,7 @@ export default function ProjectsPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {actionErr && <ErrorBanner message={actionErr} onDismiss={() => setActionErr("")} />}
         {/* Summary cells */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-y lg:divide-y-0 lg:divide-x divide-[var(--con-line)] overflow-hidden">
           <MetricCell label="TOTAL"     value={counts.all}       hint="All time" />
@@ -300,13 +312,25 @@ export default function ProjectsPage() {
                           <StatusBadge status={p.status} />
                         </td>
                         <td className="px-3 py-3">
-                          <Link
-                            href={`/projects/${p.id}`}
-                            aria-label={`Open ${p.name}`}
-                            className="inline-flex items-center justify-center h-9 w-9 -my-2 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring"
-                          >
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </Link>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Link
+                              href={`/projects/${p.id}`}
+                              aria-label={`Open ${p.name}`}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring"
+                            >
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </Link>
+                            {(canWrite || isAdmin) && (
+                              <RowActions
+                                project={p}
+                                canWrite={canWrite}
+                                isAdmin={isAdmin}
+                                onArchive={async () => { setActionErr(""); try { await archiveProject(p.id); refetch(); } catch (e) { setActionErr(e instanceof Error ? e.message : "Archive failed"); } }}
+                                onSoftDelete={async () => { setActionErr(""); try { await deleteProject(p.id); refetch(); } catch (e) { setActionErr(e instanceof Error ? e.message : "Delete failed"); } }}
+                                onForceDelete={() => setConfirmForce(p)}
+                              />
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -330,7 +354,65 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={confirmForce !== null}
+        onClose={() => setConfirmForce(null)}
+        onConfirm={async () => {
+          if (!confirmForce) return;
+          setBusy(true); setActionErr("");
+          try { await forceDeleteProject(confirmForce.id); setConfirmForce(null); refetch(); }
+          catch (e) { setActionErr(e instanceof Error ? e.message : "Force delete failed"); }
+          finally { setBusy(false); }
+        }}
+        title={`Permanently delete "${confirmForce?.name}"?`}
+        description="Admin force-delete removes the project and ALL its data — runs, steps, reconciliation, validation, connections, and schema. This cannot be undone."
+        destructive
+        busy={busy}
+        confirmLabel="Force delete"
+      />
     </AppShell>
+  );
+}
+
+function RowActions({ project, canWrite, isAdmin, onArchive, onSoftDelete, onForceDelete }: {
+  project: APIProject;
+  canWrite: boolean;
+  isAdmin: boolean;
+  onArchive: () => void;
+  onSoftDelete: () => void;
+  onForceDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" aria-label="Project actions" onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring">
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hx bg-surface shadow-lg py-1 text-[12.5px]">
+          {canWrite && project.status !== "archived" && (
+            <button type="button" onClick={() => { setOpen(false); onArchive(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Archive</button>
+          )}
+          {canWrite && (
+            <button type="button" onClick={() => { setOpen(false); onSoftDelete(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Delete (soft)</button>
+          )}
+          {isAdmin && (
+            <button type="button" onClick={() => { setOpen(false); onForceDelete(); }} className="w-full text-left px-3 py-1.5 text-[var(--con-err)] hover:bg-app-2 border-t border-hx mt-0.5 pt-2">
+              Force delete
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

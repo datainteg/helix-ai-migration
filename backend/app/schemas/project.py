@@ -15,6 +15,9 @@ class ProjectCreate(BaseModel):
     source_system: Optional[str] = Field(default=None, max_length=100)
     target_system: Optional[str] = Field(default=None, max_length=100)
     environment: Optional[str] = Field(default=None, max_length=50)
+    # Optional explicit owner (defaults to the creator) + initial status.
+    owner_id: Optional[str] = Field(default=None, max_length=36)
+    status: Optional[str] = Field(default=None, max_length=50)
 
 
 class ProjectResponse(BaseModel):
