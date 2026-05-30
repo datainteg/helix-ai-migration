@@ -19,6 +19,7 @@ const TABS = [
   { label: "Overview", suffix: "" },
   { label: "Requirements", suffix: "/requirements" },
   { label: "Agents", suffix: "/agents" },
+  { label: "Migration", suffix: "/migration" },
   { label: "Source & Target", suffix: "/source-target" },
   { label: "Validation", suffix: "/validation" },
   { label: "Recon", suffix: "/recon" },
