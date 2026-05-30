@@ -23,6 +23,8 @@ import {
   Mail,
   LogOut,
   X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { HelixWordmark } from "./HelixLogo";
 import { Avatar } from "@/components/ui/Avatar";
@@ -66,15 +68,17 @@ const ADMIN: NavItem[] = [
   { label: "Email / SMTP",       href: "/admin/email",          icon: Mail,        perm: "admin:llm:read" },
 ];
 
-function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
+function NavLink({ item, active, onNavigate, collapsed }: { item: NavItem; active: boolean; onNavigate?: () => void; collapsed?: boolean }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
+      title={collapsed ? item.label : undefined}
       className={cn(
-        "group relative flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[12.5px] transition-colors",
+        "group relative flex items-center rounded-md text-[12.5px] transition-colors",
+        collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2 py-1.5",
         active
           ? "bg-app-2 text-ink font-medium"
           : "text-ink-3 hover:bg-[rgba(10,10,10,0.03)] hover:text-ink-2"
@@ -88,15 +92,15 @@ function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean;
           active ? "h-3.5" : "h-0"
         )}
       />
-      <Icon className={cn("h-[15px] w-[15px]", active ? "text-ink" : "text-ink-4")} />
-      <span className="flex-1 truncate">{item.label}</span>
-      {item.live && (
+      <Icon className={cn("h-[15px] w-[15px] flex-shrink-0", active ? "text-ink" : "text-ink-4")} />
+      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+      {!collapsed && item.live && (
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--con-brand)] motion-safe:animate-pulse-dot" />
       )}
-      {item.count !== undefined && (
+      {!collapsed && item.count !== undefined && (
         <span className="font-mono tabular-nums text-[10.5px] text-ink-4">{item.count}</span>
       )}
-      {item.shortcut && !active && (
+      {!collapsed && item.shortcut && !active && (
         <span className="hidden group-hover:inline-block">
           <Kbd>{item.shortcut}</Kbd>
         </span>
@@ -105,14 +109,15 @@ function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean;
   );
 }
 
-function NavGroup({ label, items, isActive, onNavigate }: { label?: string; items: NavItem[]; isActive: (href: string) => boolean; onNavigate?: () => void }) {
+function NavGroup({ label, items, isActive, onNavigate, collapsed }: { label?: string; items: NavItem[]; isActive: (href: string) => boolean; onNavigate?: () => void; collapsed?: boolean }) {
   return (
-    <div className="flex flex-col gap-px px-3.5">
-      {label && (
+    <div className={cn("flex flex-col gap-px", collapsed ? "px-2" : "px-3.5")}>
+      {label && !collapsed && (
         <div className="eyebrow text-[9.5px] px-2 pt-3 pb-1.5">{label}</div>
       )}
+      {label && collapsed && <div className="mx-2 my-2 border-t border-hx" aria-hidden />}
       {items.map((item) => (
-        <NavLink key={item.href} item={item} active={isActive(item.href)} onNavigate={onNavigate} />
+        <NavLink key={item.href} item={item} active={isActive(item.href)} onNavigate={onNavigate} collapsed={collapsed} />
       ))}
     </div>
   );
@@ -237,9 +242,12 @@ interface SidebarProps {
   /** When true, render as mobile drawer (overlay). Ignored on lg+ screens. */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  /** Desktop only: collapse to a slim icon rail. */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
+export function Sidebar({ mobileOpen = false, onMobileClose, collapsed = false, onToggleCollapse }: SidebarProps = {}) {
   const pathname = usePathname() || "";
   const { can } = useAuth();
   // Permission-gated nav: hide links the user can't access (server still
@@ -269,13 +277,27 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
     };
   }, [mobileOpen, onMobileClose]);
 
-  const navContent = (
+  const renderNav = (compact: boolean) => (
     <>
-      {/* Brand */}
-      <div className="px-5 pt-4 pb-3.5 border-b border-hx flex items-center justify-between">
-        <Link href="/dashboard" aria-label="Helix Console home" onClick={onMobileClose}>
-          <HelixWordmark size={22} />
-        </Link>
+      {/* Brand + desktop collapse toggle */}
+      <div className={cn("pt-4 pb-3.5 border-b border-hx flex items-center", compact ? "px-2 justify-center" : "px-5 justify-between")}>
+        {!compact && (
+          <Link href="/dashboard" aria-label="Helix Console home" onClick={onMobileClose}>
+            <HelixWordmark size={22} />
+          </Link>
+        )}
+        {/* Desktop collapse/expand toggle */}
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={compact ? "Expand sidebar" : "Collapse sidebar"}
+            title={compact ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden lg:grid place-items-center h-8 w-8 rounded-md text-ink-4 hover:text-ink hover:bg-app-2 focus-ring"
+          >
+            {compact ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
+        )}
         {/* Mobile-only close button inside drawer */}
         {onMobileClose && (
           <button
@@ -289,26 +311,30 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
         )}
       </div>
 
-      {/* Workspace + search */}
-      <div className="px-3.5 pt-2.5 pb-3 flex flex-col gap-2">
-        <WorkspaceSwitcher />
-        <SearchTrigger />
-      </div>
+      {/* Workspace + search — hidden when collapsed */}
+      {!compact && (
+        <div className="px-3.5 pt-2.5 pb-3 flex flex-col gap-2">
+          <WorkspaceSwitcher />
+          <SearchTrigger />
+        </div>
+      )}
 
       {/* Nav */}
-      <nav aria-label="Primary" className="flex-1 overflow-y-auto pb-3">
-        <NavGroup items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} />
-        <NavGroup label="Resources" items={RESOURCES} isActive={isActive} onNavigate={onMobileClose} />
+      <nav aria-label="Primary" className={cn("flex-1 overflow-y-auto pb-3", compact && "pt-2")}>
+        <NavGroup items={PRIMARY} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
+        <NavGroup label="Resources" items={RESOURCES} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
         {adminItems.length > 0 && (
-          <NavGroup label="System" items={adminItems} isActive={isActive} onNavigate={onMobileClose} />
+          <NavGroup label="System" items={adminItems} isActive={isActive} onNavigate={onMobileClose} collapsed={compact} />
         )}
       </nav>
 
-      {/* Status + user */}
-      <div className="px-3.5 pt-2 pb-3 border-t border-hx bg-surface-hi">
-        <SystemStatus />
-        <UserFooter />
-      </div>
+      {/* Status + user — hidden when collapsed (footer would overflow the rail) */}
+      {!compact && (
+        <div className="px-3.5 pt-2 pb-3 border-t border-hx bg-surface-hi">
+          <SystemStatus />
+          <UserFooter />
+        </div>
+      )}
     </>
   );
 
@@ -317,9 +343,12 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
       {/* Desktop sticky sidebar */}
       <aside
         aria-label="Primary navigation"
-        className="hidden lg:flex w-[232px] flex-shrink-0 flex-col h-screen sticky top-0 bg-surface-hi border-r border-hx"
+        className={cn(
+          "hidden lg:flex flex-shrink-0 flex-col h-screen sticky top-0 bg-surface-hi border-r border-hx transition-[width] duration-200",
+          collapsed ? "w-[64px]" : "w-[232px]"
+        )}
       >
-        {navContent}
+        {renderNav(collapsed)}
       </aside>
 
       {/* Mobile drawer overlay */}
@@ -338,7 +367,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
             aria-label="Primary navigation"
             className="relative w-[280px] max-w-[85vw] h-full flex flex-col bg-surface-hi border-r border-hx shadow-lg"
           >
-            {navContent}
+            {renderNav(false)}
           </aside>
         </div>
       )}

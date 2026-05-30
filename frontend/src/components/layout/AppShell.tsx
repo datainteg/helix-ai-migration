@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { PageHero } from "./PageHero";
@@ -39,8 +39,25 @@ export function AppShell({
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // Desktop sidebar collapse — slim icon rail when collapsed. Persisted so the
+  // choice sticks across navigation/reloads.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try { setCollapsed(localStorage.getItem("hx-sidebar-collapsed") === "1"); } catch { /* ignore */ }
+  }, []);
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem("hx-sidebar-collapsed", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[232px_1fr] min-h-screen bg-app text-ink">
+    <div className={cn(
+      "grid grid-cols-1 min-h-screen bg-app text-ink transition-[grid-template-columns] duration-200",
+      collapsed ? "lg:grid-cols-[64px_1fr]" : "lg:grid-cols-[232px_1fr]"
+    )}>
       {/* Skip-to-main link — first focusable element on every page.
           Hidden until focused, then visible at top-left. */}
       <a
@@ -50,8 +67,13 @@ export function AppShell({
         Skip to main content
       </a>
 
-      {/* Sidebar — desktop sticky, mobile drawer */}
-      <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+      {/* Sidebar — desktop sticky (collapsible), mobile drawer */}
+      <Sidebar
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
+      />
 
       <div className="flex flex-col min-w-0">
         <Topbar
