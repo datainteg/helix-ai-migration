@@ -20,14 +20,19 @@ export default function SystemHealthPage() {
   const { token } = useAuth();
   const [components, setComponents] = useState<ComponentStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
-    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data?.components) setComponents(data.components); })
-      .finally(() => setLoading(false));
-  }, []);
+  const load = async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" });
+      const data = res.ok ? await res.json() : null;
+      if (data?.components) setComponents(data.components);
+    } catch { /* ignore */ }
+    finally { setLoading(false); setRefreshing(false); }
+  };
+
+  useEffect(() => { void load(); }, []);
 
   const data: ComponentStatus[] = components;
 
@@ -39,7 +44,7 @@ export default function SystemHealthPage() {
       title="System Health"
       page="System Health"
       subtitle="Live status of backend, database, queue, worker, and connector components."
-      actions={<Button variant="outline"><RefreshCcw className="h-4 w-4" /> Refresh</Button>}
+      actions={<Button variant="outline" onClick={() => void load()} loading={refreshing}><RefreshCcw className="h-4 w-4" /> Refresh</Button>}
     >
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <MetricCard label="COMPONENTS" value={data.length} />

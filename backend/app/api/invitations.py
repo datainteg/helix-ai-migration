@@ -23,9 +23,12 @@ router = APIRouter(tags=["invitations"])
 
 
 # Roles a non-super-admin caller is allowed to grant via invitation.
+# Non-admin system roles a member can be invited as. MUST match real role names
+# in auth_service.SYSTEM_ROLES — create_invitation resolves the Role by name, so
+# a name with no matching Role row would orphan the invite on accept.
 # `admin` and `super_admin` are intentionally excluded — promoting someone to
-# admin must go through the super-admin promotion endpoint, not an invite.
-_INVITABLE_ROLES = {"viewer", "editor", "developer", "analyst"}
+# admin must go through role assignment after they join, not an invite.
+_INVITABLE_ROLES = {"viewer", "project_manager", "architect", "data_engineer", "qa_engineer"}
 
 
 class InviteRequest(BaseModel):
