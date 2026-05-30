@@ -27,6 +27,7 @@ from app.api.webhooks import router as webhooks_router
 from app.api.usage import router as usage_router
 from app.api.notifications import router as notifications_router
 from app.api.email_settings import router as email_settings_router
+from app.api.admin_rbac import router as admin_rbac_router
 from app.api.superadmin import router as superadmin_router
 from app.api.users import router as users_router
 from app.api.sprints import router as sprints_router
@@ -386,6 +387,7 @@ app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(email_settings_router, prefix="/api/v1")
+app.include_router(admin_rbac_router, prefix="/api/v1")
 app.include_router(superadmin_router, prefix="/api/v1/superadmin")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(sprints_router, prefix="/api/v1")

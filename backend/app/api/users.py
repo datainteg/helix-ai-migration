@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import resolve_active_org_id, require_permission
+from app.auth.dependencies import resolve_active_org_id
 from app.db.session import get_db
 from app.models.identity import User
 from app.schemas.identity import UserPreferencesUpdate, UserProfileUpdate, UserResponse
@@ -115,23 +115,3 @@ def update_my_preferences(
     except Exception:
         pass
     return UserPreferences(preferences=user.preferences)
-
-
-@router.get("/admin/roles")
-def list_rbac(user_id: str = Depends(require_permission("admin:roles:read"))):
-    """Read-only RBAC matrix: the built-in system roles and the permissions
-    each grants. Source of truth is auth_service.SYSTEM_ROLES / _PERMISSIONS;
-    `*` means all permissions (super_admin)."""
-    from app.services.auth_service import SYSTEM_ROLES, SYSTEM_PERMISSIONS
-
-    roles = []
-    for name, perms in SYSTEM_ROLES.items():
-        all_perms = "*" in perms
-        granted = SYSTEM_PERMISSIONS if all_perms else perms
-        roles.append({
-            "role": name,
-            "wildcard": all_perms,
-            "permissions": list(granted),
-            "count": len(SYSTEM_PERMISSIONS) if all_perms else len(perms),
-        })
-    return {"permissions": SYSTEM_PERMISSIONS, "roles": roles}
