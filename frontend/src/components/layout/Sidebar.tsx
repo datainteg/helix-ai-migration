@@ -217,17 +217,23 @@ function SystemStatus() {
   );
 }
 
+// Pretty-print a role code (e.g. "super_admin" -> "Super Admin").
+function roleLabel(r: string | null): string {
+  if (!r) return "Member";
+  return r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function UserFooter() {
-  const { user, logout } = useAuth();
+  const { user, logout, role } = useAuth();
   const name = user?.name || user?.email || "Signed in";
-  const role = user ? "Member" : "Sign in";
+  const roleText = user ? roleLabel(role) : "Sign in";
   return (
     <div className="mt-1 border-t border-hx pt-2">
       <div className="flex items-center gap-2.5 px-1 py-1.5">
         <Avatar name={name} size={26} />
         <div className="flex-1 min-w-0">
           <div className="text-[12px] font-medium text-ink truncate">{name}</div>
-          <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
+          <div className="text-[10.5px] text-ink-4 truncate">{roleText}</div>
         </div>
       </div>
       {user && (
