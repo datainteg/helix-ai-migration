@@ -22,6 +22,8 @@ from typing import Any
 
 from temporalio import activity
 
+from agents.runtime.llm_client import call_llm
+
 logger = logging.getLogger(__name__)
 
 # Cost-bounding caps for source introspection (A2-2). A migration source can
@@ -313,19 +315,266 @@ def schema_analyst_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Bound the prompt size: a source DB can carry hundreds of tables, but the
+# type-mapper only needs enough samples to enumerate distinct source types, so
+# we cap the compact representation at the first N tables and flag truncation.
+_MAX_PROMPT_TABLES = 40
+
+# Cap the ambiguous-mappings list before it lands in WorkflowStep.parsed_output_json
+# (JSONB) so a chatty model can't bloat the row.
+_MAX_AMBIGUOUS = 50
+
+
+def _type_mapper_failure(errors: list[str], summary: str) -> dict[str, Any]:
+    """Standard-shape failure result for the type_mapper node."""
+    return {
+        "agent": "type_mapper",
+        "skill": "migration-map-types",
+        "success": False,
+        "mode": "llm",
+        "errors": errors,
+        "artifact_path": None,
+        "parsed": {
+            "summary": summary,
+            "approval_required": True,
+            "mapping_count": 0,
+            "ambiguous_mappings": [],
+            "truncated": False,
+        },
+    }
+
+
+def _load_latest_source_model(project_id: str) -> dict[str, Any] | None:
+    """Return the parsed payload of the most recent SourceSchemaSnapshot, or None.
+
+    None means either no snapshot row exists or its payload failed to parse —
+    callers treat both as "run SchemaAnalyst first".
+    """
+    from worker.db.session import SessionLocal
+    from app.models.schema_snapshot import SourceSchemaSnapshot
+
+    db = SessionLocal()
+    try:
+        snapshot = (
+            db.query(SourceSchemaSnapshot)
+            .filter(SourceSchemaSnapshot.project_id == project_id)
+            .order_by(SourceSchemaSnapshot.created_at.desc())
+            .first()
+        )
+        if snapshot is None:
+            return None
+        try:
+            model = json.loads(snapshot.payload)
+        except Exception as exc:  # noqa: BLE001 — malformed payload is non-fatal
+            logger.warning("type_mapper: snapshot payload parse failed: %s", exc)
+            return None
+        return model if isinstance(model, dict) else None
+    finally:
+        db.close()
+
+
+def _compact_schema_lines(model: dict[str, Any]) -> tuple[list[str], bool]:
+    """Flatten the source schema model into compact per-table lines.
+
+    Emits one line per table: `schema.table: col1 TYPE [NULL], col2 TYPE, ...`.
+    Caps at `_MAX_PROMPT_TABLES`; returns (lines, truncated).
+    """
+    lines: list[str] = []
+    truncated = bool(model.get("truncated"))
+    emitted = 0
+    total_tables = 0
+
+    for schema in model.get("schemas") or []:
+        schema_name = schema.get("schema") or ""
+        for table in schema.get("tables") or []:
+            total_tables += 1
+            if emitted >= _MAX_PROMPT_TABLES:
+                continue
+            table_name = table.get("table") or ""
+            col_parts: list[str] = []
+            for col in table.get("columns") or []:
+                name = col.get("name") or ""
+                ctype = col.get("type") or "?"
+                # `nullable` is True when the column accepts NULL.
+                null_flag = " [NULL]" if col.get("nullable") else ""
+                col_parts.append(f"{name} {ctype}{null_flag}")
+            lines.append(f"{schema_name}.{table_name}: " + ", ".join(col_parts))
+            emitted += 1
+
+    if total_tables > emitted:
+        truncated = True
+        lines.append(f"... and {total_tables - emitted} more tables omitted")
+
+    return lines, truncated
+
+
+def _write_type_mapping_artifact(
+    project_id: str,
+    summary: str,
+    mappings: list[dict[str, Any]],
+    ambiguous: list[dict[str, Any]],
+    source_connector_type: str | None,
+    target: str,
+) -> str | None:
+    """Write the type-mapping artifact (markdown). Best-effort; None on failure."""
+    try:
+        from agents.runtime.artifact_store import write_artifact
+
+        lines = [
+            "# Type Mapping\n",
+            f"LLM-proposed source→target type mapping ({source_connector_type or '?'} → {target}).\n",
+            "## Summary\n",
+            summary + "\n",
+            "## Mappings\n",
+            "| Source type | Target type | Note |",
+            "| --- | --- | --- |",
+        ]
+        for m in mappings:
+            src = str(m.get("source_type", "")).replace("|", "\\|")
+            tgt = str(m.get("target_type", "")).replace("|", "\\|")
+            note = str(m.get("note", "")).replace("|", "\\|")
+            lines.append(f"| {src} | {tgt} | {note} |")
+        if not mappings:
+            lines.append("| _(none returned)_ | | |")
+
+        lines.append("\n## Ambiguous / needs review\n")
+        if ambiguous:
+            for a in ambiguous:
+                lines.append(
+                    f"- `{a.get('table', '?')}.{a.get('column', '?')}` "
+                    f"({a.get('source_type', '?')} → {a.get('target_type', '?')}): "
+                    f"{a.get('reason', '')}"
+                )
+        else:
+            lines.append("_None flagged._")
+
+        body = "\n".join(lines) + "\n"
+        artifact = write_artifact(
+            project_id=project_id,
+            agent_code="type_mapper",
+            skill="migration-map-types",
+            filename="type-mapping",
+            body=body,
+            frontmatter={
+                "source_connector_type": source_connector_type,
+                "target_connector_type": target,
+                "mapping_count": len(mappings),
+                "ambiguous_count": len(ambiguous),
+                "approval_required": True,
+            },
+            phase="planning",
+        )
+        return str(artifact.path)
+    except Exception as exc:  # noqa: BLE001 — artifact write is best-effort
+        logger.warning("type_mapper: artifact write failed: %s", exc)
+        return None
+
+
 @activity.defn
 def type_mapper_activity(input_data: dict[str, Any]) -> dict[str, Any]:
-    logger.info("migration: type_mapper (echo) for project=%s", input_data.get("project_id"))
-    return _echo(
-        "type_mapper",
-        "migration-map-types",
-        {
-            "summary": "echo: type mapping proposed",
-            "target_connector_type": input_data.get("target_connector_type"),
-            "approval_required": True,
-            "ambiguous_mappings": [],
-        },
+    project_id = input_data.get("project_id")
+    logger.info("migration: type_mapper (llm) for project=%s", project_id)
+
+    # 1. Load the latest source-schema snapshot.
+    model = _load_latest_source_model(project_id)
+    if model is None:
+        return _type_mapper_failure(
+            ["no source schema snapshot found; run SchemaAnalyst first"],
+            "type mapping skipped: no source schema snapshot found",
+        )
+
+    source_connector_type = (
+        model.get("source_connector_type") or input_data.get("source_connector_type")
     )
+    target = input_data.get("target_connector_type") or "postgres"
+
+    # 2. Build a bounded compact representation of the source schema.
+    compact_lines, truncated = _compact_schema_lines(model)
+    compact_text = "\n".join(compact_lines) if compact_lines else "(no tables)"
+
+    # 3. Compose prompts.
+    system_prompt = (
+        "You are a senior database migration engineer. Map source column data "
+        "types to the target database's equivalent types. Be precise about "
+        "precision/scale, identity/sequences, and lossy or ambiguous conversions. "
+        "Respond with STRICT JSON only."
+    )
+    user_prompt = (
+        f"Source: {source_connector_type}. Target: {target}.\n"
+        f"Source schema:\n{compact_text}\n\n"
+        'Return JSON: {"mappings":[{"source_type":"...","target_type":"...","note":"..."}], '
+        '"ambiguous_mappings":[{"table":"...","column":"...","source_type":"...",'
+        '"target_type":"...","reason":"..."}], "summary":"..."}'
+    )
+
+    # 4. Call the LLM, wrapped so Temporal keeps heartbeating during the (possibly
+    #    >60s) blocking provider call.
+    from worker.activities.bmad_node_activities import _run_with_heartbeats
+
+    result = _run_with_heartbeats(
+        lambda: call_llm(
+            "type_mapper",
+            system_prompt,
+            user_prompt,
+            org_id=input_data.get("organization_id"),
+        ),
+        "type_mapper",
+    )
+
+    if result is None:
+        return _type_mapper_failure(
+            ["LLM call failed (provider/key/API error)"],
+            "type mapping failed: LLM call returned no result",
+        )
+
+    # Normalize. The model may return the full JSON schema, or — if it ignored the
+    # instruction — just `{"summary": "<raw text>"}`. Either way we succeed.
+    mappings = result.get("mappings") if isinstance(result, dict) else []
+    if not isinstance(mappings, list):
+        mappings = []
+    ambiguous = result.get("ambiguous_mappings") if isinstance(result, dict) else []
+    if not isinstance(ambiguous, list):
+        ambiguous = []
+    summary = (result.get("summary") if isinstance(result, dict) else None) or (
+        str(result)[:300]
+    )
+
+    # 5. The chain always gates after this node.
+    approval_required = True
+
+    # Cap ambiguous list before it is persisted into JSONB.
+    ambiguous = ambiguous[:_MAX_AMBIGUOUS]
+
+    # 6. Write the type-mapping artifact (best-effort).
+    artifact_path = (
+        _write_type_mapping_artifact(
+            str(project_id),
+            summary,
+            mappings,
+            ambiguous,
+            source_connector_type,
+            target,
+        )
+        if project_id
+        else None
+    )
+
+    # 7. Return the standard result shape.
+    return {
+        "agent": "type_mapper",
+        "skill": "migration-map-types",
+        "success": True,
+        "mode": "llm",
+        "errors": [],
+        "artifact_path": artifact_path,
+        "parsed": {
+            "summary": summary,
+            "approval_required": approval_required,
+            "mapping_count": len(mappings),
+            "ambiguous_mappings": ambiguous,
+            "truncated": truncated,
+        },
+    }
 
 
 @activity.defn
