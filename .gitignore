@@ -5,7 +5,9 @@ __pycache__/
 .venv/
 frontend/.next/
 frontend/node_modules/
-data/
+# Anchored to repo root only — an unanchored `data/` also ignored
+# website/src/data (the site's content), which broke the marketing site.
+/data/
 backend/data/
 .DS_Store
 dist/
