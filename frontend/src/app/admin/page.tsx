@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+"use client";
 
-export const metadata: Metadata = { title: "Admin · Helix" };
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   Users,
   Lock,
@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { AdminShell } from "@/components/layout";
 import { Card, Chip, MetricCard } from "@/components/ui";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Tile {
   href: string;
@@ -39,17 +41,76 @@ const TILES: Tile[] = [
   { href: "/admin/import-export", icon: Upload, label: "Import / Export", desc: "Projects, plans, configurations.", comingSoon: true },
 ];
 
+// Em dash placeholder while loading or when a metric is unavailable (e.g. the
+// caller lacks permission for the endpoint). We never fabricate a number.
+const DASH = "—";
+
 export default function AdminHomePage() {
+  // Real headline metrics — each sourced from a backend endpoint that exists
+  // (confirmed against /openapi.json). null = still loading or unavailable; we
+  // render "—" rather than any placeholder value.
+  const [userCount, setUserCount] = useState<number | null>(null);
+  const [providerCount, setProviderCount] = useState<number | null>(null);
+  const [health, setHealth] = useState<{ status: string; total: number } | null>(null);
+  const [auditCount, setAuditCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    // SC-010: auth via the HttpOnly cookie (credentials:"include").
+
+    // Users — only the superadmin roster endpoint can return a count; a regular
+    // admin gets 403, in which case we leave "—" rather than guess.
+    fetch(`${API_BASE}/api/v1/superadmin/users`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((rows) => { if (Array.isArray(rows)) setUserCount(rows.length); })
+      .catch(() => {});
+
+    // LLM providers — count of configured providers for the active org.
+    fetch(`${API_BASE}/api/v1/llm-providers`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((rows) => { if (Array.isArray(rows)) setProviderCount(rows.length); })
+      .catch(() => {});
+
+    // System health — overall status + number of components reporting.
+    fetch(`${API_BASE}/api/v1/system/health`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => {
+        if (d?.status) setHealth({ status: String(d.status), total: Array.isArray(d.components) ? d.components.length : 0 });
+      })
+      .catch(() => {});
+
+    // Audit — count of the most recent events (no per-day aggregation endpoint
+    // exists, so we report the recent-event count honestly rather than a rate).
+    fetch(`${API_BASE}/api/v1/audit-logs?limit=500`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((rows) => { if (Array.isArray(rows)) setAuditCount(rows.length); })
+      .catch(() => {});
+  }, []);
+
+  const healthValue = health ? (health.status === "ok" ? "OK" : health.status.replace(/\b\w/g, (c) => c.toUpperCase())) : DASH;
+
   return (
     <AdminShell
       title="Admin"
       subtitle="Platform configuration, security, governance, and observability."
     >
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <MetricCard label="USERS" value="24" delta={4} spark={[20, 22, 22, 23, 24]} />
-        <MetricCard label="LLM PROVIDERS" value="7" deltaLabel="active" />
-        <MetricCard label="SYSTEM HEALTH" value="OK" deltaLabel="all components" />
-        <MetricCard label="AUDIT EVENTS / DAY" value="1.2K" delta={3.4} spark={[900, 1000, 1100, 1150, 1200]} />
+        <MetricCard label="USERS" value={userCount ?? DASH} />
+        <MetricCard
+          label="LLM PROVIDERS"
+          value={providerCount ?? DASH}
+          deltaLabel={providerCount !== null ? "configured" : undefined}
+        />
+        <MetricCard
+          label="SYSTEM HEALTH"
+          value={healthValue}
+          accent={health && health.status !== "ok" ? "var(--con-err)" : undefined}
+          deltaLabel={health && health.total > 0 ? `${health.total} components` : undefined}
+        />
+        <MetricCard
+          label="RECENT AUDIT EVENTS"
+          value={auditCount ?? DASH}
+          deltaLabel={auditCount !== null ? "latest" : undefined}
+        />
       </div>
 
       <Card title="Quick access" description="Most-used administration surfaces.">

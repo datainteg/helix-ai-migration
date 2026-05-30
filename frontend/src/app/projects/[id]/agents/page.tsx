@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Play, Save } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
-import { Card, Button, StatusBadge, Avatar, Chip, DemoBanner, LoadingState } from "@/components/ui";
+import { Card, Button, StatusBadge, Avatar, Chip, EmptyState, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import {
   listProjectWorkflowRuns,
@@ -14,18 +14,6 @@ import {
   type WorkflowDetail,
   type WorkflowStep,
 } from "@/lib/workflows/api";
-
-const DEMO_FLOW = [
-  { id: "intake", label: "Requirement Intake", phase: "Input", color: "indigo" as const, status: "completed" },
-  { id: "ba", label: "BA Agent", phase: "Analysis", color: "indigo" as const, status: "completed" },
-  { id: "arch", label: "Architect Agent", phase: "Design", color: "violet" as const, status: "running" },
-  { id: "approval", label: "Human Approval", phase: "Gate", color: "amber" as const, status: "queued" },
-  { id: "de", label: "Data Engineer", phase: "Build", color: "cyan" as const, status: "pending" },
-  { id: "qa", label: "QA Agent", phase: "Validate", color: "green" as const, status: "pending" },
-  { id: "recon", label: "Recon Agent", phase: "Reconcile", color: "indigo" as const, status: "pending" },
-  { id: "devops", label: "DevOps Agent", phase: "Deploy", color: "violet" as const, status: "pending" },
-  { id: "final", label: "PM · Final", phase: "Sign-off", color: "default" as const, status: "pending" },
-];
 
 const AGENT_PHASE: Record<string, { label: string; color: "indigo" | "violet" | "cyan" | "amber" | "green" | "default" }> = {
   project_context: { label: "Setup", color: "default" },
@@ -114,8 +102,8 @@ export default function ProjectAgentsPage() {
           status: s.status,
         };
       })
-    : DEMO_FLOW;
-  const usingReal = (runs?.length ?? 0) > 0 && active !== null;
+    : [];
+  const hasRuns = (runs?.length ?? 0) > 0;
 
   return (
     <ProjectShell
@@ -132,20 +120,24 @@ export default function ProjectAgentsPage() {
         <LoadingState label="Loading workflow runs…" />
       ) : (
         <>
-          {!usingReal && (
-            <div className="mb-4">
-              <DemoBanner message="No workflow runs for this project yet. The flow below is a static preview; Start Workflow above will replace it with real per-agent state." />
-            </div>
-          )}
           <div className="grid grid-cols-12 gap-4">
             <Card className="col-span-12 lg:col-span-8" title="Workflow Canvas">
-              <div className="space-y-3">
-                {flow.map((n) => (
-                  <div key={n.id} className="flex items-center gap-3">
-                    <FlowNode {...n} />
-                  </div>
-                ))}
-              </div>
+              {flow.length > 0 ? (
+                <div className="space-y-3">
+                  {flow.map((n) => (
+                    <div key={n.id} className="flex items-center gap-3">
+                      <FlowNode {...n} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No agent runs yet"
+                  description={hasRuns
+                    ? "This workflow has no recorded steps yet."
+                    : "Run a workflow to see per-agent execution state here."}
+                />
+              )}
             </Card>
             <div className="col-span-12 lg:col-span-4 space-y-4">
               <Card title="Workflow Details">
