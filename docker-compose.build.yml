@@ -28,7 +28,12 @@ services:
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_API_URL is baked into the JS bundle at build time.
-        # Set via env var before building for production, e.g.:
+        # Default is EMPTY -> API_BASE becomes "" -> the browser calls the API
+        # relative (same-origin), proxied to the backend by next.config.mjs.
+        # This works in any browser and is the right default behind the proxy.
+        # Override with an absolute URL only for a split-host deploy, e.g.:
         #   NEXT_PUBLIC_API_URL=https://helix.example.com docker compose \
         #     -f docker-compose.yml -f docker-compose.build.yml build frontend
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        # NOTE: `:-` (not bare `-`) so an EMPTY .env value also yields ""
+        # rather than falling back to a default.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
