@@ -19,6 +19,7 @@ import {
   Settings,
   Search,
   DollarSign,
+  LogOut,
   X,
 } from "lucide-react";
 import { HelixWordmark } from "./HelixLogo";
@@ -200,7 +201,7 @@ function SystemStatus() {
 }
 
 function UserFooter() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const name = user?.name || user?.email || "Signed in";
   const role = user ? "Member" : "Sign in";
   return (
@@ -210,7 +211,17 @@ function UserFooter() {
         <div className="text-[12px] font-medium text-ink truncate">{name}</div>
         <div className="text-[10.5px] text-ink-4 truncate">{role}</div>
       </div>
-      {/* UI-030 — no user menu wired yet; omit the ChevronDown that implies one. */}
+      {user && (
+        <button
+          type="button"
+          onClick={logout}
+          aria-label="Sign out"
+          title="Sign out"
+          className="p-1.5 rounded-md text-ink-4 hover:text-ink hover:bg-surface-hi focus-ring"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
