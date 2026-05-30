@@ -122,6 +122,30 @@ def user_login(request: Request, response: Response, data: UserLogin, db: Sessio
     return result
 
 
+@router.post("/auth/demo-login", response_model=TokenResponse)
+@limiter.limit("10/minute")
+def demo_login(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Log in as the read-only demo user (no password) for the seeded demo org.
+
+    Gated by the ALLOW_DEMO_LOGIN env flag so production deploys can disable it.
+    Mints the SAME HttpOnly cookie as a normal login; the session is scoped to
+    the demo org by the usual org-membership resolution, so it can only see the
+    demo data and real orgs never see it.
+    """
+    if not settings.ALLOW_DEMO_LOGIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Demo login is disabled")
+    from app.services.demo_org import ensure_demo_org
+
+    org, user = ensure_demo_org(db)
+    # `is_demo` claim → the read-only-demo middleware (main.py) 403s any
+    # mutating request carrying this token, so the shared demo data is safe.
+    token = create_access_token(str(user.id), extra_claims={"is_demo": True})
+    _set_auth_cookie(response, request, token)
+    write_audit(db, org_id=org.id, actor_id=str(user.id), action="demo_login",
+                entity_type="user", entity_id=str(user.id), request=request)
+    return {"access_token": token, "token_type": "bearer", "user_id": str(user.id)}
+
+
 @router.get("/auth/me", response_model=UserResponse)
 def current_user(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return get_current_user(db, user_id)

@@ -37,3 +37,6 @@ services:
         # NOTE: `:-` (not bare `-`) so an EMPTY .env value also yields ""
         # rather than falling back to a default.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        # Shows the "Login with Demo User" button when "true". Pair with
+        # ALLOW_DEMO_LOGIN=true on the backend. Baked at build time.
+        NEXT_PUBLIC_DEMO_ENABLED: ${NEXT_PUBLIC_DEMO_ENABLED:-}

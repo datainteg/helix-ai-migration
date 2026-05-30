@@ -199,6 +199,45 @@ async def enforce_body_size(request: Request, call_next):
     return await call_next(request)
 
 
+# Paths a demo session may still POST to (auth lifecycle only).
+_DEMO_WRITE_ALLOWLIST = {
+    "/api/v1/auth/logout",
+    "/api/v1/auth/demo-login",
+    "/api/v1/auth/sse-ticket",
+}
+
+
+@app.middleware("http")
+async def enforce_demo_readonly(request: Request, call_next):
+    """Read-only demo: 403 any mutating request that carries a demo token.
+
+    The "Login with Demo User" token carries an `is_demo` claim. Per-endpoint
+    permission gates are inconsistent, so this is the single guarantee that a
+    shared demo session can never mutate data (which would corrupt the sandbox
+    for other demo users). Real users are unaffected — their tokens lack the
+    claim. Reads (GET/HEAD/OPTIONS) always pass.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path not in _DEMO_WRITE_ALLOWLIST:
+        from app.auth.jwt import AUTH_COOKIE_NAME, decode_access_token
+
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+        if not token:
+            auth = request.headers.get("authorization", "")
+            if auth.lower().startswith("bearer "):
+                token = auth[7:]
+        if token:
+            try:
+                payload = decode_access_token(token)
+            except Exception:  # noqa: BLE001 — invalid token; let the route's auth handle it
+                payload = None
+            if payload and payload.get("is_demo"):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Read-only demo session — sign in with a real account to make changes."},
+                )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def guard_metrics_endpoint(request: Request, call_next):
     """SC-056: require a static bearer on the backend `/metrics` route when

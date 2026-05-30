@@ -14,6 +14,9 @@ interface AuthState {
   token: string | null;
   user: { email: string; name: string } | null;
   login: (email: string, password: string) => Promise<void>;
+  /** Log in as the read-only demo user (no credentials). Backend-gated by
+   * ALLOW_DEMO_LOGIN; the button is gated by NEXT_PUBLIC_DEMO_ENABLED. */
+  demoLogin: () => Promise<void>;
   setupFirstAdmin: (data: FirstAdminData) => Promise<void>;
   /** Re-sync the user from the server after an out-of-band auth step (e.g. the
    * multi-step setup wizard). The cookie is already set by the backend; this
@@ -83,6 +86,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/dashboard");
   };
 
+  const demoLogin = async () => {
+    const res = await fetch(`${API_BASE}/api/v1/auth/demo-login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Demo login is unavailable");
+    }
+    const ok = await refreshUser();
+    if (!ok) setUser({ email: "demo@helix.local", name: "Demo User" });
+    router.push("/dashboard");
+  };
+
   const setupFirstAdmin = async (formData: FirstAdminData) => {
     const res = await fetch(`${API_BASE}/api/v1/auth/first-admin`, {
       method: "POST",
@@ -129,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const token = user ? "cookie-session" : null;
 
   return (
-    <AuthContext.Provider value={{ token, user, login: loginFn, setupFirstAdmin, setSession, logout, loading }}>
+    <AuthContext.Provider value={{ token, user, login: loginFn, demoLogin, setupFirstAdmin, setSession, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

@@ -12,6 +12,9 @@ class Organization(BaseModel):
     name = Column(String(255), nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
     status = Column(String(50), default="active", nullable=False)
+    # Marks the seeded demo organization behind "Login with Demo User". Demo
+    # users are scoped (like any org) to this org only; real orgs never see it.
+    is_demo = Column(Boolean, default=False, nullable=False, server_default="false")
 
     members = relationship("OrganizationMember", back_populates="organization")
     projects = relationship("Project", back_populates="organization")

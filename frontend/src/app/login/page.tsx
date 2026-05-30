@@ -7,11 +7,14 @@ import { HelixLogo } from "@/components/layout/HelixLogo";
 import { Button, ErrorBanner } from "@/components/ui";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, demoLogin } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
+  // Baked at build time; the button only renders when the deploy opts in.
+  const demoEnabled = process.env.NEXT_PUBLIC_DEMO_ENABLED === "true";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +26,18 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDemo = async () => {
+    setError("");
+    setDemoLoading(true);
+    try {
+      await demoLogin();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Demo login failed");
+    } finally {
+      setDemoLoading(false);
     }
   };
 
@@ -97,6 +112,28 @@ export default function LoginPage() {
               Sign In
             </Button>
           </form>
+
+          {demoEnabled && (
+            <div className="mt-4">
+              <div className="flex items-center gap-3 my-4">
+                <div className="h-px flex-1 bg-hx" />
+                <span className="text-[11px] uppercase tracking-wider text-ink-3">or</span>
+                <div className="h-px flex-1 bg-hx" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                loading={demoLoading}
+                onClick={handleDemo}
+                className="w-full !h-11"
+              >
+                Login with Demo User
+              </Button>
+              <p className="mt-2 text-[11.5px] text-ink-3 text-center">
+                Read-only sandbox with sample data — no account needed.
+              </p>
+            </div>
+          )}
 
           <p className="mt-6 text-[12.5px] text-ink-3 text-center">
             New to Helix?{" "}

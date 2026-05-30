@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Helix Migration"
     APP_ENV: str = "development"
+    # Enables the public POST /auth/demo-login (the "Login with Demo User"
+    # button). Off by default; turn on for demo/sandbox deploys.
+    ALLOW_DEMO_LOGIN: bool = False
     APP_SECRET_KEY: str = _EPHEMERAL_APP_SECRET
 
     BACKEND_HOST: str = "0.0.0.0"
