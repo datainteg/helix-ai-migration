@@ -38,6 +38,7 @@ from app.api.cdc import router as cdc_router
 from app.api.workflow_ops import router as workflow_ops_router
 from app.api.marketplace import router as marketplace_router
 from app.api.knowledge import router as knowledge_router
+from app.api.migrations import router as migrations_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -352,6 +353,7 @@ app.include_router(cdc_router, prefix="/api/v1")
 app.include_router(workflow_ops_router, prefix="/api/v1")
 app.include_router(marketplace_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(migrations_router, prefix="/api/v1")
 
 
 @app.get("/")

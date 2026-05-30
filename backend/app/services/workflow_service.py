@@ -20,7 +20,7 @@ import uuid
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from agents import HelixBMAD, HelixBMADResult
+from agents import HelixBMAD, HelixBMADResult, HelixMigration
 from app.db.session import SessionLocal
 from app.models.workflow import WorkflowRun, WorkflowStep
 
@@ -123,6 +123,55 @@ async def start_bmad_planning_workflow(
     return payload
 
 
+async def start_migration_workflow(
+    project_id: str,
+    requirement_id: str,
+    organization_id: str | None = None,
+    source_connection_id: str | None = None,
+    target_connection_id: str | None = None,
+    source_connector_type: str | None = None,
+    target_connector_type: str | None = None,
+    source_config: dict | None = None,
+    target_config: dict | None = None,
+    in_scope_schemas: list[str] | None = None,
+    requirement_text: str | None = None,
+    db: Session | None = None,
+    correlation_id: str | None = None,
+) -> dict:
+    """Start the DB-migration agent chain via Temporal.
+
+    Unlike BMAD there is no in-process local fallback — the migration nodes run
+    only in the worker. Persists a WorkflowRun(kind="migration") pinned to the
+    worker's stamped run id so step inserts satisfy the FK.
+    """
+    helix = HelixMigration(
+        project_id=project_id,
+        requirement_id=requirement_id,
+        organization_id=organization_id,
+        source_connection_id=source_connection_id,
+        target_connection_id=target_connection_id,
+        source_connector_type=source_connector_type,
+        target_connector_type=target_connector_type,
+        source_config=source_config,
+        target_config=target_config,
+        in_scope_schemas=in_scope_schemas,
+        requirement_text=requirement_text or "",
+        correlation_id=correlation_id,
+    )
+    try:
+        started = await helix.start_temporal()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Migration workflow start failed: %s", exc)
+        raise RuntimeError(
+            "Could not start the migration workflow — the Temporal worker is unavailable."
+        ) from exc
+    logger.info(
+        "Migration workflow started: %s (run_id=%s)", started.workflow_id, started.run_id
+    )
+    _persist_started_workflow(db, started, helix, kind="migration")
+    return started.to_dict()
+
+
 async def get_workflow_status(
     workflow_id: str,
     db: Session | None = None,
@@ -197,7 +246,7 @@ async def get_workflow_status(
 # ── Persistence ──────────────────────────────────────────────────────
 
 
-def _persist_started_workflow(db: Session | None, started: HelixBMADResult, helix: HelixBMAD) -> None:
+def _persist_started_workflow(db: Session | None, started: HelixBMADResult, helix, kind: str = "bmad") -> None:
     own_db = db is None
     if own_db:
         db = SessionLocal()
@@ -212,6 +261,7 @@ def _persist_started_workflow(db: Session | None, started: HelixBMADResult, heli
             status="started",
             mode="temporal",
             run_uuid=helix.workflow_run_id,
+            kind=kind,
         )
     except SQLAlchemyError as exc:
         logger.warning("Failed to persist started workflow: %s", exc)
@@ -383,11 +433,14 @@ def create_workflow_run(
     status: str = "pending",
     mode: str = "local_fallback",
     run_uuid: str | None = None,
+    kind: str = "bmad",
 ) -> WorkflowRun:
     # `run_uuid` pins WorkflowRun.id to the same UUID the Temporal worker stamps
     # onto every WorkflowStep.workflow_run_id (helix.workflow_run_id, carried in
     # the workflow input). Without it the row got BaseModel's random default id,
     # so every step insert violated workflow_steps.workflow_run_id_fkey.
+    # `kind` distinguishes the BMAD pipeline ("bmad") from the DB-migration
+    # chain ("migration").
     run = WorkflowRun(
         **({"id": run_uuid} if run_uuid else {}),
         organization_id=organization_id,
@@ -397,6 +450,7 @@ def create_workflow_run(
         run_id=run_id,
         status=status,
         mode=mode,
+        kind=kind,
     )
     db.add(run)
     db.commit()

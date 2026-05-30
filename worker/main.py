@@ -48,8 +48,15 @@ from worker.activities.bmad_node_activities import (
     winston_readiness_activity,
     winston_stories_activity,
 )
+from worker.activities.migration_node_activities import (
+    reconciler_activity,
+    schema_analyst_activity,
+    script_generator_activity,
+    type_mapper_activity,
+)
 from worker.workflows.bmad_per_node_workflow import BMADPerNodeWorkflow
 from worker.workflows.bmad_planning_workflow import BMADPlanningWorkflow
+from worker.workflows.migration_per_node_workflow import MigrationPerNodeWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +161,7 @@ async def main() -> int:
             max_workers=max_concurrent_activities,
             thread_name_prefix="bmad-activity",
         ),
-        workflows=[BMADPlanningWorkflow, BMADPerNodeWorkflow],
+        workflows=[BMADPlanningWorkflow, BMADPerNodeWorkflow, MigrationPerNodeWorkflow],
         activities=[
             execute_bmad_graph_activity,
             winston_project_context_activity,
@@ -169,6 +176,11 @@ async def main() -> int:
             amelia_qa_activity,
             amelia_code_review_activity,
             paige_docs_activity,
+            # DB-migration agent chain (A2) — runs alongside BMAD.
+            schema_analyst_activity,
+            type_mapper_activity,
+            script_generator_activity,
+            reconciler_activity,
             persist_workflow_step_activity,
             persist_workflow_terminal_state_activity,
         ],

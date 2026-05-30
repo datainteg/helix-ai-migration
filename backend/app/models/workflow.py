@@ -19,6 +19,10 @@ class WorkflowRun(BaseModel):
     run_id = Column(String(255), nullable=True)
     status = Column(String(50), default="pending", nullable=False)
     mode = Column(String(50), nullable=False)  # "temporal" or "local_fallback"
+    # Distinguishes the BMAD software-planning pipeline from the DB-migration
+    # agent chain that runs alongside it on the same worker/queue. Defaults to
+    # "bmad" so every existing row + any caller that omits it is unchanged.
+    kind = Column(String(20), nullable=False, server_default="bmad", default="bmad")
 
     steps = relationship("WorkflowStep", back_populates="workflow_run", cascade="all, delete-orphan")
 
