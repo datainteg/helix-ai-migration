@@ -269,6 +269,10 @@ app.add_middleware(
     allow_headers=[
         "Authorization", "Content-Type", "Accept",
         "Idempotency-Key", "X-Active-Org-Id",
+        # `X-Setup-Token` carries the first-admin provisioning token from the
+        # /setup/first-admin wizard — must be allow-listed or the browser's
+        # preflight is rejected (400 Disallowed CORS headers).
+        "X-Setup-Token",
     ],
     # Surface the replay marker so SDKs can detect cache hits and the
     # standardized retry hint on 429s.
