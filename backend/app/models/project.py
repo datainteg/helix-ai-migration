@@ -13,6 +13,9 @@ class Project(BaseModel):
     status = Column(String(50), default="draft", nullable=False)
     risk_level = Column(String(20), default="unknown")
     migration_type = Column(String(50), nullable=True)
+    # Target deployment environment label (dev/staging/prod/…). Collected at
+    # project creation; nullable for rows created before this column.
+    environment = Column(String(50), nullable=True)
     owner_id = Column(String(36), nullable=False)
 
     organization = relationship("Organization", back_populates="projects")

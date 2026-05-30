@@ -10,6 +10,11 @@ class ProjectCreate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
     risk_level: str = "unknown"
     migration_type: Optional[str] = Field(default=None, max_length=100)
+    # The new-project form collects these; create_project provisions matching
+    # SourceConnection / TargetConnection rows and stores environment.
+    source_system: Optional[str] = Field(default=None, max_length=100)
+    target_system: Optional[str] = Field(default=None, max_length=100)
+    environment: Optional[str] = Field(default=None, max_length=50)
 
 
 class ProjectResponse(BaseModel):
@@ -21,6 +26,10 @@ class ProjectResponse(BaseModel):
     risk_level: str
     migration_type: Optional[str] = None
     owner_id: str
+    # Derived from the project's source/target connection rows (first of each).
+    source_system: Optional[str] = None
+    target_system: Optional[str] = None
+    environment: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

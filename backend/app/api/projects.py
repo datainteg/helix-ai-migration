@@ -72,6 +72,91 @@ def api_list_projects(
     return paginate(rows, limit=limit, offset=offset)
 
 
+@router.get("/projects/summary")
+def api_projects_summary(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Per-project rollup for the Projects table: validation %, recon %, table
+    count, and latest workflow status/kind. One pass over the org's projects.
+    Returns a dict keyed by project_id so the list page can merge it in."""
+    from sqlalchemy import func
+    from app.models.project import Project, TableMetadata, SchemaMetadata
+    from app.models.workflow import WorkflowRun
+    from app.models.validation import ValidationResult, ValidationRun, ReconResult, ReconRun
+
+    org_id = _org_id(user_id, db)
+    project_ids = [p.id for p in db.query(Project.id).filter(Project.organization_id == org_id).all()]
+    if not project_ids:
+        return {}
+
+    out: dict[str, dict] = {pid: {} for pid in project_ids}
+
+    # Validation: passed / total per project.
+    v_rows = (
+        db.query(ValidationRun.project_id, ValidationResult.status, func.count(ValidationResult.id))
+        .join(ValidationResult, ValidationResult.run_id == ValidationRun.id)
+        .filter(ValidationRun.project_id.in_(project_ids))
+        .group_by(ValidationRun.project_id, ValidationResult.status)
+        .all()
+    )
+    v_agg: dict[str, dict[str, int]] = {}
+    for pid, status, n in v_rows:
+        d = v_agg.setdefault(pid, {"total": 0, "passed": 0})
+        d["total"] += int(n)
+        if status == "passed":
+            d["passed"] += int(n)
+
+    # Recon: clean / total per project.
+    r_rows = (
+        db.query(ReconRun.project_id, ReconResult.mismatch_count, func.count(ReconResult.id))
+        .join(ReconResult, ReconResult.run_id == ReconRun.id)
+        .filter(ReconRun.project_id.in_(project_ids))
+        .group_by(ReconRun.project_id, ReconResult.mismatch_count)
+        .all()
+    )
+    r_agg: dict[str, dict[str, int]] = {}
+    for pid, mismatch, n in r_rows:
+        d = r_agg.setdefault(pid, {"total": 0, "clean": 0})
+        d["total"] += int(n)
+        if (mismatch or 0) == 0:
+            d["clean"] += int(n)
+
+    # Table count per project (via schema metadata).
+    t_rows = (
+        db.query(SchemaMetadata.project_id, func.count(TableMetadata.id))
+        .join(TableMetadata, TableMetadata.schema_id == SchemaMetadata.id)
+        .filter(SchemaMetadata.project_id.in_(project_ids))
+        .group_by(SchemaMetadata.project_id)
+        .all()
+    )
+    tbl_counts = {pid: int(n) for pid, n in t_rows}
+
+    # Latest workflow run per project (status + kind = "phase").
+    wf_rows = (
+        db.query(WorkflowRun.project_id, WorkflowRun.status, WorkflowRun.kind, WorkflowRun.created_at)
+        .filter(WorkflowRun.project_id.in_(project_ids))
+        .order_by(WorkflowRun.created_at.desc())
+        .all()
+    )
+    latest_wf: dict[str, dict] = {}
+    for pid, status, kind, _created in wf_rows:
+        if pid not in latest_wf:
+            latest_wf[pid] = {"status": status, "kind": kind or "bmad"}
+
+    for pid in project_ids:
+        v = v_agg.get(pid)
+        r = r_agg.get(pid)
+        out[pid] = {
+            "validation_pct": round(v["passed"] / v["total"] * 100, 1) if v and v["total"] else None,
+            "recon_pct": round(r["clean"] / r["total"] * 100, 1) if r and r["total"] else None,
+            "table_count": tbl_counts.get(pid, 0),
+            "latest_status": latest_wf.get(pid, {}).get("status"),
+            "phase": latest_wf.get(pid, {}).get("kind"),
+        }
+    return out
+
+
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def api_get_project(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return get_project(db, _org_id(user_id, db), project_id)

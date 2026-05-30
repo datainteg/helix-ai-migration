@@ -23,24 +23,63 @@ from app.services.secret_service import encrypt_value, decrypt_value
 # ── Projects ────────────────────────────────────────────────────────
 
 
+def _project_to_response(project: Project) -> ProjectResponse:
+    """Serialise a Project, deriving source/target system from its first
+    source/target connection row (the connector_type)."""
+    src = project.source_connections[0].connector_type if project.source_connections else None
+    tgt = project.target_connections[0].connector_type if project.target_connections else None
+    return ProjectResponse(
+        id=project.id,
+        organization_id=project.organization_id,
+        name=project.name,
+        description=project.description,
+        status=project.status,
+        risk_level=project.risk_level,
+        migration_type=project.migration_type,
+        owner_id=project.owner_id,
+        source_system=src,
+        target_system=tgt,
+        environment=getattr(project, "environment", None),
+    )
+
+
 def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate) -> ProjectResponse:
-    project = Project(organization_id=org_id, owner_id=owner_id, name=data.name, description=data.description, risk_level=data.risk_level, migration_type=data.migration_type)
+    project = Project(
+        organization_id=org_id, owner_id=owner_id, name=data.name,
+        description=data.description, risk_level=data.risk_level,
+        migration_type=data.migration_type, environment=data.environment,
+    )
     db.add(project)
+    db.flush()  # get project.id for the connection rows
+
+    # Provision source/target connection rows from the chosen systems so the
+    # project carries its source→target intent (the migration flow fills in
+    # credentials later via the connection endpoints).
+    if data.source_system:
+        db.add(SourceConnection(
+            organization_id=org_id, project_id=project.id,
+            name=f"{data.source_system} source", connector_type=data.source_system, status="draft",
+        ))
+    if data.target_system:
+        db.add(TargetConnection(
+            organization_id=org_id, project_id=project.id,
+            name=f"{data.target_system} target", connector_type=data.target_system, status="draft",
+        ))
     db.commit()
     db.refresh(project)
-    return ProjectResponse.model_validate(project)
+    return _project_to_response(project)
 
 
 def list_projects(db: Session, org_id: str, include_archived: bool = False) -> list[ProjectResponse]:
     q = db.query(Project).filter(Project.organization_id == org_id, Project.status != "deleted")
     if not include_archived:
         q = q.filter(Project.status != "archived")
-    return [ProjectResponse.model_validate(p) for p in q.all()]
+    return [_project_to_response(p) for p in q.all()]
 
 
 def get_project(db: Session, org_id: str, project_id: str) -> ProjectResponse:
     project = _get_project(db, org_id, project_id)
-    return ProjectResponse.model_validate(project)
+    return _project_to_response(project)
 
 
 def _get_project(db: Session, org_id: str, project_id: str) -> Project:

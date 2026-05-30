@@ -12,8 +12,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Download,
-  Filter,
-  MoreHorizontal,
   Plus,
   ArrowUpRight,
   ArrowRight,
@@ -43,44 +41,63 @@ interface APIProject {
   name: string;
   description?: string;
   status: string;
+  risk_level?: string;
   source_system?: string;
   target_system?: string;
+  environment?: string;
   owner_name?: string;
   risk_score?: number;
-  validation_pct?: number;
-  recon_pct?: number;
+  validation_pct?: number | null;
+  recon_pct?: number | null;
   table_count?: number;
   phase?: string;
   environments?: string[];
   updated_at?: string;
 }
 
+interface ProjectSummary {
+  validation_pct: number | null;
+  recon_pct: number | null;
+  table_count: number;
+  latest_status: string | null;
+  phase: string | null;
+}
+
+const PAGE_SIZE = 50;
 type Filter = "all" | "running" | "awaiting" | "completed" | "failed" | "draft";
 
 export default function ProjectsPage() {
   const { token } = useAuth();
   const [projects, setProjects] = useState<APIProject[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
-    fetch(`${API_BASE}/api/v1/projects`, {
-      credentials: "include",
-    })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: unknown) => {
-        // Backend returns a paginated envelope {items, total, limit, offset}.
-        // Guard against bare-array responses from older backends.
-        const items: APIProject[] = Array.isArray(data)
-          ? (data as APIProject[])
-          : (((data as any).items as APIProject[]) ?? []);
-        setProjects(items);
+    setLoading(true);
+    // Paginated fetch + per-project summary merge (validation %, recon %, …).
+    Promise.all([
+      fetch(`${API_BASE}/api/v1/projects?limit=${PAGE_SIZE}&offset=${offset}`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : { items: [], total: 0 })),
+      fetch(`${API_BASE}/api/v1/projects/summary`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({})),
+    ])
+      .then(([data, summary]: [any, Record<string, ProjectSummary>]) => {
+        const items: APIProject[] = Array.isArray(data) ? data : (data.items ?? []);
+        setTotal(typeof data?.total === "number" ? data.total : items.length);
+        // Merge summary rollups into each project.
+        const merged = items.map((p) => {
+          const s = summary[p.id];
+          return s ? { ...p, validation_pct: s.validation_pct, recon_pct: s.recon_pct, table_count: s.table_count, phase: s.phase ?? undefined } : p;
+        });
+        setProjects(merged);
       })
-      .catch(() => setProjects([]))
+      .catch(() => { setProjects([]); setTotal(0); })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [token, offset]);
 
   const counts = {
     all: projects.length,
@@ -114,7 +131,7 @@ export default function ProjectsPage() {
       crumbs={["Projects"]}
       actions={
         <>
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => exportProjectsCsv(filtered)} disabled={filtered.length === 0}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
           <Link href="/projects/new">
@@ -161,12 +178,7 @@ export default function ProjectsPage() {
             />
           </div>
           <div className="flex-1" />
-          <Button variant="outline" size="sm">
-            <Filter className="h-3.5 w-3.5" /> Filters
-          </Button>
-          <Button variant="ghost" size="icon" aria-label="More actions">
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </Button>
+          <span className="text-[11.5px] text-ink-4 font-mono">{filtered.length} shown</span>
         </div>
 
         {loading ? (
@@ -228,13 +240,13 @@ export default function ProjectsPage() {
                     const risk = p.risk_score ?? 0;
                     const valid = p.validation_pct ?? 0;
                     const recon = p.recon_pct ?? 0;
+                    const env = p.environment || (p.environments?.length ? p.environments.join(", ") : "");
                     const riskColor =
                       risk >= 80 ? "var(--con-err)" :
                       risk >= 60 ? "var(--con-warn)" :
                       risk >= 40 ? "var(--con-info)" :
                       risk === 0 ? "var(--con-ink-5)" :
                                    "var(--con-ok)";
-                    const envs = p.environments?.length ? p.environments.join(", ") : "—";
                     return (
                       <tr
                         key={p.id}
@@ -250,7 +262,7 @@ export default function ProjectsPage() {
                             <div className="flex flex-col gap-0.5">
                               <span className="font-medium text-ink truncate">{p.name}</span>
                               <span className="font-mono text-[11px] text-ink-3">
-                                {p.id.slice(0, 8)} · {envs}
+                                {p.id.slice(0, 8)}{env ? ` · ${env}` : ""}
                               </span>
                             </div>
                           </Link>
@@ -304,9 +316,36 @@ export default function ProjectsPage() {
             </div>
           </Card>
         )}
+
+        {/* Pagination — only when the org has more than one page of projects. */}
+        {!loading && total > PAGE_SIZE && (
+          <div className="flex items-center justify-between text-[12px] text-ink-3">
+            <span className="font-mono">
+              {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</Button>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );
+}
+
+function exportProjectsCsv(projects: APIProject[]) {
+  const head = ["id", "name", "status", "source", "target", "environment", "tables", "validation_pct", "recon_pct"];
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows = projects.map((p) => [
+    p.id, p.name, p.status, p.source_system ?? "", p.target_system ?? "", p.environment ?? "",
+    p.table_count ?? "", p.validation_pct ?? "", p.recon_pct ?? "",
+  ].map(esc).join(","));
+  const csv = head.join(",") + "\n" + rows.join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = "helix-projects.csv";
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
