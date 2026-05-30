@@ -66,6 +66,21 @@ class DashboardStats(BaseModel):
     has_any_data: bool
 
 
+class ActivityItem(BaseModel):
+    workflow_id: str
+    project_id: str
+    project_name: str | None = None
+    kind: str
+    status: str
+    created_at: str | None = None
+
+
+class ValidationBreakdown(BaseModel):
+    """Validation result counts by status (passed / failed / warning / …)."""
+    by_status: dict[str, int]
+    total: int
+
+
 _RUNNING = {"running", "started", "in_progress"}
 _PENDING = {"pending", "awaiting_approval"}
 _DONE = {"completed", "approved"}
@@ -174,3 +189,52 @@ def dashboard_stats(
         ),
         has_any_data=has_any_data,
     )
+
+
+@router.get("/dashboard/activity", response_model=list[ActivityItem])
+def dashboard_activity(
+    limit: int = 12,
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+) -> list[ActivityItem]:
+    """Most recent workflow runs across the org (feeds the dashboard activity
+    feed + projects-requiring-attention). Joined to project name."""
+    limit = max(1, min(limit, 50))
+    rows = (
+        db.query(WorkflowRun, Project.name)
+        .outerjoin(Project, WorkflowRun.project_id == Project.id)
+        .filter(WorkflowRun.organization_id == org_id)
+        .order_by(WorkflowRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        ActivityItem(
+            workflow_id=run.workflow_id,
+            project_id=run.project_id,
+            project_name=pname,
+            kind=run.kind or "bmad",
+            status=run.status,
+            created_at=str(run.created_at) if run.created_at else None,
+        )
+        for run, pname in rows
+    ]
+
+
+@router.get("/dashboard/validation-breakdown", response_model=ValidationBreakdown)
+def dashboard_validation_breakdown(
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+) -> ValidationBreakdown:
+    """Validation results grouped by status, org-wide (feeds the dashboard
+    'Validation outcomes' panel)."""
+    rows = (
+        db.query(ValidationResult.status, func.count(ValidationResult.id))
+        .join(ValidationRun, ValidationResult.run_id == ValidationRun.id)
+        .join(Project, ValidationRun.project_id == Project.id)
+        .filter(Project.organization_id == org_id)
+        .group_by(ValidationResult.status)
+        .all()
+    )
+    by_status = {(s or "unknown"): int(c) for s, c in rows}
+    return ValidationBreakdown(by_status=by_status, total=sum(by_status.values()))

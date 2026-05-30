@@ -105,3 +105,25 @@ export async function fetchDashboardStats(token: string | null): Promise<Dashboa
     return fallbackStats(token);
   }
 }
+
+export interface ActivityItem {
+  workflow_id: string;
+  project_id: string;
+  project_name: string | null;
+  kind: string;
+  status: string;
+  created_at: string | null;
+}
+
+export function fetchDashboardActivity(token: string | null, limit = 12): Promise<ActivityItem[]> {
+  return fetchJson<ActivityItem[]>(`/api/v1/dashboard/activity?limit=${limit}`, token);
+}
+
+export interface ValidationBreakdown {
+  by_status: Record<string, number>;
+  total: number;
+}
+
+export function fetchValidationBreakdown(token: string | null): Promise<ValidationBreakdown> {
+  return fetchJson<ValidationBreakdown>("/api/v1/dashboard/validation-breakdown", token);
+}
