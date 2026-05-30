@@ -20,6 +20,7 @@ import {
   Check,
   FileText,
   ArrowRight,
+  Pencil,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -33,8 +34,10 @@ import {
   ProgressBar,
   StatusBadge,
   ErrorBanner,
+  Modal,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { updateProject, fetchProjectMembers, type OrgMember } from "@/lib/projects/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -82,6 +85,7 @@ interface APIProject {
   status: string;
   source_system?: string;
   target_system?: string;
+  owner_id?: string;
   owner_name?: string;
   team?: string;
   environment?: string;
@@ -141,19 +145,21 @@ function SourceTarget({ source, target }: { source?: string; target?: string }) 
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { token, can } = useAuth();
+  const canWrite = can("project:write");
   const [project, setProject] = useState<APIProject | null>(null);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
-    fetch(`${API_BASE}/api/v1/projects/${id}`, {
-      credentials: "include",
-    })
+    fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setProject(data ?? null))
       .catch(() => setProject(null));
-  }, [id]);
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
   const displayName = project?.name || "Untitled project";
   const shortId = String(id).slice(0, 8);
@@ -456,7 +462,14 @@ export default function ProjectDetailPage() {
 
           {/* RIGHT */}
           <div className="flex flex-col gap-4">
-            <Card title="Details">
+            <Card
+              title="Details"
+              actions={canWrite ? (
+                <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Button>
+              ) : undefined}
+            >
               <dl
                 className="grid text-[12.5px] m-0"
                 style={{
@@ -495,6 +508,7 @@ export default function ProjectDetailPage() {
                     )
                   }
                 />
+                <Detail k="Status" v={project?.status ? <StatusBadge status={project.status} /> : "—"} />
                 <Detail k="Team" v={project?.team ?? "—"} />
                 <Detail
                   k="Environment"
@@ -605,7 +619,68 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       </div>
+
+      {editing && project && (
+        <EditProjectModal
+          projectId={String(id)}
+          current={{ owner_id: project.owner_id, status: project.status }}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); load(); }}
+        />
+      )}
     </AppShell>
+  );
+}
+
+function EditProjectModal({ projectId, current, onClose, onSaved }: {
+  projectId: string;
+  current: { owner_id?: string; status?: string };
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [ownerId, setOwnerId] = useState(current.owner_id ?? "");
+  const [status, setStatus] = useState(current.status ?? "draft");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { fetchProjectMembers().then(setMembers).catch(() => setMembers([])); }, []);
+
+  const save = async () => {
+    setSaving(true); setErr("");
+    try {
+      await updateProject(projectId, { owner_id: ownerId || undefined, status });
+      onSaved();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Edit project" width="sm">
+      <div className="space-y-4">
+        {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Owner</span>
+          <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)} className="h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring">
+            <option value="">— Select owner —</option>
+            {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Status</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 px-2.5 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring">
+            {["draft", "running", "awaiting", "completed", "failed", "archived"].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} loading={saving}>Save changes</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
