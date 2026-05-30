@@ -37,6 +37,11 @@ export function archiveProject(id: string) {
   return req(`/api/v1/projects/${id}/archive`, { method: "PATCH" });
 }
 
+/** Restore an archived/soft-deleted project back to draft. project:write. */
+export function restoreProject(id: string) {
+  return req(`/api/v1/projects/${id}/restore`, { method: "PATCH" });
+}
+
 /** Soft delete (status=deleted). project:write. */
 export function deleteProject(id: string) {
   return req<void>(`/api/v1/projects/${id}`, { method: "DELETE" });

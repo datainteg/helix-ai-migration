@@ -36,7 +36,7 @@ import {
 import { AppIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
 import { formatRelative as formatRelativeUtil } from "@/lib/utils";
-import { archiveProject, deleteProject, forceDeleteProject } from "@/lib/projects/api";
+import { archiveProject, restoreProject, deleteProject, forceDeleteProject } from "@/lib/projects/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -68,7 +68,7 @@ interface ProjectSummary {
 }
 
 const PAGE_SIZE = 50;
-type Filter = "all" | "running" | "awaiting" | "completed" | "failed" | "draft";
+type Filter = "all" | "running" | "awaiting" | "completed" | "failed" | "draft" | "archived";
 
 export default function ProjectsPage() {
   const { token, can, role, isSuperAdmin } = useAuth();
@@ -90,7 +90,7 @@ export default function ProjectsPage() {
     setLoading(true);
     // Paginated fetch + per-project summary merge (validation %, recon %, …).
     Promise.all([
-      fetch(`${API_BASE}/api/v1/projects?limit=${PAGE_SIZE}&offset=${offset}`, { credentials: "include" })
+      fetch(`${API_BASE}/api/v1/projects?include_archived=true&limit=${PAGE_SIZE}&offset=${offset}`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : { items: [], total: 0 })),
       fetch(`${API_BASE}/api/v1/projects/summary`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : {}))
@@ -111,18 +111,19 @@ export default function ProjectsPage() {
   }, [token, offset, reloadKey]);
 
   const counts = {
-    all: projects.length,
+    all: projects.filter((p) => p.status !== "archived").length,
     running: projects.filter((p) => p.status === "running").length,
     awaiting: projects.filter((p) => p.status === "awaiting").length,
     completed: projects.filter((p) => p.status === "completed").length,
     failed: projects.filter((p) => p.status === "failed").length,
     draft: projects.filter((p) => p.status === "draft" || p.status === "queued").length,
+    archived: projects.filter((p) => p.status === "archived").length,
   };
 
   const filtered = projects.filter((p) => {
     const matchStatus =
       filter === "all"
-        ? true
+        ? p.status !== "archived"   // "All" hides archived; use the Archived tab
         : filter === "draft"
         ? p.status === "draft" || p.status === "queued"
         : p.status === filter;
@@ -186,6 +187,7 @@ export default function ProjectsPage() {
                 { id: "completed", label: "Completed", count: counts.completed },
                 { id: "failed",    label: "Failed",    count: counts.failed },
                 { id: "draft",     label: "Draft",     count: counts.draft },
+                { id: "archived",  label: "Archived",  count: counts.archived },
               ]}
             />
           </div>
@@ -326,6 +328,7 @@ export default function ProjectsPage() {
                                 canWrite={canWrite}
                                 isAdmin={isAdmin}
                                 onArchive={async () => { setActionErr(""); try { await archiveProject(p.id); refetch(); } catch (e) { setActionErr(e instanceof Error ? e.message : "Archive failed"); } }}
+                                onRestore={async () => { setActionErr(""); try { await restoreProject(p.id); refetch(); } catch (e) { setActionErr(e instanceof Error ? e.message : "Restore failed"); } }}
                                 onSoftDelete={async () => { setActionErr(""); try { await deleteProject(p.id); refetch(); } catch (e) { setActionErr(e instanceof Error ? e.message : "Delete failed"); } }}
                                 onForceDelete={() => setConfirmForce(p)}
                               />
@@ -375,11 +378,12 @@ export default function ProjectsPage() {
   );
 }
 
-function RowActions({ project, canWrite, isAdmin, onArchive, onSoftDelete, onForceDelete }: {
+function RowActions({ project, canWrite, isAdmin, onArchive, onRestore, onSoftDelete, onForceDelete }: {
   project: APIProject;
   canWrite: boolean;
   isAdmin: boolean;
   onArchive: () => void;
+  onRestore: () => void;
   onSoftDelete: () => void;
   onForceDelete: () => void;
 }) {
@@ -399,10 +403,13 @@ function RowActions({ project, canWrite, isAdmin, onArchive, onSoftDelete, onFor
       </button>
       {open && (
         <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hx bg-surface shadow-lg py-1 text-[12.5px]">
-          {canWrite && project.status !== "archived" && (
+          {canWrite && (project.status === "archived" || project.status === "deleted") && (
+            <button type="button" onClick={() => { setOpen(false); onRestore(); }} className="w-full text-left px-3 py-1.5 text-[var(--con-ok)] font-medium hover:bg-app-2">Restore</button>
+          )}
+          {canWrite && project.status !== "archived" && project.status !== "deleted" && (
             <button type="button" onClick={() => { setOpen(false); onArchive(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Archive</button>
           )}
-          {canWrite && (
+          {canWrite && project.status !== "deleted" && (
             <button type="button" onClick={() => { setOpen(false); onSoftDelete(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Delete (soft)</button>
           )}
           {isAdmin && (
