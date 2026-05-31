@@ -24,7 +24,6 @@ interface Props {
 // each group boundary): Plan → Execute → Verify → Release → Govern.
 // Migration is folded into Workflows (legacy /migration redirects to /agents).
 const TABS = [
-  { label: "Overview", suffix: "", group: "plan" },
   { label: "Requirements", suffix: "/requirements", group: "plan" },
   { label: "Source & Target", suffix: "/source-target", group: "plan" },
   { label: "Workflows", suffix: "/agents", group: "execute" },
@@ -50,7 +49,7 @@ export function ProjectShell({ children, projectId, projectName, projectStatus, 
     <AppShell
       title={projectName}
       subtitle={subtitle}
-      crumbs={[{ label: "Projects", href: "/projects" }, { label: projectName }]}
+      crumbs={[{ label: "Projects", href: "/projects" }, { label: projectName, href: base }]}
       actions={
         <div className="flex items-center gap-3">
           {projectStatus && <StatusBadge status={projectStatus} />}
