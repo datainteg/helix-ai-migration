@@ -45,6 +45,7 @@ import {
   fetchProjectComments, addProjectComment,
   type OrgMember, type ProjectComment as ProjectCommentT,
 } from "@/lib/projects/api";
+import { listRunRequests } from "@/lib/workflows/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -95,6 +96,7 @@ interface APIProject {
   owner_id?: string;
   owner_name?: string;
   on_hold?: boolean;
+  require_run_approval?: boolean;
   team?: string;
   environment?: string;
   environments?: string[];
@@ -152,6 +154,25 @@ function SourceTarget({ source, target }: { source?: string; target?: string }) 
   );
 }
 
+/** One PM status tile — label, a value node, optional sub-line, optional link. */
+function StatusTile({ label, value, sub, href }: { label: string; value: React.ReactNode; sub?: string; href?: string }) {
+  const inner = (
+    <div className="rounded-[10px] border border-hx bg-surface p-3 h-full hover:border-hx-2 transition-colors">
+      <div className="text-[10px] uppercase tracking-wider font-mono text-ink-4">{label}</div>
+      <div className="mt-2 flex items-center gap-1.5">{value}</div>
+      {sub && <div className="mt-1 text-[11px] text-ink-4">{sub}</div>}
+    </div>
+  );
+  return href ? <Link href={href} className="block">{inner}</Link> : inner;
+}
+
+/** A percentage value with a muted "no data yet" fallback. */
+function PctValue({ pct, total }: { pct: number | null; total: number }) {
+  if (pct == null) return <span className="text-[12px] text-ink-4">{total ? "—" : "No data"}</span>;
+  const tone = pct >= 99 ? "var(--con-ok)" : pct >= 90 ? "var(--con-brand)" : "var(--con-err)";
+  return <span className="font-mono tabular-nums text-[18px] font-medium" style={{ color: tone }}>{pct.toFixed(1)}%</span>;
+}
+
 // ─── Page ───────────────────────────────────────────────────────
 
 export default function ProjectDetailPage() {
@@ -165,6 +186,15 @@ export default function ProjectDetailPage() {
   const [editing, setEditing] = useState(false);
   const [holdPrompt, setHoldPrompt] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+
+  // Pending run-requests count for the PM status view (best-effort).
+  useEffect(() => {
+    if (!id) return;
+    listRunRequests(String(id))
+      .then((rs) => setPendingApprovals(rs.filter((r) => r.status === "pending").length))
+      .catch(() => setPendingApprovals(0));
+  }, [id]);
 
   const load = useCallback(async () => {
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
@@ -290,6 +320,36 @@ export default function ProjectDetailPage() {
       )}
 
       <div className="flex flex-col gap-4">
+        {/* PM status row — every status at a glance. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <StatusTile label="Status" value={<StatusBadge status={project?.status ?? "draft"} />} />
+          <StatusTile label="Operational" value={
+            <Chip tone={project?.on_hold ? "amber" : "green"} dot>{project?.on_hold ? "On hold" : "Live"}</Chip>
+          } />
+          <StatusTile
+            label="Run approval"
+            value={<Chip tone={project?.require_run_approval ? "indigo" : "zinc"}>{project?.require_run_approval ? "Required" : "Direct"}</Chip>}
+            sub={pendingApprovals > 0 ? `${pendingApprovals} pending` : undefined}
+            href={`/projects/${id}/agents`}
+          />
+          <StatusTile
+            label="Pipeline"
+            value={run ? <StatusBadge status={run.status} /> : <span className="text-[12px] text-ink-4">Not started</span>}
+            sub={run ? `${run.steps_done}/${run.steps_total} steps` : undefined}
+            href={`/projects/${id}/agents`}
+          />
+          <StatusTile
+            label="Validation"
+            value={<PctValue pct={overview?.validation.pct ?? null} total={overview?.validation.total ?? 0} />}
+            href={`/projects/${id}/validation`}
+          />
+          <StatusTile
+            label="Reconciliation"
+            value={<PctValue pct={overview?.recon.pct ?? null} total={overview?.recon.total ?? 0} />}
+            href={`/projects/${id}/recon`}
+          />
+        </div>
+
         {/* Pipeline progress — REAL steps from the latest workflow run, or an
             honest empty state when nothing has run. No hardcoded phase ladder. */}
         <Card>
