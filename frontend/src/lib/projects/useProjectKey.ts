@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -33,6 +34,8 @@ const _cache = new Map<string, any>();
 
 export function useProjectKey(param: string | undefined): ResolvedProject {
   const p = param || "";
+  const pathname = usePathname() || "";
+  const router = useRouter();
   const cached = _cache.get(p);
   const [project, setProject] = useState<Record<string, unknown> | null>(cached ?? null);
   const [loading, setLoading] = useState(!cached);
@@ -52,6 +55,16 @@ export function useProjectKey(param: string | undefined): ResolvedProject {
 
   const id = (project?.id as string) || "";
   const slug = (project?.slug as string) || "";
+
+  // Canonicalize the URL to the slug: if the user arrived via the UUID (or an
+  // old slug) and a slug exists, rewrite the path so the address bar + all
+  // in-page links use the readable slug.
+  useEffect(() => {
+    if (slug && p && p !== slug && pathname.includes(p)) {
+      router.replace(pathname.replace(p, slug));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, p, pathname]);
   return {
     id,
     key: slug || id || p,

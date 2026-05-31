@@ -294,6 +294,16 @@ def _persist_started_workflow(db: Session | None, started: HelixBMADResult, heli
             run_uuid=helix.workflow_run_id,
             kind=kind,
         )
+        # Reflect the live run on the project: a started workflow flips status
+        # to "running" (unless the project is archived/deleted).
+        try:
+            from app.models.project import Project
+            proj = db.query(Project).filter(Project.id == helix.project_id).first()
+            if proj is not None and proj.status not in ("archived", "deleted"):
+                proj.status = "running"
+                db.commit()
+        except SQLAlchemyError:
+            db.rollback()
     except SQLAlchemyError as exc:
         logger.warning("Failed to persist started workflow: %s", exc)
         db.rollback()

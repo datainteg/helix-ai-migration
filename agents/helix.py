@@ -128,8 +128,11 @@ class HelixBMAD:
 
     @property
     def workflow_id(self) -> str:
-        """Stable workflow ID used as Temporal workflow handle."""
-        return f"bmad-{self.project_id}-{self.requirement_id}"
+        """Temporal workflow handle — unique per run so the same requirement can
+        be re-run (a deterministic id collided with 'Workflow execution already
+        started' and silently fell back to local). workflow_run_id is a fresh
+        uuid per HelixBMAD instance; the suffix keeps each start distinct."""
+        return f"bmad-{self.project_id}-{self.requirement_id}-{self.workflow_run_id[:8]}"
 
     @property
     def artifact_dir(self) -> Path:

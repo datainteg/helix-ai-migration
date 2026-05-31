@@ -75,7 +75,9 @@ class HelixMigration:
 
     @property
     def workflow_id(self) -> str:
-        return f"mig-{self.project_id}-{self.requirement_id}"
+        # Unique per run so the same requirement can be re-run without colliding
+        # with an existing Temporal workflow id.
+        return f"mig-{self.project_id}-{self.requirement_id}-{self.workflow_run_id[:8]}"
 
     def _input_payload(self) -> dict[str, Any]:
         source_kind = connector_kind(self.source_connector_type)
