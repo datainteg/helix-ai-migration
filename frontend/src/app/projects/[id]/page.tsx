@@ -40,6 +40,7 @@ import {
   Modal,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { cn } from "@/lib/utils";
 import {
   updateProject, fetchProjectMembers, setProjectHold,
   fetchProjectComments, addProjectComment,
@@ -157,7 +158,7 @@ function SourceTarget({ source, target }: { source?: string; target?: string }) 
 /** One PM status tile — label, a value node, optional sub-line, optional link. */
 function StatusTile({ label, value, sub, href }: { label: string; value: React.ReactNode; sub?: string; href?: string }) {
   const inner = (
-    <div className="rounded-[10px] border border-hx bg-surface p-3 h-full hover:border-hx-2 transition-colors">
+    <div className={cn("rounded-[10px] border border-hx bg-surface p-3 h-full", href && "hover:border-hx-2 transition-colors")}>
       <div className="text-[10px] uppercase tracking-wider font-mono text-ink-4">{label}</div>
       <div className="mt-2 flex items-center gap-1.5">{value}</div>
       {sub && <div className="mt-1 text-[11px] text-ink-4">{sub}</div>}
@@ -330,23 +331,19 @@ export default function ProjectDetailPage() {
             label="Run approval"
             value={<Chip tone={project?.require_run_approval ? "indigo" : "zinc"}>{project?.require_run_approval ? "Required" : "Direct"}</Chip>}
             sub={pendingApprovals > 0 ? `${pendingApprovals} pending` : undefined}
-            href={`/projects/${id}/agents`}
           />
           <StatusTile
             label="Pipeline"
             value={run ? <StatusBadge status={run.status} /> : <span className="text-[12px] text-ink-4">Not started</span>}
             sub={run ? `${run.steps_done}/${run.steps_total} steps` : undefined}
-            href={`/projects/${id}/agents`}
           />
           <StatusTile
             label="Validation"
             value={<PctValue pct={overview?.validation.pct ?? null} total={overview?.validation.total ?? 0} />}
-            href={`/projects/${id}/validation`}
           />
           <StatusTile
             label="Reconciliation"
             value={<PctValue pct={overview?.recon.pct ?? null} total={overview?.recon.total ?? 0} />}
-            href={`/projects/${id}/recon`}
           />
         </div>
 
