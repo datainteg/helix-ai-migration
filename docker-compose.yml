@@ -322,7 +322,12 @@ services:
     #  - Mounts ONLY the dedicated helix_workspace volume — never the host root
     #    or the repo. Generated migration code is reviewed/approved in Helix and
     #    is NEVER executed by the Helix backend.
-    #  - Password-protected via CODE_SERVER_PASSWORD (set a strong value).
+    #  - Isolated on helix-workspace-net (NOT helix-network) so code run in the
+    #    IDE cannot reach postgres/redis/temporal/backend. Users access it only
+    #    via the localhost-published port.
+    #  - SET A STRONG CODE_SERVER_PASSWORD in .env before enabling — the
+    #    fallback below is insecure and only acceptable because the service is
+    #    opt-in, bound to 127.0.0.1, and on an isolated network.
     #  - Bound to 127.0.0.1 only; put it behind the TLS reverse proxy + auth
     #    before exposing it to a network.
     profiles: ["workspace"]
@@ -337,7 +342,7 @@ services:
     volumes:
       - helix_workspace:/home/coder/workspace
     networks:
-      - helix-network
+      - helix-workspace-net
     mem_limit: 1g
     logging: *default-logging
 
@@ -360,4 +365,9 @@ volumes:
 
 networks:
   helix-network:
+    driver: bridge
+  # Isolated network for the optional code-server workspace — deliberately NOT
+  # shared with postgres/redis/temporal/backend so IDE-run code cannot reach
+  # internal services.
+  helix-workspace-net:
     driver: bridge

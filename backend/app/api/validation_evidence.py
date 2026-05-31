@@ -121,7 +121,9 @@ def accept(evidence_id: str, org_id: str = Depends(get_current_organization_id),
 
 
 @router.post("/validation/evidence/{evidence_id}/reject")
-def reject(evidence_id: str, data: StageRejectRequest,
+def reject(evidence_id: str, data: StageRejectRequest, changes_only: bool = False,
            org_id: str = Depends(get_current_organization_id),
            user_id: str = Depends(require_permission("agent:approve")), db: Session = Depends(get_db)):
-    return _ev(svc.reject_evidence(db, org_id, evidence_id, user_id, data.comment))
+    """Reject evidence. `changes_only=true` marks it `changes_required` (fixable)
+    rather than a hard `rejected`."""
+    return _ev(svc.reject_evidence(db, org_id, evidence_id, user_id, data.comment, changes_only=changes_only))

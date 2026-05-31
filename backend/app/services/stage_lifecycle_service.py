@@ -262,9 +262,10 @@ def approve_stage(db: Session, organization_id: str, project_id: str, stage_key:
     if stage.stage_key == LC.VALIDATION:
         try:
             from app.services.validation_evidence_service import has_accepted_evidence
-            _has = has_accepted_evidence(db, organization_id, project_id)
-        except Exception:  # noqa: BLE001
-            _has = True   # never hard-fail approval on an import/availability error
+        except ImportError:
+            has_accepted_evidence = None  # module unavailable in this deployment
+        # A real query error must NOT default the gate open — let it propagate.
+        _has = True if has_accepted_evidence is None else has_accepted_evidence(db, organization_id, project_id)
         if not _has:
             raise HTTPException(status_code=409, detail="Validation cannot be approved until at least one evidence item is accepted.")
     prev = stage.status
@@ -280,8 +281,17 @@ def approve_stage(db: Session, organization_id: str, project_id: str, stage_key:
     return stage
 
 
+# A stage may only be rejected / sent-back while it is actually under review.
+# Guarding this stops a reviewer reverting an already-approved/done (or
+# not-started) stage, which would otherwise break the ordering invariant (the
+# prior-required gate only checks the closest predecessor).
+_REVERTABLE_STATUSES = frozenset({"generated", "under_review", "resubmitted", "edit_requested"})
+
+
 def reject_stage(db: Session, organization_id: str, project_id: str, stage_key: str, user_id: str, comment: str) -> MigrationStage:
     stage = _get_stage(db, organization_id, project_id, stage_key)
+    if stage.status not in _REVERTABLE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; only a stage under review can be rejected.")
     prev = stage.status
     stage.status = "rejected"
     stage.rejected_at = _now()
@@ -294,11 +304,48 @@ def reject_stage(db: Session, organization_id: str, project_id: str, stage_key: 
 
 def request_stage_changes(db: Session, organization_id: str, project_id: str, stage_key: str, user_id: str, comment: str) -> MigrationStage:
     stage = _get_stage(db, organization_id, project_id, stage_key)
+    if stage.status not in _REVERTABLE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; changes can only be requested on a stage under review.")
     prev = stage.status
     stage.status = "edit_requested"
     stage.updated_by = user_id
     _log_transition(db, stage, prev, "edit_requested", "request_changes", "user", user_id, comment)
     db.commit()
+    return stage
+
+
+# Sentinel "agents" mark non-agent stages: orchestration (sprint execution),
+# human (sign-off) and system (closure). These stages produce no artifact and
+# are completed via complete_stage (not via the agent/approve path).
+_SENTINEL_AGENTS = frozenset({"__orchestration__", "__human__", "__system__"})
+
+
+def complete_stage(db: Session, organization_id: str, project_id: str, stage_key: str,
+                   actor_user_id: str | None, actor_type: str = "user") -> MigrationStage:
+    """Complete a NON-agent stage (orchestration/human/system) and advance.
+
+    Agent stages have no artifact to approve here; they are driven to done via
+    approve_stage. This closes the lifecycle gap where SPRINT_EXECUTION /
+    SIGN_OFF / CLOSURE could never reach a done status."""
+    stages = get_project_lifecycle(db, organization_id, project_id)
+    stage = next((s for s in stages if s.stage_key == stage_key), None)
+    if not stage:
+        raise HTTPException(status_code=404, detail=f"Stage {stage_key} not found")
+    if stage.assigned_agent not in _SENTINEL_AGENTS:
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is agent-driven; approve its artifact instead of completing it.")
+    if stage.status in LC.STAGE_DONE_STATUSES:
+        return stage  # idempotent
+    if stage.status not in ("not_started", "running", "failed"):
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; cannot complete from this state.")
+    _require_prior_done(stages, stage, "complete")
+    prev = stage.status
+    stage.status = "completed"
+    stage.completed_at = _now()
+    stage.updated_by = actor_user_id
+    _log_transition(db, stage, prev, "completed", "complete", actor_type, actor_user_id)
+    _audit(db, organization_id, actor_user_id, "complete", project_id, stage_key, None)
+    db.commit()
+    advance_to_next_stage(db, organization_id, project_id)
     return stage
 
 

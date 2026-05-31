@@ -212,6 +212,14 @@ def request_artifact_changes(db: Session, org_id: str, artifact_id: str, version
 
 def add_artifact_comment(db: Session, org_id: str, artifact_id: str, version_id: str | None, user_id: str, comment: str) -> MigrationArtifactComment:
     artifact = _get_artifact(db, org_id, artifact_id)
+    if version_id:
+        # The pinned version must belong to this artifact (no cross-artifact ref).
+        belongs = db.query(MigrationArtifactVersion.id).filter(
+            MigrationArtifactVersion.id == version_id,
+            MigrationArtifactVersion.artifact_id == artifact_id,
+        ).first()
+        if not belongs:
+            raise HTTPException(status_code=404, detail="Version does not belong to this artifact.")
     row = MigrationArtifactComment(
         organization_id=org_id, project_id=artifact.project_id, artifact_id=artifact_id,
         artifact_version_id=version_id, user_id=user_id, comment=comment,

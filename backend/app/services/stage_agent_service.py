@@ -160,7 +160,7 @@ def _build_stage_prompt(db: Session, org_id: str, project: Project, stage_key: s
 
     req = _latest_requirement(db, project.id)
     if req and req.source_text:
-        parts.append(f"## Approved requirement (v{req.version}, {req.status})\n{req.source_text[:_MAX_ARTIFACT_CHARS]}")
+        parts.append(f"## Requirement (v{req.version}, status: {req.status})\n{req.source_text[:_MAX_ARTIFACT_CHARS]}")
 
     conn = _connector_context(db, org_id, project.id)
     if conn:

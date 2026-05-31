@@ -156,8 +156,18 @@ def create_sprints_and_tasks(db: Session, org_id: str, project_id: str,
         db.delete(sp)   # cascade removes tasks
     db.flush()
 
+    # Re-index AFTER any surviving sprints (active or manually-created rows keep
+    # their index). Starting at 1 unconditionally would collide with a survivor
+    # on the unique (org, project, index) index → IntegrityError/500.
+    from sqlalchemy import func
+    max_idx = (
+        db.query(func.max(Sprint.index))
+        .filter(Sprint.project_id == project_id, Sprint.organization_id == org_id)
+        .scalar()
+    ) or 0
+
     created: list[Sprint] = []
-    for i, spec in enumerate(sprint_plan_json, start=1):
+    for i, spec in enumerate(sprint_plan_json, start=max_idx + 1):
         sprint = Sprint(
             organization_id=org_id, project_id=project_id, index=i,
             name=str(spec.get("name") or f"Sprint {i}")[:200],

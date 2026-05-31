@@ -176,6 +176,60 @@ def test_signoff_draft_creation(db_session):
     assert draft.recon_report_id == rep.id
 
 
+# ── Full lifecycle completion (sentinel stages) — covers C1 ──────────
+def test_lifecycle_completes_through_sentinel_stages(db_session):
+    org_id, uid = _org_user(db_session, "o1", "a@o1.test")
+    p = _project(db_session, org_id, uid)
+    for s in sl.get_project_lifecycle(db_session, org_id, p.id):
+        agent = s.assigned_agent
+        if agent in ("__orchestration__", "__human__", "__system__"):
+            sl.complete_stage(db_session, org_id, p.id, s.stage_key, uid)
+        elif sa.is_agent_runnable(s.stage_key):
+            sa.run_stage_agent(db_session, org_id, p.id, s.stage_key, uid)
+            if s.stage_key == LC.VALIDATION:
+                ev = ve.create_evidence(db_session, org_id, p.id, uid, evidence_type="summary", title="ok", content_json={"passed": 1})
+                ve.accept_evidence(db_session, org_id, ev.id, uid)
+            sl.approve_stage(db_session, org_id, p.id, s.stage_key, uid, "ok", allow_self_approval=True)
+        # UX_DESIGN (optional) left not_started — non-blocking.
+    proj = sl._get_project(db_session, org_id, p.id)
+    assert proj.lifecycle_status == LC.LIFECYCLE_COMPLETED
+    assert sl.get_current_stage(db_session, org_id, p.id) is None
+
+
+def test_complete_stage_rejects_agent_stage(db_session):
+    org_id, uid = _org_user(db_session, "o1", "a@o1.test")
+    p = _project(db_session, org_id, uid)
+    with pytest.raises(HTTPException) as e:
+        sl.complete_stage(db_session, org_id, p.id, LC.PROJECT_CONTEXT, uid)  # agent stage
+    assert e.value.status_code == 409
+
+
+# ── Sprint generation must not collide with a manual sprint — covers C2 ──
+def test_sprint_generation_reindexes_around_manual_sprint(db_session):
+    from app.services import sprint_service
+    from app.schemas.sprint import SprintCreate
+    org_id, uid = _org_user(db_session, "o1", "a@o1.test")
+    p = _project(db_session, org_id, uid)
+    _approve_planning(db_session, org_id, p.id, uid)
+    # A manual sprint (no created_from_artifact_id) at index 1 survives generation.
+    manual = sprint_service.create_sprint(db_session, org_id, p.id, SprintCreate(index=1, name="Manual"))
+    gen = sgen.generate_sprints_from_approved_artifacts(db_session, org_id, p.id, uid)  # must NOT raise IntegrityError
+    assert len(gen) >= 2
+    assert db_session.query(Sprint).filter(Sprint.id == manual.id).count() == 1   # manual survived
+    idxs = [s.index for s in db_session.query(Sprint).filter(Sprint.project_id == p.id).all()]
+    assert len(idxs) == len(set(idxs))  # no duplicate indexes
+
+
+# ── Sign-off requires an approved recon report — covers H1 ───────────
+def test_signoff_requires_approved_recon(db_session):
+    org_id, uid = _org_user(db_session, "o1", "a@o1.test")
+    p = _project(db_session, org_id, uid)
+    rr.generate_report(db_session, org_id, p.id, uid)   # generated, NOT approved
+    with pytest.raises(HTTPException) as e:
+        so.create_draft(db_session, org_id, p.id, uid)
+    assert e.value.status_code == 409
+
+
 # ── Organization isolation ───────────────────────────────────────────
 def test_organization_isolation(db_session):
     org_a, ua = _org_user(db_session, "orga", "a@orga.test")

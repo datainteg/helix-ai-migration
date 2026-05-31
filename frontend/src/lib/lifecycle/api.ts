@@ -148,6 +148,7 @@ export const resubmitStage = (projectId: string, stageKey: string, artifactVersi
   stagePost(projectId, stageKey, "resubmit", { artifact_version_id: artifactVersionId });
 export const skipStage = (projectId: string, stageKey: string, reason: string) =>
   stagePost(projectId, stageKey, "skip", { reason });
+export const completeStage = (projectId: string, stageKey: string) => stagePost(projectId, stageKey, "complete");
 export const advanceLifecycle = (projectId: string) =>
   req<MigrationStage | null>(`/api/v1/projects/${projectId}/lifecycle/advance`, { method: "POST" });
 

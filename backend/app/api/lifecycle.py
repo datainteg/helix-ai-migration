@@ -101,6 +101,14 @@ def skip(project_id: str, stage_key: str, data: StageSkipRequest, org_id: str = 
     return stage_to_dict(svc.skip_optional_stage(db, org_id, project_id, stage_key, user_id, data.reason))
 
 
+@router.post("/projects/{project_id}/lifecycle/{stage_key}/complete")
+def complete(project_id: str, stage_key: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
+    """Complete a non-agent stage (sprint execution / sign-off / closure) and
+    advance the lifecycle. Agent stages must be approved, not completed."""
+    ensure_project_access(db, org_id, project_id)
+    return stage_to_dict(svc.complete_stage(db, org_id, project_id, stage_key, user_id))
+
+
 @router.post("/projects/{project_id}/lifecycle/advance")
 def advance(project_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)

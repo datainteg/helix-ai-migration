@@ -40,12 +40,21 @@ def _connectors(db: Session, org_id: str, project_id: str) -> tuple[str, str]:
     return (src.connector_type if src else "n/a"), (tgt.connector_type if tgt else "n/a")
 
 
-def _latest_approved_recon(db: Session, org_id: str, project_id: str, recon_report_id: str | None) -> ReconReport | None:
+def _approved_recon_or_409(db: Session, org_id: str, project_id: str, recon_report_id: str | None) -> ReconReport:
+    """Resolve the recon report to sign off on — it MUST be approved. Sign-off
+    cannot proceed on an unapproved or absent reconciliation report."""
     q = db.query(ReconReport).filter(ReconReport.organization_id == org_id, ReconReport.project_id == project_id)
     if recon_report_id:
-        return q.filter(ReconReport.id == recon_report_id).first()
-    return q.filter(ReconReport.status == "approved").order_by(ReconReport.approved_at.desc().nullslast()).first() \
-        or q.order_by(ReconReport.created_at.desc()).first()
+        r = q.filter(ReconReport.id == recon_report_id).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Recon report not found")
+        if r.status != "approved":
+            raise HTTPException(status_code=409, detail="The reconciliation report must be approved before requesting sign-off.")
+        return r
+    r = q.filter(ReconReport.status == "approved").order_by(ReconReport.approved_at.desc().nullslast()).first()
+    if not r:
+        raise HTTPException(status_code=409, detail="Approve a reconciliation report before requesting sign-off.")
+    return r
 
 
 def _exec_summary(markdown: str | None) -> str:
@@ -71,13 +80,16 @@ def _exec_summary(markdown: str | None) -> str:
 def create_draft(db: Session, org_id: str, project_id: str, user_id: str, recon_report_id: str | None = None) -> SignoffRequest:
     project = sl._get_project(db, org_id, project_id)
     src, tgt = _connectors(db, org_id, project_id)
-    recon = _latest_approved_recon(db, org_id, project_id, recon_report_id)
+    recon = _approved_recon_or_409(db, org_id, project_id, recon_report_id)
     accepted = db.query(ValidationEvidence).filter(
         ValidationEvidence.organization_id == org_id, ValidationEvidence.project_id == project_id,
         ValidationEvidence.status == "accepted",
     ).count()
     alias = project.alias or project.name
-    summary = _exec_summary(recon.report_markdown if recon else None)
+    summary = _exec_summary(recon.report_markdown)
+    has_pdf = bool(recon.report_pdf_path)
+    report_ref = ("the attached reconciliation report" if has_pdf
+                  else "the reconciliation report (available in Helix)")
 
     subject = f"Migration reconciliation sign-off required — {alias}"
     body = (
@@ -90,26 +102,26 @@ def create_draft(db: Session, org_id: str, project_id: str, user_id: str, recon_
         f"<li><b>Validation:</b> {accepted} evidence item(s) accepted</li>"
         f"</ul>"
         f"<p><b>Reconciliation summary:</b><br/>{html.escape(summary)}</p>"
-        f"<p><b>Approval requested:</b> please review the attached reconciliation report and reply to "
+        f"<p><b>Approval requested:</b> please review {report_ref} and reply to "
         f"confirm sign-off, or request changes.</p>"
         f"<p><b>Next steps:</b> on your approval the project proceeds to documentation and closure.</p>"
         f"<p>Regards,<br/>Helix Migration</p>"
     )
     attachments: list[str] = []
-    if recon and recon.report_pdf_path:
+    if recon.report_pdf_path:
         attachments.append(recon.report_pdf_path)
     attachments.append(f"validation-summary: {accepted} accepted evidence item(s)")
 
     row = SignoffRequest(
         organization_id=org_id, project_id=project_id,
-        recon_report_id=(recon.id if recon else None),
+        recon_report_id=recon.id,
         recipient_email=None, subject=subject, body=body,
         attachment_paths_json=attachments, status="draft", created_by_user_id=user_id,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    sl._audit(db, org_id, user_id, "signoff_draft_created", project_id, LC.SIGN_OFF, f"recon={recon.id if recon else None}")
+    sl._audit(db, org_id, user_id, "signoff_draft_created", project_id, LC.SIGN_OFF, f"recon={recon.id}")
     return row
 
 
@@ -167,17 +179,27 @@ async def send_signoff(db: Session, org_id: str, signoff_id: str, user_id: str) 
 
 def mark_approved(db: Session, org_id: str, signoff_id: str, user_id: str, comment: str | None = None) -> SignoffRequest:
     s = _get(db, org_id, signoff_id)
+    if s.status != "sent":
+        raise HTTPException(status_code=409, detail=f"Sign-off is {s.status}; it must be sent before recording approval.")
     s.status = "approved"
     s.approved_at = _now()
     db.commit()
     db.refresh(s)
     sl._audit(db, org_id, user_id, "signoff_approved", s.project_id, LC.SIGN_OFF, comment)
+    # Business approval completes the SIGN_OFF lifecycle stage and advances.
+    try:
+        sl.complete_stage(db, org_id, s.project_id, LC.SIGN_OFF, user_id, actor_type="user")
+    except Exception:  # noqa: BLE001  (best-effort; the sign-off record is authoritative)
+        db.rollback()
     return s
 
 
 def mark_rejected(db: Session, org_id: str, signoff_id: str, user_id: str, comment: str | None = None) -> SignoffRequest:
     s = _get(db, org_id, signoff_id)
+    if s.status != "sent":
+        raise HTTPException(status_code=409, detail=f"Sign-off is {s.status}; it must be sent before recording a decision.")
     s.status = "rejected"
+    s.approved_at = None
     db.commit()
     db.refresh(s)
     sl._audit(db, org_id, user_id, "signoff_rejected", s.project_id, LC.SIGN_OFF, comment)

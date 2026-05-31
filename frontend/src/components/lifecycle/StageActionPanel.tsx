@@ -55,6 +55,16 @@ export function StageActionPanel({ projectId, projectKey, stage, canWrite, canAp
     <div className="space-y-3">
       {err && <ErrorBanner message={err} onDismiss={() => setErr(null)} />}
       <div className="flex flex-wrap gap-2">
+        {/* Non-agent stages (sprint execution / sign-off / closure) have no
+            artifact to approve — they are completed to advance the lifecycle. */}
+        {canWrite && !runnable && (s === "not_started" || s === "running" || s === "failed") && (
+          <Button disabled={!!busy} onClick={() => run("complete", async () => {
+            await api.completeStage(projectId, stage.stage_key);
+          })}>
+            {busy === "complete" ? "Completing…" : "Mark Stage Complete"}
+          </Button>
+        )}
+
         {/* Run / regenerate (authoring) */}
         {canWrite && runnable && (s === "not_started" || s === "failed") && (
           <Button disabled={!!busy} onClick={() => run("run", () => api.runStageAgent(projectId, stage.stage_key))}>

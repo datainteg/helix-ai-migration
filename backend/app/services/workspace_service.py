@@ -239,6 +239,8 @@ def review_generated_code(db: Session, org_id: str, code_id: str, user_id: str, 
 
 def approve_generated_code(db: Session, org_id: str, code_id: str, user_id: str) -> GeneratedCodeArtifact:
     row = _get_code(db, org_id, code_id)
+    if row.status not in ("draft", "reviewed"):
+        raise HTTPException(status_code=409, detail=f"Generated code is {row.status}; only draft/reviewed can be approved.")
     row.status = "approved"
     row.reviewed_by_user_id = user_id
     db.commit()

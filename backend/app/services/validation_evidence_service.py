@@ -113,6 +113,7 @@ def qa_review_evidence(db: Session, org_id: str, evidence_id: str, user_id: str)
     )
     ev.reviewed_by_agent = "qa"
     ev.review_summary = (markdown[:1000] if markdown else None)
+    ev.artifact_id = artifact.id   # link the evidence row to its QA-review artifact
     db.commit()
     db.refresh(ev)
     sl._audit(db, org_id, user_id, "validation_evidence_qa_reviewed", ev.project_id, LC.VALIDATION, ev.title[:120])
