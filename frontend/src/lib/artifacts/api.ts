@@ -44,6 +44,50 @@ export async function listOrgArtifacts(token: string | null, limit = 100): Promi
   return unwrapItems<Artifact>(data);
 }
 
-export function listArtifactVersions(token: string | null, artifactId: string): Promise<Artifact[]> {
-  return get<Artifact[]>(`/api/v1/artifacts/${artifactId}/versions`, token);
+export interface ArtifactVersion {
+  id: string;
+  artifact_id: string;
+  version_number: string;
+  content_hash: string;
+  generated_by_agent?: string | null;
+  llm_model?: string | null;
+  change_summary?: string | null;
+  approval_status: string;
+  approved_by?: string | null;
+}
+
+export function listArtifactVersions(token: string | null, artifactId: string): Promise<ArtifactVersion[]> {
+  return get<ArtifactVersion[]>(`/api/v1/artifacts/${artifactId}/versions`, token);
+}
+
+export interface ArtifactContent {
+  artifact_id: string;
+  version_number: string;
+  file_type?: string | null;
+  filename?: string | null;
+  content_hash?: string | null;
+  content: string | null;
+  truncated: boolean;
+  size_bytes: number;
+  note?: string;
+}
+
+/** Fetch decoded text content for an artifact (latest, or a specific version). */
+export function fetchArtifactContent(token: string | null, artifactId: string, version?: string): Promise<ArtifactContent> {
+  const q = version ? `?version=${encodeURIComponent(version)}` : "";
+  return get<ArtifactContent>(`/api/v1/artifacts/${artifactId}/content${q}`, token);
+}
+
+/** Save an edited artifact as a NEW version (history preserved). */
+export async function saveArtifactContent(token: string | null, artifactId: string, content: string, changeSummary?: string): Promise<ArtifactContent> {
+  const res = await fetch(`${API_BASE}/api/v1/artifacts/${artifactId}/content`, {
+    method: "PUT", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, change_summary: changeSummary }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Save failed (${res.status})`);
+  }
+  return res.json() as Promise<ArtifactContent>;
 }

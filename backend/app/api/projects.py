@@ -8,7 +8,7 @@ from app.auth.dependencies import resolve_active_org_id, require_permission, use
 from app.schemas.project import (
     ProjectCreate, ProjectResponse,
     SubProjectCreate, SubProjectResponse,
-    RequirementCreate, RequirementResponse,
+    RequirementCreate, RequirementResponse, RequirementUpdate,
     ConnectionCreate, ConnectionUpdate, ConnectionResponse, ConnectionTestResponse,
     SchemaCreate, SchemaResponse,
     TableCreate, TableResponse,
@@ -453,6 +453,14 @@ def api_add_requirement(project_id: str, data: RequirementCreate, user_id: str =
     return add_requirement(db, _org_id(user_id, db), project_id, data)
 
 
+@router.put("/projects/{project_id}/requirements/{requirement_id}", response_model=RequirementResponse)
+def api_edit_requirement(project_id: str, requirement_id: str, data: RequirementUpdate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Edit a requirement — creates a NEW version in the same chain (history is
+    preserved; the prior version is marked superseded)."""
+    from app.services.project_service import edit_requirement
+    return edit_requirement(db, _org_id(user_id, db), project_id, requirement_id, data.source_text)
+
+
 @router.get("/projects/{project_id}/requirements")
 def api_list_requirements(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     """List a project's migration requirements — used to start a workflow (the
@@ -468,7 +476,8 @@ def api_list_requirements(project_id: str, user_id: str = Depends(get_current_us
         .all()
     )
     return [{"id": r.id, "source_text": r.source_text, "status": r.status,
-             "version": r.version, "created_at": str(r.created_at) if r.created_at else None}
+             "version": r.version, "root_id": r.root_id or r.id,
+             "created_at": str(r.created_at) if r.created_at else None}
             for r in rows]
 
 

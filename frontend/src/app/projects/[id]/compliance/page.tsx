@@ -9,12 +9,13 @@
  */
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, ShieldCheck, FileText } from "lucide-react";
 
 import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Button, Card, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -23,6 +24,24 @@ export default function ProjectCompliancePage() {
   const { token } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
+  const [projectName, setProjectName] = useState("Project");
+  const [projectStatus, setProjectStatus] = useState("draft");
+  const [onHold, setOnHold] = useState(false);
+
+  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+
+  // Real project name + status for the ProjectShell header + breadcrumb.
+  useEffect(() => {
+    if (!id) return;
+    fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => {
+        setProjectName(p?.name || "Project");
+        if (p?.status) setProjectStatus(p.status);
+        setOnHold(!!p?.on_hold);
+      })
+      .catch(() => setProjectName("Project"));
+  }, [id]);
 
   const download = async () => {
     if (!id) return;
@@ -54,8 +73,9 @@ export default function ProjectCompliancePage() {
   return (
     <ProjectShell
       projectId={String(id)}
-      projectName="Untitled project"
-      projectStatus="active"
+      projectName={projectName}
+      projectStatus={projectStatus as any}
+      onHold={onHold}
       subtitle="SOC 2 / HIPAA-style evidence bundle for this project."
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}

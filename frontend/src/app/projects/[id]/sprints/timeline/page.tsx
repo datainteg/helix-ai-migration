@@ -8,7 +8,7 @@
  * checkpoints derived from sprint milestones / endDates.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Filter } from "lucide-react";
 
@@ -57,7 +57,7 @@ export default function SprintTimelinePage() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -68,6 +68,10 @@ export default function SprintTimelinePage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // Compute global date range
   const range = useMemo(() => {
@@ -143,9 +147,10 @@ export default function SprintTimelinePage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        load();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

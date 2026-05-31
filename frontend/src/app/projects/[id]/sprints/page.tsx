@@ -122,9 +122,10 @@ export default function SprintDashboardPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        refetchSprints();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

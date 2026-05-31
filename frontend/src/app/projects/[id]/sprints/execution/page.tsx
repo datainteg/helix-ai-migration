@@ -7,7 +7,7 @@
  * runs, failed queue (with retry), and blocked workflows from sprint tasks.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { RefreshCw, Pause, AlertTriangle, RotateCw } from "lucide-react";
 
@@ -70,7 +70,7 @@ export default function SprintExecutionPage() {
   const [streamLive, setStreamLive] = useState(false);
 
   // Active sprint lookup is a one-shot fetch (independent of the SSE stream).
-  useEffect(() => {
+  const loadActive = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -81,6 +81,10 @@ export default function SprintExecutionPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    loadActive();
+  }, [loadActive]);
 
   // SSE execution stream — replaces the prior single-fetch.
   useEffect(() => {
@@ -139,9 +143,10 @@ export default function SprintExecutionPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        loadActive();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

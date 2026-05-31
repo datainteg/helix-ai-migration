@@ -7,7 +7,7 @@
  * validation + recon trend lines, and a per-sprint stats table.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, BarChart3 } from "lucide-react";
 
@@ -53,7 +53,7 @@ export default function SprintAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -70,6 +70,10 @@ export default function SprintAnalyticsPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const avgVelocity = useMemo(() => {
     const delivered = velocity.map((v) => v.delivered);
@@ -111,9 +115,10 @@ export default function SprintAnalyticsPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        load();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

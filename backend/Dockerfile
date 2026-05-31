@@ -39,7 +39,12 @@ COPY connectors/ ./connectors/
 COPY _bmad/ ./_bmad/
 
 RUN adduser --disabled-password --gecos "" --uid 1000 helix \
+    && mkdir -p /app/data/artifacts \
     && chown -R helix:helix /app
+# Pre-creating /app/data/artifacts as helix means a freshly-created named volume
+# mounted there inherits helix ownership — so the app (uid 1000) can write
+# generated/uploaded artifacts. Without this the empty volume comes up root-owned
+# and every artifact write fails with EACCES.
 USER 1000
 
 EXPOSE 8000

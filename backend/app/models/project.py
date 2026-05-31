@@ -60,6 +60,11 @@ class MigrationRequirement(BaseModel):
     source_text = Column(Text, nullable=False)
     status = Column(String(50), default="draft")
     version = Column(String(20), default="1")
+    # Version-chain grouping: all versions of one logical requirement share a
+    # root_id (the id of v1). NULL for legacy rows = treated as their own root.
+    # Editing a requirement creates a NEW row (next version) with the same
+    # root_id, preserving history.
+    root_id = Column(String(36), nullable=True, index=True)
 
     project = relationship("Project", back_populates="requirements")
 

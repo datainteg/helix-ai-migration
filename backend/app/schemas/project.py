@@ -68,8 +68,15 @@ class RequirementResponse(BaseModel):
     source_text: str
     status: str
     version: str
+    root_id: Optional[str] = None
+    created_at: Optional[Any] = None
 
     model_config = {"from_attributes": True}
+
+
+class RequirementUpdate(BaseModel):
+    # SC-019: same 10 KB cap as create — this becomes the agent prompt.
+    source_text: str = Field(max_length=10_000)
 
 
 class ConnectionCreate(BaseModel):

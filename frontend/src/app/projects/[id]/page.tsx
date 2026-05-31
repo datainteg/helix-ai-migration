@@ -10,7 +10,7 @@
  * when missing.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -22,6 +22,7 @@ import {
   FileText,
   ArrowRight,
   Pencil,
+  RotateCw,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -160,27 +161,61 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<APIProject | null>(null);
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [holdPrompt, setHoldPrompt] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
 
-  const load = () => {
+  const load = useCallback(async () => {
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
-    fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setProject(data ?? null))
-      .catch(() => setProject(null));
-    fetch(`${API_BASE}/api/v1/projects/${id}/overview`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setOverview(data ?? null))
-      .catch(() => setOverview(null));
-  };
+    setLoading(true);
+    setError("");
+    try {
+      const [pRes, oRes] = await Promise.all([
+        fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" }),
+        fetch(`${API_BASE}/api/v1/projects/${id}/overview`, { credentials: "include" }),
+      ]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+      // The project endpoint is the source of truth for existence: a 404 here
+      // means the project genuinely doesn't exist; any other non-OK is treated
+      // as a transient/retryable failure.
+      if (pRes.status === 404) {
+        setProject(null);
+        setOverview(null);
+        setError("Project not found — it may have been deleted or you don't have access.");
+        return;
+      }
+      if (!pRes.ok) {
+        throw new Error(`project ${pRes.status}`);
+      }
+
+      const projectData: APIProject = await pRes.json();
+      setProject(projectData);
+
+      // Overview is supplementary — if it fails we still show the project, but
+      // surface a (dismissable) error so the user knows metrics are stale.
+      if (oRes.ok) {
+        setOverview(await oRes.json());
+      } else {
+        setOverview(null);
+        if (oRes.status !== 404) {
+          setError("Couldn't load this project's overview — retry to refresh metrics.");
+        }
+      }
+    } catch {
+      // Network failure or a non-404 project error: keep whatever we had and
+      // let the user retry rather than showing a silent blank page.
+      setError("Couldn't load this project — retry.");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
 
   // Real name once loaded; a neutral placeholder while the fetch is in flight
   // (never "Untitled" for a project that actually has a name).
-  const displayName = project?.name || (project === null ? "Loading…" : "Untitled project");
+  const displayName = project?.name || (loading ? "Loading…" : "Untitled project");
   const shortId = String(id).slice(0, 8);
   // Register id → name so breadcrumbs (here + deep sub-pages) show the project
   // name instead of the raw id.
@@ -244,8 +279,13 @@ export default function ProjectDetailPage() {
       }
     >
       {error && (
-        <div className="mb-4">
-          <ErrorBanner message={error} onDismiss={() => setError("")} />
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex-1">
+            <ErrorBanner message={error} onDismiss={() => setError("")} />
+          </div>
+          <Button variant="outline" onClick={() => load()} loading={loading}>
+            <RotateCw className="h-3.5 w-3.5" /> Retry
+          </Button>
         </div>
       )}
 

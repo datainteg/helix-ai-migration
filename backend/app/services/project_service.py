@@ -154,9 +154,48 @@ def add_requirement(db: Session, org_id: str, project_id: str, data: Requirement
     _get_project(db, org_id, project_id)
     req = MigrationRequirement(project_id=project_id, source_text=data.source_text)
     db.add(req)
+    db.flush()
+    req.root_id = req.id  # a brand-new requirement is the root of its own chain
     db.commit()
     db.refresh(req)
     return RequirementResponse.model_validate(req)
+
+
+def edit_requirement(db: Session, org_id: str, project_id: str, requirement_id: str, source_text: str) -> RequirementResponse:
+    """Edit a requirement by creating a NEW version in the same chain.
+
+    History is preserved: the prior row is kept (marked 'superseded') and a new
+    row is inserted with the next version number, sharing root_id. The latest
+    version is what runs use.
+    """
+    _get_project(db, org_id, project_id)
+    current = (
+        db.query(MigrationRequirement)
+        .filter(MigrationRequirement.id == requirement_id, MigrationRequirement.project_id == project_id)
+        .first()
+    )
+    if not current:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    root = current.root_id or current.id
+    siblings = db.query(MigrationRequirement).filter(
+        (MigrationRequirement.root_id == root) | (MigrationRequirement.id == root),
+        MigrationRequirement.project_id == project_id,
+    ).all()
+    next_version = max((int(s.version) if str(s.version).isdigit() else 1) for s in siblings) + 1
+    # Retire every prior version in this chain — the new one becomes current.
+    for s in siblings:
+        if s.status != "superseded":
+            s.status = "superseded"
+
+    new_req = MigrationRequirement(
+        project_id=project_id, source_text=source_text,
+        version=str(next_version), root_id=root, status="draft",
+    )
+    db.add(new_req)
+    db.commit()
+    db.refresh(new_req)
+    return RequirementResponse.model_validate(new_req)
 
 
 # ── Connection config encryption helpers ────────────────────────────

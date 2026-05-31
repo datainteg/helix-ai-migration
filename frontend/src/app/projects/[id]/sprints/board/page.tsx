@@ -95,7 +95,7 @@ export default function SprintBoardPage() {
     [token],
   );
 
-  useEffect(() => {
+  const loadSprints = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -113,6 +113,10 @@ export default function SprintBoardPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    loadSprints();
+  }, [loadSprints]);
 
   useEffect(() => {
     if (!token || !selectedSprintId) {
@@ -136,9 +140,10 @@ export default function SprintBoardPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        loadSprints();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

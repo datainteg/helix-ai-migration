@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query, Request, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -140,6 +140,37 @@ def api_get_artifact(artifact_id: str, user_id: str = Depends(get_current_user_i
 @router.get("/artifacts/{artifact_id}/versions")
 def api_list_versions(artifact_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return list_versions(db, resolve_active_org_id(db, user_id), artifact_id)
+
+
+@router.get("/artifacts/{artifact_id}/content")
+def api_get_artifact_content(
+    artifact_id: str,
+    version: str | None = None,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Decoded text content of an artifact (latest version, or ?version=<n>).
+    Powers the Developer Workspace code view + version diff."""
+    from app.services.artifact_version_service import read_artifact_content
+    return read_artifact_content(db, resolve_active_org_id(db, user_id), artifact_id, version)
+
+
+class ArtifactEdit(BaseModel):
+    content: str = Field(max_length=2_000_000)  # ~2MB of text
+    change_summary: str | None = Field(default=None, max_length=500)
+
+
+@router.put("/artifacts/{artifact_id}/content")
+def api_edit_artifact_content(
+    artifact_id: str,
+    data: ArtifactEdit,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Save an edited artifact as a NEW version. Humans use this to correct
+    AI-generated scripts (extra/missing statements). History is preserved."""
+    from app.services.artifact_version_service import save_artifact_edit
+    return save_artifact_edit(db, resolve_active_org_id(db, user_id), artifact_id, data.content, data.change_summary, user_id)
 
 
 class RollbackLink(BaseModel):

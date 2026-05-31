@@ -7,7 +7,7 @@
  * 5x5 likelihood × impact heatmap, and detail cards sorted by severity.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/layout";
@@ -59,7 +59,7 @@ export default function SprintRisksPage() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -70,6 +70,10 @@ export default function SprintRisksPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     if (!token || !active) {
@@ -122,9 +126,10 @@ export default function SprintRisksPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        load();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

@@ -7,7 +7,7 @@
  * based) with a colour/status legend and side-panel summary statistics.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Download, Maximize2 } from "lucide-react";
 
@@ -44,7 +44,7 @@ export default function SprintMappingPage() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!token || !projectId) {
       setLoading(false);
       return;
@@ -58,6 +58,10 @@ export default function SprintMappingPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token, projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // Aggregate counts per status
   const statusCounts = useMemo(() => {
@@ -96,9 +100,10 @@ export default function SprintMappingPage() {
     setSeeding(true);
     seedSprints(token, projectId)
       .then(() => {
-        if (typeof window !== "undefined") window.location.reload();
+        load();
       })
-      .catch(() => setSeeding(false));
+      .catch(() => {})
+      .finally(() => setSeeding(false));
   };
 
   if (loading) {

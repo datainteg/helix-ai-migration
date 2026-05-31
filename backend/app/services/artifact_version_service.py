@@ -49,6 +49,113 @@ def get_artifact(db: Session, org_id: str, artifact_id: str) -> ArtifactResponse
     return ArtifactResponse.model_validate(artifact)
 
 
+_MAX_CONTENT_BYTES = 512 * 1024  # cap inline content payloads (code artifacts are text)
+
+
+def read_artifact_content(db: Session, org_id: str, artifact_id: str, version_number: str | None = None) -> dict:
+    """Return the decoded text content of an artifact version (org-scoped).
+
+    version_number=None → the latest version (falls back to the artifact's own
+    storage_path if no version rows exist). Reads real stored bytes via the
+    storage driver; never fabricates content. Caps the payload and decodes as
+    UTF-8 (replace) since artifacts are SQL/text. On a read failure returns
+    content=None + a note rather than 500, so the UI can show an honest state.
+    """
+    from fastapi import HTTPException
+
+    artifact = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id,
+        CodeArtifact.organization_id == org_id,
+    ).first()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    q = db.query(CodeArtifactVersion).filter(CodeArtifactVersion.artifact_id == artifact_id)
+    if version_number is not None:
+        version = q.filter(CodeArtifactVersion.version_number == version_number).first()
+        if not version:
+            raise HTTPException(status_code=404, detail="Artifact version not found")
+    else:
+        version = q.order_by(CodeArtifactVersion.version_number.desc()).first()
+
+    storage_path = version.storage_path if version else artifact.storage_path
+    resolved_version = version.version_number if version else "1"
+    content_hash = version.content_hash if version else artifact.content_hash
+
+    base = {
+        "artifact_id": artifact_id,
+        "version_number": resolved_version,
+        "file_type": artifact.file_type,
+        "filename": artifact.filename,
+        "content_hash": content_hash,
+    }
+    if not storage_path:
+        return {**base, "content": None, "truncated": False, "size_bytes": 0, "note": "No stored content path."}
+    try:
+        from app.storage.s3 import read_artifact_bytes
+        raw = read_artifact_bytes(storage_path)
+    except Exception as exc:  # noqa: BLE001 — surface as honest empty state, not 500
+        return {**base, "content": None, "truncated": False, "size_bytes": 0, "note": f"Content unavailable: {exc}"}
+    truncated = len(raw) > _MAX_CONTENT_BYTES
+    text = raw[:_MAX_CONTENT_BYTES].decode("utf-8", errors="replace")
+    return {**base, "content": text, "truncated": truncated, "size_bytes": len(raw)}
+
+
+def save_artifact_edit(
+    db: Session, org_id: str, artifact_id: str, content: str,
+    change_summary: str | None = None, editor_user_id: str | None = None,
+) -> dict:
+    """Save an edited artifact as a NEW version (history preserved).
+
+    Writes the new bytes via the storage driver, inserts a CodeArtifactVersion
+    with the next version number, and points the artifact's head
+    storage_path/content_hash at it. Returns the new version's content payload
+    (same shape as read_artifact_content). Used when a human corrects
+    AI-generated output (extra/missing statements, etc.).
+    """
+    from fastapi import HTTPException
+
+    artifact = db.query(CodeArtifact).filter(
+        CodeArtifact.id == artifact_id,
+        CodeArtifact.organization_id == org_id,
+    ).first()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    raw = (content or "").encode("utf-8")
+    new_hash = hash_content(raw)
+
+    from app.storage.s3 import save_artifact
+    storage_path = save_artifact(artifact.project_id, artifact.filename, raw)
+
+    existing = db.query(CodeArtifactVersion).filter(CodeArtifactVersion.artifact_id == artifact_id).all()
+    next_version = max((int(v.version_number) if str(v.version_number).isdigit() else 1) for v in existing) + 1 if existing else 1
+
+    version = CodeArtifactVersion(
+        artifact_id=artifact_id, version_number=str(next_version),
+        content_hash=new_hash, storage_path=storage_path,
+        change_summary=change_summary or "Manual edit",
+        approval_status="draft", generated_by_agent="human",
+        approved_by=editor_user_id,
+    )
+    db.add(version)
+    # Point the artifact head at the new content.
+    artifact.storage_path = storage_path
+    artifact.content_hash = new_hash
+    db.commit()
+
+    return {
+        "artifact_id": artifact_id,
+        "version_number": str(next_version),
+        "file_type": artifact.file_type,
+        "filename": artifact.filename,
+        "content_hash": new_hash,
+        "content": content,
+        "truncated": False,
+        "size_bytes": len(raw),
+    }
+
+
 def list_versions(db: Session, org_id: str, artifact_id: str) -> list[ArtifactVersionResponse]:
     artifact = db.query(CodeArtifact).filter(
         CodeArtifact.id == artifact_id,

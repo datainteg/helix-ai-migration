@@ -63,6 +63,7 @@ export interface ProjectRequirement {
   source_text: string;
   status: string;
   version: string;
+  root_id?: string | null;   // version-chain key (all versions share it)
   created_at: string | null;
 }
 
@@ -80,6 +81,20 @@ export async function createProjectRequirement(projectId: string, sourceText: st
   if (!res.ok) {
     const d = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error((d && d.detail) || `Create failed (${res.status})`);
+  }
+  return res.json() as Promise<ProjectRequirement>;
+}
+
+/** Edit a requirement → creates a NEW version in the same chain (history kept). */
+export async function editProjectRequirement(projectId: string, requirementId: string, sourceText: string): Promise<ProjectRequirement> {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/requirements/${requirementId}`, {
+    method: "PUT", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_text: sourceText }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Edit failed (${res.status})`);
   }
   return res.json() as Promise<ProjectRequirement>;
 }

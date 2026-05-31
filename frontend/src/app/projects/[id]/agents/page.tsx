@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Play, ExternalLink } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
@@ -24,6 +24,7 @@ import {
   type ProjectRequirement,
   type RequirementSpec,
 } from "@/lib/workflows/api";
+import { approveMigration, rejectMigration } from "@/lib/migrations/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -45,6 +46,7 @@ const AGENT_PHASE: Record<string, { label: string; color: "indigo" | "violet" | 
 
 export default function ProjectAgentsPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const { token, can } = useAuth();
   const canWrite = can("project:write");
   const [runs, setRuns] = useState<WorkflowRun[] | null>(null);
@@ -52,17 +54,39 @@ export default function ProjectAgentsPage() {
   const [loading, setLoading] = useState(true);
   const [projectName, setProjectName] = useState("Loading…");
   const [migType, setMigType] = useState("db_to_db");
+  const [onHold, setOnHold] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [runModal, setRunModal] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState<"" | "approve" | "reject">("");
+
+  const awaitingApproval = active?.status === "awaiting_approval";
+  const decide = async (kind: "approve" | "reject") => {
+    if (!active) return;
+    setApprovalBusy(kind);
+    try {
+      await (kind === "approve" ? approveMigration(active.workflow_id) : rejectMigration(active.workflow_id));
+      setReloadKey((k) => k + 1);
+    } catch {
+      // surfaced via the run status not changing; keep the panel responsive
+    } finally {
+      setApprovalBusy("");
+    }
+  };
 
   useRegisterCrumbLabel(String(id), projectName !== "Loading…" ? projectName : undefined);
+
+  // The persistent "Start Workflow" CTA (ProjectShell) links here with ?run=new
+  // to open the Run modal directly. Honour it once the page mounts.
+  useEffect(() => {
+    if (canWrite && !onHold && searchParams.get("run") === "new") setRunModal(true);
+  }, [searchParams, canWrite, onHold]);
 
   // Real project name for the ProjectShell header + breadcrumb.
   useEffect(() => {
     if (!id) return;
     fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); })
+      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); setOnHold(!!p?.on_hold); })
       .catch(() => setProjectName("Project"));
   }, [id]);
 
@@ -138,17 +162,15 @@ export default function ProjectAgentsPage() {
       projectId={String(id)}
       projectName={projectName}
       projectStatus={active ? (active.status as any) : "draft"}
+      onHold={onHold}
       subtitle="This project's workflow runs — live agent pipeline, execution log, and artifacts."
-      actions={<>
-        {active && (
+      actions={
+        active ? (
           <Link href={`/agents?run=${encodeURIComponent(active.workflow_id)}`}>
             <Button variant="outline"><ExternalLink className="h-4 w-4" /> View in Agents</Button>
           </Link>
-        )}
-        {canWrite && (
-          <Button onClick={() => setRunModal(true)}><Play className="h-4 w-4" /> Run Workflow</Button>
-        )}
-      </>}
+        ) : undefined
+      }
     >
       {runModal && (
         <RunWorkflowModal
@@ -199,12 +221,23 @@ export default function ProjectAgentsPage() {
                 </dl>
               </Card>
               <Card title="Human Approval">
-                <p className="text-[12.5px] text-ink-3">Review the Architect Agent output before proceeding to execution agents.</p>
-                <div className="mt-3 flex flex-col gap-2">
-                  <Button className="w-full justify-center">Approve</Button>
-                  <Button variant="outline" className="w-full justify-center">Request changes</Button>
-                  <Button variant="danger" className="w-full justify-center">Reject</Button>
-                </div>
+                {awaitingApproval ? (
+                  <>
+                    <p className="text-[12.5px] text-ink-3">This run is paused for review. Approve to proceed to the execution agents, or reject to stop it.</p>
+                    {canWrite ? (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <Button className="w-full justify-center" loading={approvalBusy === "approve"} disabled={approvalBusy !== ""} onClick={() => decide("approve")}>Approve</Button>
+                        <Button variant="danger" className="w-full justify-center" loading={approvalBusy === "reject"} disabled={approvalBusy !== ""} onClick={() => decide("reject")}>Reject</Button>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[12px] text-ink-4">You don&apos;t have permission to approve runs.</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[12.5px] text-ink-3">
+                    No approval pending. The pipeline pauses here for human review after the mapping step — approve / reject controls appear when a run is awaiting sign-off.
+                  </p>
+                )}
               </Card>
               <Card title="Output Artifacts">
                 {active && active.steps.some((s) => s.artifact_path) ? (
