@@ -20,22 +20,23 @@ interface Props {
   onHold?: boolean;
 }
 
-// Migration is folded into Workflows (single canonical run UI); the legacy
-// /migration route redirects to /agents.
+// Tabs are ordered by the migration lifecycle and grouped (a thin divider marks
+// each group boundary): Plan → Execute → Verify → Release → Govern.
+// Migration is folded into Workflows (legacy /migration redirects to /agents).
 const TABS = [
-  { label: "Overview", suffix: "" },
-  { label: "Requirements", suffix: "/requirements" },
-  { label: "Source & Target", suffix: "/source-target" },
-  { label: "Workflows", suffix: "/agents" },
-  { label: "Artifacts", suffix: "/artifacts" },
-  { label: "Validation", suffix: "/validation" },
-  { label: "Recon", suffix: "/recon" },
-  { label: "Cutover", suffix: "/cutover" },
-  { label: "Developer Workspace", suffix: "/developer-workspace" },
-  { label: "Compliance", suffix: "/compliance" },
-  { label: "Reports", suffix: "/reports" },
-  { label: "Approvals", suffix: "/approvals" },
-  { label: "Timeline", suffix: "/timeline" },
+  { label: "Overview", suffix: "", group: "plan" },
+  { label: "Requirements", suffix: "/requirements", group: "plan" },
+  { label: "Source & Target", suffix: "/source-target", group: "plan" },
+  { label: "Workflows", suffix: "/agents", group: "execute" },
+  { label: "Artifacts", suffix: "/artifacts", group: "execute" },
+  { label: "Developer Workspace", suffix: "/developer-workspace", group: "execute" },
+  { label: "Validation", suffix: "/validation", group: "verify" },
+  { label: "Recon", suffix: "/recon", group: "verify" },
+  { label: "Cutover", suffix: "/cutover", group: "release" },
+  { label: "Approvals", suffix: "/approvals", group: "release" },
+  { label: "Compliance", suffix: "/compliance", group: "govern" },
+  { label: "Reports", suffix: "/reports", group: "govern" },
+  { label: "Timeline", suffix: "/timeline", group: "govern" },
 ];
 
 export function ProjectShell({ children, projectId, projectName, projectStatus, subtitle, actions, onHold }: Props) {
@@ -69,25 +70,28 @@ export function ProjectShell({ children, projectId, projectName, projectStatus, 
       }
     >
       <div className="sticky top-11 z-10 -mx-6 sm:-mx-8 px-6 sm:px-8 mb-6 border-b border-hx bg-app/85 backdrop-blur supports-[backdrop-filter]:bg-app/70 overflow-x-auto">
-        <nav className="flex gap-0.5 min-w-max">
-          {TABS.map((tab) => {
+        <nav className="flex items-center gap-0.5 min-w-max">
+          {TABS.map((tab, i) => {
             const href = `${base}${tab.suffix}`;
             const active = tab.suffix === "" ? pathname === base : pathname.startsWith(href);
+            const newGroup = i > 0 && tab.group !== TABS[i - 1].group;
             return (
-              <Link
-                key={tab.label}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "relative px-3 py-2.5 text-[13px] rounded-t-md whitespace-nowrap transition-colors",
-                  active
-                    ? "text-helix-700 font-medium"
-                    : "text-ink-3 hover:text-ink-1 hover:bg-app-2"
-                )}
-              >
-                {tab.label}
-                {active && <span className="absolute left-2.5 right-2.5 -bottom-px h-0.5 rounded-full bg-helix-500" />}
-              </Link>
+              <span key={tab.label} className="flex items-center">
+                {newGroup && <span className="mx-1.5 h-4 w-px bg-hx-2" aria-hidden />}
+                <Link
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "relative px-3 py-2.5 text-[13px] rounded-t-md whitespace-nowrap transition-colors",
+                    active
+                      ? "text-helix-700 font-medium"
+                      : "text-ink-3 hover:text-ink-1 hover:bg-app-2"
+                  )}
+                >
+                  {tab.label}
+                  {active && <span className="absolute left-2.5 right-2.5 -bottom-px h-0.5 rounded-full bg-helix-500" />}
+                </Link>
+              </span>
             );
           })}
         </nav>
