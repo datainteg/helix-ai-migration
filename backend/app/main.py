@@ -48,6 +48,7 @@ from app.api.lifecycle_artifacts import router as lifecycle_artifacts_router
 from app.api.stage_agents import router as stage_agents_router
 from app.api.workspaces import router as workspaces_router
 from app.api.validation_evidence import router as validation_evidence_router
+from app.api.recon_reports import router as recon_reports_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -388,6 +389,7 @@ app.include_router(lifecycle_artifacts_router, prefix="/api/v1")
 app.include_router(stage_agents_router, prefix="/api/v1")
 app.include_router(workspaces_router, prefix="/api/v1")
 app.include_router(validation_evidence_router, prefix="/api/v1")
+app.include_router(recon_reports_router, prefix="/api/v1")
 app.include_router(code_reviews_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")

@@ -116,6 +116,10 @@ export default function ProjectReconPage() {
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
 
+      <div className="flex items-center gap-4 text-[12.5px]">
+        <a href={`/projects/${projectKey}/recon/reports`} className="text-helix-700 hover:underline">Recon Agent &amp; business reports →</a>
+      </div>
+
       {loading ? (
         <LoadingState label="Loading reconciliation…" />
       ) : (
