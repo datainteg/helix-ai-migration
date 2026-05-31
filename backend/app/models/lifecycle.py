@@ -24,6 +24,7 @@ class MigrationStage(BaseModel):
     started_at = Column(DateTime(timezone=True), nullable=True)
     generated_at = Column(DateTime(timezone=True), nullable=True)
     submitted_for_review_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_for_review_by = Column(String(36), nullable=True)  # SoD: who submitted (may not self-approve)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     rejected_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

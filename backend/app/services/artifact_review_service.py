@@ -10,6 +10,7 @@ import difflib
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.migration_artifact import (
@@ -29,6 +30,25 @@ def _get_artifact(db: Session, org_id: str, artifact_id: str) -> MigrationArtifa
     if not a:
         raise HTTPException(status_code=404, detail="Artifact not found")
     return a
+
+
+def _resolve_review_version(db: Session, artifact: MigrationArtifact, version_id: str | None) -> str:
+    """Resolve and validate the version to act on for a review transition.
+
+    Falls back to the artifact's current version, then verifies the version
+    actually belongs to THIS artifact — a caller must not be able to lock /
+    review a foreign artifact's version by passing its id (cross-artifact
+    corruption)."""
+    vid = version_id or artifact.current_version_id
+    if not vid:
+        raise HTTPException(status_code=409, detail="Artifact has no version to review.")
+    belongs = db.query(MigrationArtifactVersion.id).filter(
+        MigrationArtifactVersion.id == vid,
+        MigrationArtifactVersion.artifact_id == artifact.id,
+    ).first()
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Version does not belong to this artifact.")
+    return vid
 
 
 def _next_version_number(db: Session, artifact_id: str) -> int:
@@ -76,15 +96,28 @@ def create_artifact_version(db: Session, org_id: str, artifact_id: str, content_
         artifact.status = "resubmitted"
         artifact.approved_by_user_id = None
         artifact.approved_at = None
-    version = MigrationArtifactVersion(
-        artifact_id=artifact_id, version_number=_next_version_number(db, artifact_id),
-        content_markdown=content_markdown, content_json=content_json,
-        change_summary=change_summary, created_by_type=created_by_type,
-        created_by_agent=created_by_agent, created_by_user_id=created_by_user_id,
-        source_version_id=source_version_id,
-    )
-    db.add(version)
-    db.flush()
+    # The (artifact_id, version_number) pair is UNIQUE at the DB level, so a
+    # concurrent insert that grabbed the same number fails the SAVEPOINT; we
+    # recompute the next number and retry. The savepoint keeps the artifact
+    # re-open mutation above intact across retries.
+    version: MigrationArtifactVersion | None = None
+    for _ in range(6):
+        candidate = MigrationArtifactVersion(
+            artifact_id=artifact_id, version_number=_next_version_number(db, artifact_id),
+            content_markdown=content_markdown, content_json=content_json,
+            change_summary=change_summary, created_by_type=created_by_type,
+            created_by_agent=created_by_agent, created_by_user_id=created_by_user_id,
+            source_version_id=source_version_id,
+        )
+        try:
+            with db.begin_nested():
+                db.add(candidate)
+            version = candidate
+            break
+        except IntegrityError:
+            continue
+    if version is None:
+        raise HTTPException(status_code=409, detail="Could not allocate a version number; please retry.")
     artifact.current_version_id = version.id
     db.commit()
     db.refresh(version)
@@ -139,9 +172,7 @@ def _record_review(db: Session, artifact: MigrationArtifact, version_id: str, re
 
 def submit_artifact_for_review(db: Session, org_id: str, artifact_id: str, version_id: str | None, user_id: str) -> MigrationArtifact:
     artifact = _get_artifact(db, org_id, artifact_id)
-    vid = version_id or artifact.current_version_id
-    if not vid:
-        raise HTTPException(status_code=409, detail="Artifact has no version to submit.")
+    _resolve_review_version(db, artifact, version_id)
     artifact.status = "under_review"
     db.commit()
     return artifact
@@ -149,9 +180,7 @@ def submit_artifact_for_review(db: Session, org_id: str, artifact_id: str, versi
 
 def approve_artifact(db: Session, org_id: str, artifact_id: str, version_id: str | None, reviewer_user_id: str, comment: str | None) -> MigrationArtifact:
     artifact = _get_artifact(db, org_id, artifact_id)
-    vid = version_id or artifact.current_version_id
-    if not vid:
-        raise HTTPException(status_code=409, detail="Cannot approve: no current artifact version.")
+    vid = _resolve_review_version(db, artifact, version_id)
     if artifact.status not in ("generated", "under_review", "resubmitted"):
         raise HTTPException(status_code=409, detail=f"Artifact is {artifact.status}; only generated/under_review/resubmitted can be approved.")
     artifact.status = "approved"
@@ -165,7 +194,7 @@ def approve_artifact(db: Session, org_id: str, artifact_id: str, version_id: str
 
 def reject_artifact(db: Session, org_id: str, artifact_id: str, version_id: str | None, reviewer_user_id: str, comment: str) -> MigrationArtifact:
     artifact = _get_artifact(db, org_id, artifact_id)
-    vid = version_id or artifact.current_version_id
+    vid = _resolve_review_version(db, artifact, version_id)
     artifact.status = "rejected"
     _record_review(db, artifact, vid, reviewer_user_id, "rejected", comment)
     db.commit()
@@ -174,7 +203,7 @@ def reject_artifact(db: Session, org_id: str, artifact_id: str, version_id: str 
 
 def request_artifact_changes(db: Session, org_id: str, artifact_id: str, version_id: str | None, reviewer_user_id: str, comment: str) -> MigrationArtifact:
     artifact = _get_artifact(db, org_id, artifact_id)
-    vid = version_id or artifact.current_version_id
+    vid = _resolve_review_version(db, artifact, version_id)
     artifact.status = "changes_requested"
     _record_review(db, artifact, vid, reviewer_user_id, "changes_requested", comment)
     db.commit()

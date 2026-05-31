@@ -97,11 +97,10 @@ def initialize_project_lifecycle(db: Session, organization_id: str, project_id: 
         )
         db.add(st)
         stages.append(st)
-    proj = db.query(Project).filter(Project.id == project_id).first()
-    if proj is not None:
-        proj.lifecycle_status = LC.LIFECYCLE_NOT_STARTED
-        proj.current_stage = LC.PROJECT_CONTEXT
-        proj.stage_progress_percent = 0
+    proj = _get_project(db, organization_id, project_id)
+    proj.lifecycle_status = LC.LIFECYCLE_NOT_STARTED
+    proj.current_stage = LC.PROJECT_CONTEXT
+    proj.stage_progress_percent = 0
     db.commit()
     return stages
 
@@ -116,10 +115,21 @@ def get_project_lifecycle(db: Session, organization_id: str, project_id: str) ->
     )
 
 
+def _is_blocking(st: MigrationStage) -> bool:
+    """A stage that still pins the lifecycle pointer. Done stages don't; an
+    OPTIONAL stage left at not_started doesn't either (it is passively skipped
+    unless someone explicitly starts it), so the project can still complete."""
+    if st.status in LC.STAGE_DONE_STATUSES:
+        return False
+    if st.is_optional and st.status == "not_started":
+        return False
+    return True
+
+
 def get_current_stage(db: Session, organization_id: str, project_id: str) -> MigrationStage | None:
-    """First non-done, non-skipped stage in order (the active gate)."""
+    """First blocking stage in order (the active gate)."""
     for st in get_project_lifecycle(db, organization_id, project_id):
-        if st.status not in LC.STAGE_DONE_STATUSES:
+        if _is_blocking(st):
             return st
     return None
 
@@ -130,31 +140,49 @@ def _prior_required_stage(stages: list[MigrationStage], target: MigrationStage) 
     return prior[-1] if prior else None
 
 
+def _require_prior_done(stages: list[MigrationStage], stage: MigrationStage, verb: str) -> None:
+    """Enforce stage ordering: the closest preceding REQUIRED stage must be
+    done (approved/skipped/completed) before this stage can be acted on. This
+    is the single ordering gate shared by start/submit/generate/approve so a
+    later stage can never leapfrog an un-approved required gate."""
+    prior = _prior_required_stage(stages, stage)
+    if prior is not None and prior.status not in LC.STAGE_DONE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Cannot {verb} {stage.stage_key}: previous stage {prior.stage_key} is not approved.")
+
+
+# Statuses a stage may be (re)started from. Already-done or in-flight stages
+# are rejected so /start can never regress a closed gate back to 'running'.
+_STARTABLE_STATUSES = {"not_started", "rejected", "edit_requested", "failed"}
+
+
 # ── Transitions ──────────────────────────────────────────────────────
 def start_stage(db: Session, organization_id: str, project_id: str, stage_key: str, actor_user_id: str) -> MigrationStage:
     stages = get_project_lifecycle(db, organization_id, project_id)
     stage = next((s for s in stages if s.stage_key == stage_key), None)
     if not stage:
         raise HTTPException(status_code=404, detail=f"Stage {stage_key} not found")
-    prior = _prior_required_stage(stages, stage)
-    if prior is not None and prior.status not in LC.STAGE_DONE_STATUSES:
-        raise HTTPException(status_code=409, detail=f"Cannot start {stage_key}: previous stage {prior.stage_key} is not approved.")
+    if stage.status not in _STARTABLE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; cannot start (only {sorted(_STARTABLE_STATUSES)}).")
+    _require_prior_done(stages, stage, "start")
     prev = stage.status
     stage.status = "running"
     stage.started_at = _now()
     stage.updated_by = actor_user_id
     _log_transition(db, stage, prev, "running", "start", "user", actor_user_id)
-    proj = db.query(Project).filter(Project.id == project_id).first()
-    if proj is not None:
-        proj.current_stage = stage_key
-        proj.lifecycle_status = LC.LIFECYCLE_IN_PROGRESS
+    proj = _get_project(db, organization_id, project_id)
+    proj.current_stage = stage_key
+    proj.lifecycle_status = LC.LIFECYCLE_IN_PROGRESS
     db.commit()
     return stage
 
 
 def mark_stage_generated(db: Session, organization_id: str, project_id: str, stage_key: str,
                          artifact_id: str, actor_type: str = "agent", actor_id: str | None = None) -> MigrationStage:
-    stage = _get_stage(db, organization_id, project_id, stage_key)
+    stages = get_project_lifecycle(db, organization_id, project_id)
+    stage = next((s for s in stages if s.stage_key == stage_key), None)
+    if not stage:
+        raise HTTPException(status_code=404, detail=f"Stage {stage_key} not found")
+    _require_prior_done(stages, stage, "generate")
     prev = stage.status
     stage.status = "generated"
     stage.generated_at = _now()
@@ -164,9 +192,18 @@ def mark_stage_generated(db: Session, organization_id: str, project_id: str, sta
     return stage
 
 
+_SUBMITTABLE_STATUSES = {"running", "generated", "edit_requested", "resubmitted", "rejected"}
+
+
 def submit_stage_for_review(db: Session, organization_id: str, project_id: str, stage_key: str,
                             artifact_id: str | None, actor_user_id: str) -> MigrationStage:
-    stage = _get_stage(db, organization_id, project_id, stage_key)
+    stages = get_project_lifecycle(db, organization_id, project_id)
+    stage = next((s for s in stages if s.stage_key == stage_key), None)
+    if not stage:
+        raise HTTPException(status_code=404, detail=f"Stage {stage_key} not found")
+    _require_prior_done(stages, stage, "submit")
+    if stage.status not in _SUBMITTABLE_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; only an active stage can be submitted for review.")
     if artifact_id:
         stage.current_artifact_id = artifact_id
     if not stage.current_artifact_id:
@@ -174,6 +211,7 @@ def submit_stage_for_review(db: Session, organization_id: str, project_id: str, 
     prev = stage.status
     stage.status = "under_review"
     stage.submitted_for_review_at = _now()
+    stage.submitted_for_review_by = actor_user_id  # SoD: this user may not self-approve
     stage.updated_by = actor_user_id
     _log_transition(db, stage, prev, "under_review", "submit", "user", actor_user_id)
     proj = _get_project(db, organization_id, project_id)
@@ -185,12 +223,24 @@ def submit_stage_for_review(db: Session, organization_id: str, project_id: str, 
 
 
 def approve_stage(db: Session, organization_id: str, project_id: str, stage_key: str,
-                  user_id: str, comment: str | None = None) -> MigrationStage:
-    stage = _get_stage(db, organization_id, project_id, stage_key)
+                  user_id: str, comment: str | None = None, allow_self_approval: bool = False) -> MigrationStage:
+    stages = get_project_lifecycle(db, organization_id, project_id)
+    stage = next((s for s in stages if s.stage_key == stage_key), None)
+    if not stage:
+        raise HTTPException(status_code=404, detail=f"Stage {stage_key} not found")
+    # 'edit_requested' is intentionally approvable: an approver may reverse their
+    # own change-request and approve directly without forcing a resubmit cycle.
     if stage.status not in LC.STAGE_REVIEWABLE_STATUSES and stage.status != "edit_requested":
         raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; only a generated/under-review/resubmitted stage can be approved.")
     if not stage.current_artifact_id and stage.assigned_agent not in ("__human__", "__system__", "__orchestration__"):
         raise HTTPException(status_code=409, detail="Cannot approve a stage with no current artifact version.")
+    # Ordering gate: a later stage can never be approved ahead of an un-approved
+    # required predecessor (the only other gate is start_stage).
+    _require_prior_done(stages, stage, "approve")
+    # Separation of duties: whoever submitted the stage for review may not also
+    # approve it, unless they are an admin/super_admin (allow_self_approval).
+    if not allow_self_approval and stage.submitted_for_review_by and stage.submitted_for_review_by == user_id:
+        raise HTTPException(status_code=403, detail="Separation of duties: the user who submitted this stage cannot approve it.")
     prev = stage.status
     stage.status = "approved"
     stage.approved_at = _now()
@@ -229,11 +279,17 @@ def request_stage_changes(db: Session, organization_id: str, project_id: str, st
 def resubmit_stage(db: Session, organization_id: str, project_id: str, stage_key: str,
                    artifact_version_id: str | None, user_id: str) -> MigrationStage:
     stage = _get_stage(db, organization_id, project_id, stage_key)
+    # Resubmit only makes sense after a reviewer pushed back; it must not be a
+    # back-door to leapfrog start→generate→submit on a fresh stage.
+    if stage.status not in ("rejected", "edit_requested"):
+        raise HTTPException(status_code=409, detail=f"Stage {stage_key} is {stage.status}; only a rejected/edit-requested stage can be resubmitted.")
     prev = stage.status
     stage.status = "resubmitted"
     stage.submitted_for_review_at = _now()
+    stage.submitted_for_review_by = user_id  # SoD: the resubmitter may not self-approve
     stage.updated_by = user_id
-    _log_transition(db, stage, prev, "resubmitted", "resubmit", "user", user_id)
+    _log_transition(db, stage, prev, "resubmitted", "resubmit", "user", user_id,
+                    f"artifact_version_id={artifact_version_id}" if artifact_version_id else None)
     db.commit()
     return stage
 
@@ -255,23 +311,25 @@ def skip_optional_stage(db: Session, organization_id: str, project_id: str, stag
 def advance_to_next_stage(db: Session, organization_id: str, project_id: str) -> MigrationStage | None:
     """Recompute current stage + progress; close the project when all done."""
     stages = get_project_lifecycle(db, organization_id, project_id)
-    nxt = next((s for s in stages if s.status not in LC.STAGE_DONE_STATUSES), None)
-    proj = db.query(Project).filter(Project.id == project_id).first()
-    if proj is not None:
-        proj.stage_progress_percent = calculate_project_progress(db, organization_id, project_id, _stages=stages)
-        if nxt is None:
-            proj.lifecycle_status = LC.LIFECYCLE_COMPLETED
-            proj.current_stage = None
-        else:
-            proj.current_stage = nxt.stage_key
-            proj.lifecycle_status = LC.LIFECYCLE_IN_PROGRESS
+    nxt = next((s for s in stages if _is_blocking(s)), None)
+    proj = _get_project(db, organization_id, project_id)
+    proj.stage_progress_percent = calculate_project_progress(db, organization_id, project_id, _stages=stages)
+    if nxt is None:
+        proj.lifecycle_status = LC.LIFECYCLE_COMPLETED
+        proj.current_stage = None
+    else:
+        proj.current_stage = nxt.stage_key
+        proj.lifecycle_status = LC.LIFECYCLE_IN_PROGRESS
     db.commit()
     return nxt
 
 
 def calculate_project_progress(db: Session, organization_id: str, project_id: str, _stages=None) -> int:
     stages = _stages if _stages is not None else get_project_lifecycle(db, organization_id, project_id)
-    if not stages:
+    # Optional stages left untouched (not_started) don't count against completion,
+    # so progress can reach 100% once every required + actioned stage is done.
+    relevant = [s for s in stages if not (s.is_optional and s.status == "not_started")]
+    if not relevant:
         return 0
-    done = sum(1 for s in stages if s.status in LC.STAGE_DONE_STATUSES)
-    return round(100 * done / len(stages))
+    done = sum(1 for s in relevant if s.status in LC.STAGE_DONE_STATUSES)
+    return round(100 * done / len(relevant))

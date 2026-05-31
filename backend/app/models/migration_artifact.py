@@ -7,7 +7,7 @@ full version history, review status, and comment threads. The UI bridges both.
 Tables are namespaced `migration_artifact*` so they never collide with the
 existing `code_artifacts` / `code_artifact_versions` / `code_reviews`.
 """
-from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, JSON, Index
+from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, JSON, Index, UniqueConstraint
 
 from app.models.base import BaseModel
 
@@ -45,6 +45,9 @@ class MigrationArtifactVersion(BaseModel):
 
     __table_args__ = (
         Index("ix_migration_artifact_versions_artifact_ver", "artifact_id", "version_number"),
+        # Closes the _next_version_number race: the DB rejects duplicate
+        # (artifact_id, version_number) pairs and the service retries.
+        UniqueConstraint("artifact_id", "version_number", name="uq_migration_artifact_versions_artifact_ver"),
     )
 
 

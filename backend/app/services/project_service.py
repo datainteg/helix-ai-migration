@@ -126,9 +126,15 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     db.refresh(project)
     # Initialize the stage-gated lifecycle (13 default stages) for the new
     # project. Best-effort — a lifecycle-init failure must not fail creation.
+    # On success we set use_stage_gated_lifecycle=True so the flag reflects
+    # reality (the lifecycle IS provisioned); if it fails the flag stays False
+    # and the project remains on the legacy linear path.
     try:
         from app.services.stage_lifecycle_service import initialize_project_lifecycle
         initialize_project_lifecycle(db, org_id, project.id, actor_user_id=owner_id)
+        project.use_stage_gated_lifecycle = True
+        db.commit()
+        db.refresh(project)
     except Exception:  # noqa: BLE001
         db.rollback()
     return _project_to_response(project, _owner_name_map(db, {project.owner_id}))

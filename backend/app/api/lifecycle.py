@@ -9,8 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import get_current_organization_id, require_permission
+from app.auth.dependencies import get_current_organization_id, require_permission, user_has_role
 from app.services.project_service import ensure_project_access
+
+# Admins/super-admins are exempt from the stage separation-of-duties rule
+# (they may self-approve); a plain project_manager cannot approve what they
+# themselves submitted.
+_SOD_BYPASS_ROLES = {"super_admin", "admin"}
 from app.services import stage_lifecycle_service as svc
 from app.schemas.lifecycle import (
     StageActionRequest, StageRejectRequest, StageSkipRequest, StageResubmitRequest,
@@ -55,7 +60,8 @@ def submit_review(project_id: str, stage_key: str, data: StageActionRequest, org
 @router.post("/projects/{project_id}/lifecycle/{stage_key}/approve")
 def approve(project_id: str, stage_key: str, data: StageActionRequest, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(require_permission("agent:approve")), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)
-    return stage_to_dict(svc.approve_stage(db, org_id, project_id, stage_key, user_id, data.comment))
+    allow_self = user_has_role(db, user_id, _SOD_BYPASS_ROLES)
+    return stage_to_dict(svc.approve_stage(db, org_id, project_id, stage_key, user_id, data.comment, allow_self_approval=allow_self))
 
 
 @router.post("/projects/{project_id}/lifecycle/{stage_key}/reject")
