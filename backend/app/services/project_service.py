@@ -124,6 +124,13 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
         ))
     db.commit()
     db.refresh(project)
+    # Initialize the stage-gated lifecycle (13 default stages) for the new
+    # project. Best-effort — a lifecycle-init failure must not fail creation.
+    try:
+        from app.services.stage_lifecycle_service import initialize_project_lifecycle
+        initialize_project_lifecycle(db, org_id, project.id, actor_user_id=owner_id)
+    except Exception:  # noqa: BLE001
+        db.rollback()
     return _project_to_response(project, _owner_name_map(db, {project.owner_id}))
 
 

@@ -43,6 +43,8 @@ from app.api.marketplace import router as marketplace_router
 from app.api.knowledge import router as knowledge_router
 from app.api.migrations import router as migrations_router
 from app.api.assistant import router as assistant_router
+from app.api.lifecycle import router as lifecycle_router
+from app.api.lifecycle_artifacts import router as lifecycle_artifacts_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -378,6 +380,8 @@ app.include_router(llm_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(artifacts_router, prefix="/api/v1")
+app.include_router(lifecycle_router, prefix="/api/v1")
+app.include_router(lifecycle_artifacts_router, prefix="/api/v1")
 app.include_router(code_reviews_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")
