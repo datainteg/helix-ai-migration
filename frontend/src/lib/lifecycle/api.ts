@@ -119,6 +119,13 @@ export const getLifecycle = (projectId: string) =>
 export const getCurrentStage = (projectId: string) =>
   req<MigrationStage | null>(`/api/v1/projects/${projectId}/lifecycle/current`);
 
+export interface StageTransition {
+  id: string; stage_id: string; from_status: string | null; to_status: string;
+  action: string; actor_type: string; actor_id: string | null; comment: string | null; created_at: string | null;
+}
+export const getStageTransitions = (projectId: string) =>
+  req<StageTransition[]>(`/api/v1/projects/${projectId}/lifecycle/transitions`);
+
 export const initializeLifecycle = (projectId: string) =>
   req<MigrationStage[]>(`/api/v1/projects/${projectId}/lifecycle/initialize`, { method: "POST" });
 

@@ -126,6 +126,19 @@ def _is_blocking(st: MigrationStage) -> bool:
     return True
 
 
+def get_stage_transitions(db: Session, organization_id: str, project_id: str, limit: int = 200) -> list[StageTransitionLog]:
+    """The append-only domain audit trail for a project's lifecycle (newest
+    first) — powers the project timeline + audit view."""
+    _get_project(db, organization_id, project_id)
+    return (
+        db.query(StageTransitionLog)
+        .filter(StageTransitionLog.project_id == project_id, StageTransitionLog.organization_id == organization_id)
+        .order_by(StageTransitionLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
 def get_current_stage(db: Session, organization_id: str, project_id: str) -> MigrationStage | None:
     """First blocking stage in order (the active gate)."""
     for st in get_project_lifecycle(db, organization_id, project_id):

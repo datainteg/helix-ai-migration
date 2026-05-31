@@ -40,6 +40,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { useProjectKey } from "@/lib/projects/useProjectKey";
+import { LifecycleConsole } from "@/components/lifecycle/LifecycleConsole";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 import { AskProject } from "@/components/projects/AskProject";
 import { AppIcon, AgentIcon } from "@/components/icons";
@@ -365,6 +366,13 @@ export default function ProjectDetailPage() {
           <Button variant="outline" onClick={() => load()} loading={loading}>
             <RotateCw className="h-3.5 w-3.5" /> Retry
           </Button>
+        </div>
+      )}
+
+      {id && (project as any)?.use_stage_gated_lifecycle !== false && (
+        <div className="mb-6">
+          <LifecycleConsole projectId={id} projectKey={projectKey}
+            alias={(project as any)?.alias} lifecycleStatus={(project as any)?.lifecycle_status} />
         </div>
       )}
 

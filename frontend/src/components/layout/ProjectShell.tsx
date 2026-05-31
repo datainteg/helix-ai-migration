@@ -24,19 +24,23 @@ interface Props {
 // each group boundary): Plan → Execute → Verify → Release → Govern.
 // Migration is folded into Workflows (legacy /migration redirects to /agents).
 const TABS = [
+  { label: "Overview", suffix: "", group: "plan" },
   { label: "Requirements", suffix: "/requirements", group: "plan" },
   { label: "Source & Target", suffix: "/source-target", group: "plan" },
   { label: "Lifecycle", suffix: "/lifecycle", group: "execute" },
   { label: "Workflows", suffix: "/agents", group: "execute" },
   { label: "Artifacts", suffix: "/artifacts", group: "execute" },
+  { label: "Sprints", suffix: "/sprints", group: "execute" },
   { label: "Developer Workspace", suffix: "/developer-workspace", group: "execute" },
   { label: "Validation", suffix: "/validation", group: "verify" },
   { label: "Recon", suffix: "/recon", group: "verify" },
+  { label: "Sign-off", suffix: "/signoff", group: "release" },
   { label: "Cutover", suffix: "/cutover", group: "release" },
   { label: "Approvals", suffix: "/approvals", group: "release" },
   { label: "Compliance", suffix: "/compliance", group: "govern" },
   { label: "Reports", suffix: "/reports", group: "govern" },
   { label: "Timeline", suffix: "/timeline", group: "govern" },
+  { label: "Audit", suffix: "/audit", group: "govern" },
 ];
 
 export function ProjectShell({ children, projectId, projectName, projectStatus, subtitle, actions, onHold }: Props) {

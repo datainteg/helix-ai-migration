@@ -31,6 +31,19 @@ def get_lifecycle(project_id: str, org_id: str = Depends(get_current_organizatio
     return [stage_to_dict(s) for s in svc.get_project_lifecycle(db, org_id, project_id)]
 
 
+@router.get("/projects/{project_id}/lifecycle/transitions")
+def get_transitions(project_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    ensure_project_access(db, org_id, project_id)
+    return [
+        {
+            "id": t.id, "stage_id": t.stage_id, "from_status": t.from_status, "to_status": t.to_status,
+            "action": t.action, "actor_type": t.actor_type, "actor_id": t.actor_id, "comment": t.comment,
+            "created_at": str(t.created_at) if t.created_at else None,
+        }
+        for t in svc.get_stage_transitions(db, org_id, project_id)
+    ]
+
+
 @router.get("/projects/{project_id}/lifecycle/current")
 def get_current(project_id: str, org_id: str = Depends(get_current_organization_id), user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     ensure_project_access(db, org_id, project_id)
