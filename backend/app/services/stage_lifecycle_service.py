@@ -69,11 +69,15 @@ def _notify(db: Session, org_id: str, project: Project, title: str, body: str, l
 
 
 def _audit(db: Session, org_id: str, actor_id: str | None, action: str, project_id: str, stage_key: str, comment: str | None) -> None:
+    # entity_id is the project id (audit_logs.entity_id is varchar(36)); the
+    # stage key lives in metadata so the value can never overflow the column.
     try:
         from app.api.audit import write_audit
+        meta: dict = {"stage_key": stage_key}
+        if comment:
+            meta["comment"] = comment
         write_audit(db, org_id=org_id, actor_id=actor_id, action=f"stage_{action}",
-                    entity_type="migration_stage", entity_id=f"{project_id}:{stage_key}",
-                    meta={"comment": comment} if comment else None)
+                    entity_type="migration_stage", entity_id=project_id, meta=meta)
     except Exception:  # noqa: BLE001
         pass
 

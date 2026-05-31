@@ -272,6 +272,17 @@ See [SECURITY.md](SECURITY.md) for the vuln disclosure policy.
 
 ---
 
+## Stage-gated migration lifecycle
+
+Beyond the linear BMAD pipeline, Helix runs an enterprise **stage-gated
+execution lifecycle**: 13 stages where each runs an agent, produces a reviewable
+artifact, and waits for human approval (with separation of duties + full audit)
+before the next stage starts — through sprint generation, a developer workspace
+for draft code, validation evidence + QA review, a business reconciliation
+report (PDF), and a business sign-off email. Generated code is never executed in
+the backend; no row-level production data is stored. See
+[docs/STAGE_GATED_BMAD_WORKFLOW.md](docs/STAGE_GATED_BMAD_WORKFLOW.md).
+
 ## Documentation
 
 | File | What |
@@ -282,6 +293,14 @@ See [SECURITY.md](SECURITY.md) for the vuln disclosure policy.
 | [SECURITY.md](SECURITY.md) | Vulnerability disclosure |
 | [docs/MIGRATION_NOTES.md](docs/MIGRATION_NOTES.md) | Alembic upgrade runbook for existing installs |
 | [docs/FRONTEND_DESIGN_BRIEF.md](docs/FRONTEND_DESIGN_BRIEF.md) | Frontend redesign brief for design tools |
+| [docs/STAGE_GATED_BMAD_WORKFLOW.md](docs/STAGE_GATED_BMAD_WORKFLOW.md) | Stage-gated lifecycle — stages, agents, gating, RBAC, audit, security review |
+| [docs/ARTIFACT_REVIEW_LIFECYCLE.md](docs/ARTIFACT_REVIEW_LIFECYCLE.md) | Artifact versioning + review/approve/compare |
+| [docs/SPRINT_EXECUTION_GUIDE.md](docs/SPRINT_EXECUTION_GUIDE.md) | Sprint generation from approved artifacts + approval gate |
+| [docs/DEVELOPER_WORKSPACE_GUIDE.md](docs/DEVELOPER_WORKSPACE_GUIDE.md) | Generated code (draft→review→approve) + workspaces |
+| [docs/VALIDATION_EVIDENCE_GUIDE.md](docs/VALIDATION_EVIDENCE_GUIDE.md) | Validation evidence upload + QA agent review |
+| [docs/RECON_REPORT_GUIDE.md](docs/RECON_REPORT_GUIDE.md) | Recon agent + draft recon code + business report (PDF) |
+| [docs/SIGNOFF_WORKFLOW.md](docs/SIGNOFF_WORKFLOW.md) | Business sign-off email workflow |
+| [WORKSPACE.md](WORKSPACE.md) | Optional code-server integration + security limitations |
 
 ---
 
