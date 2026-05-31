@@ -26,6 +26,7 @@ interface Props {
 const TABS = [
   { label: "Requirements", suffix: "/requirements", group: "plan" },
   { label: "Source & Target", suffix: "/source-target", group: "plan" },
+  { label: "Lifecycle", suffix: "/lifecycle", group: "execute" },
   { label: "Workflows", suffix: "/agents", group: "execute" },
   { label: "Artifacts", suffix: "/artifacts", group: "execute" },
   { label: "Developer Workspace", suffix: "/developer-workspace", group: "execute" },
