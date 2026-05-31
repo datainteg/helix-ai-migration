@@ -27,6 +27,7 @@ const TABS = [
   { label: "Requirements", suffix: "/requirements" },
   { label: "Source & Target", suffix: "/source-target" },
   { label: "Workflows", suffix: "/agents" },
+  { label: "Artifacts", suffix: "/artifacts" },
   { label: "Validation", suffix: "/validation" },
   { label: "Recon", suffix: "/recon" },
   { label: "Cutover", suffix: "/cutover" },

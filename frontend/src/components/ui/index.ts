@@ -21,3 +21,4 @@ export { Modal } from "./Modal";
 export { ConfirmModal } from "./ConfirmModal";
 export { SearchInput } from "./SearchInput";
 export { Skeleton, SkeletonMetricRow, SkeletonTable } from "./Skeleton";
+export { MarkdownView } from "./MarkdownView";
