@@ -74,7 +74,7 @@ export default function ReconReportDetailPage() {
                   <Button size="sm" variant="outline" disabled={!!busy} onClick={() => { setChangeText(""); setChangeModal(true); }}>Request changes</Button>
                 )}
                 {report.status === "approved" && (
-                  <Link href={`/projects/${key}/approvals`} className="text-center text-[12.5px] text-helix-700 hover:underline">Send for sign-off →</Link>
+                  <Link href={`/projects/${key}/signoff`} className="text-center text-[12.5px] text-helix-700 hover:underline">Send for sign-off →</Link>
                 )}
               </div>
             </Card>
