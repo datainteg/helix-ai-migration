@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.db.session import get_db
 from app.core.config import settings
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import get_current_organization_id, require_permission
+from app.auth.dependencies import get_current_organization_id, require_permission, user_has_role
 from app.services.project_service import ensure_project_access
 from app.services.workflow_service import (
     get_workflow_run,
@@ -293,7 +293,9 @@ async def approve_run_request(
     ensure_project_access(db, org_id, req.project_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail=f"Request already {req.status}.")
-    if req.requested_by == user_id:
+    # Separation of duties: a regular approver can't approve their own request.
+    # Admins / super-admins may self-approve (they own the project governance).
+    if req.requested_by == user_id and not user_has_role(db, user_id, {"super_admin", "admin"}):
         raise HTTPException(status_code=403, detail="You can't approve your own run request (separation of duties).")
 
     requirement = db.query(MigrationRequirement).filter(MigrationRequirement.id == req.requirement_id).first()
@@ -330,7 +332,7 @@ def reject_run_request(
     ensure_project_access(db, org_id, req.project_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail=f"Request already {req.status}.")
-    if req.requested_by == user_id:
+    if req.requested_by == user_id and not user_has_role(db, user_id, {"super_admin", "admin"}):
         raise HTTPException(status_code=403, detail="You can't action your own run request (separation of duties).")
     req.status = "rejected"
     req.approver_id = user_id
