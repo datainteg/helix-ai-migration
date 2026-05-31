@@ -18,6 +18,7 @@ import { FileText, FileCode, History, Pencil, Save, X } from "lucide-react";
 import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, Button, Chip, EmptyState, LoadingState, ErrorBanner, MarkdownView } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 import {
   listProjectArtifacts, listArtifactVersions, fetchArtifactContent, saveArtifactContent,
@@ -34,7 +35,8 @@ function isMarkdown(filename?: string | null, fileType?: string | null): boolean
 }
 
 export default function ProjectArtifactsPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token, can } = useAuth();
   const canWrite = can("project:write");
 
@@ -57,7 +59,7 @@ export default function ProjectArtifactsPage() {
   const [editErr, setEditErr] = useState("");
   const [versionsReloadKey, setVersionsReloadKey] = useState(0);
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Real project name + status for the ProjectShell header + breadcrumb.
   useEffect(() => {
@@ -158,7 +160,7 @@ export default function ProjectArtifactsPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}

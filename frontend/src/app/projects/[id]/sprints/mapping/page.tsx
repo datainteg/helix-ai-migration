@@ -16,6 +16,7 @@ import { Button, Card, EmptyState, LoadingState } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import { MigrationMappingCanvas } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchMapping,
   seedSprints,
@@ -35,8 +36,8 @@ const STATUS_LIST: Array<{ key: MappingNodeStatus; label: string; color: string 
 ];
 
 export default function SprintMappingPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [nodes, setNodes] = useState<MNode[]>([]);
@@ -111,7 +112,7 @@ export default function SprintMappingPage() {
       <AppShell
         eyebrow="SPRINT MAPPING SHOWCASE"
         title="Migration Execution Mapping"
-        crumbs={["Projects", projectId, "Sprints", "Mapping"]}
+        crumbs={["Projects", projectKey, "Sprints", "Mapping"]}
       >
         <LoadingState />
       </AppShell>
@@ -123,7 +124,7 @@ export default function SprintMappingPage() {
       <AppShell
         eyebrow="SPRINT MAPPING SHOWCASE"
         title="Migration Execution Mapping"
-        crumbs={["Projects", projectId, "Sprints", "Mapping"]}
+        crumbs={["Projects", projectKey, "Sprints", "Mapping"]}
       >
         <Card>
           <EmptyState

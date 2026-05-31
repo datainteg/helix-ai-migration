@@ -110,7 +110,6 @@ export function AppShell({
               subtitle={subtitle}
               metric={metric}
               actions={actions}
-              crumbs={trailCrumbs}
             />
           )}
           <div className={cn(fullBleed ? "" : "px-4 sm:px-6 lg:px-10 py-6")}>

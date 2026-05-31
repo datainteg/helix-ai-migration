@@ -20,6 +20,7 @@ import { CheckCircle2, XCircle, Inbox, PlayCircle, GitPullRequestArrow } from "l
 import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Button, Card, Chip, StatusBadge, EmptyState, ErrorBanner, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 import {
   listRunRequests, approveRunRequest, rejectRunRequest,
@@ -40,7 +41,8 @@ function shortId(id: string | null): string {
 }
 
 export default function ProjectApprovalsPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token, can } = useAuth();
   const canApprove = can("agent:approve");
 
@@ -54,7 +56,7 @@ export default function ProjectApprovalsPage() {
   const [runErr, setRunErr] = useState("");
   const [busyId, setBusyId] = useState("");
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Real project header for the shell + breadcrumb.
   useEffect(() => {
@@ -124,7 +126,7 @@ export default function ProjectApprovalsPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}

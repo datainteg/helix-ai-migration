@@ -27,6 +27,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   CONNECTOR_FIELDS, CONNECTOR_LABELS, type FieldDef,
 } from "@/lib/projects/connections";
@@ -52,7 +53,8 @@ const fmt = (n: number | undefined | null) =>
   n == null ? "—" : n.toLocaleString();
 
 export default function ProjectReconPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { can } = useAuth();
   const canWrite = can("project:write");
 
@@ -68,7 +70,7 @@ export default function ProjectReconPage() {
   // responses — the only per-table recon detail the API exposes).
   const [results, setResults] = useState<ReconRunResult[]>([]);
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   const loadOverview = useCallback(() => {
     if (!id) return Promise.resolve();
@@ -106,7 +108,7 @@ export default function ProjectReconPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}
@@ -157,7 +159,7 @@ export default function ProjectReconPage() {
 
           {/* ── Run reconciliation ── */}
           <ReconRunner
-            projectId={String(id)}
+            projectId={id}
             canWrite={canWrite}
             onRan={onRan}
             onError={setError}

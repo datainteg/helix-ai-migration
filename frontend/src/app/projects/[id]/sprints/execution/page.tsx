@@ -15,6 +15,7 @@ import { AppShell } from "@/components/layout";
 import { Button, Card, Chip, EmptyState, LoadingState, MetricCell } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchActiveSprint,
   fetchTasks,
@@ -58,8 +59,8 @@ function formatStarted(iso: string): string {
 }
 
 export default function SprintExecutionPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [executions, setExecutions] = useState<AgentExecution[]>([]);
@@ -152,9 +153,9 @@ export default function SprintExecutionPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint execution"
-        crumbs={["Projects", projectId, "Sprints", "Execution"]}
+        crumbs={["Projects", projectKey, "Sprints", "Execution"]}
       >
         <LoadingState />
       </AppShell>
@@ -164,9 +165,9 @@ export default function SprintExecutionPage() {
   if (!active) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint execution"
-        crumbs={["Projects", projectId, "Sprints", "Execution"]}
+        crumbs={["Projects", projectKey, "Sprints", "Execution"]}
       >
         <Card>
           <EmptyState
@@ -192,10 +193,10 @@ export default function SprintExecutionPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Sprint execution"
       description="Live agent runs, retries, failed queue, and blocked workflows for the active sprint."
-      crumbs={["Projects", projectId, "Sprints", "Execution"]}
+      crumbs={["Projects", projectKey, "Sprints", "Execution"]}
       actions={
         <>
           {streamLive ? (

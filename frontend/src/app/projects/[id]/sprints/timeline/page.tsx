@@ -15,6 +15,7 @@ import { Download, Filter } from "lucide-react";
 import { AppShell } from "@/components/layout";
 import { Button, Card, Chip, EmptyState, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { fetchSprints, seedSprints, type Sprint } from "@/lib/sprints";
 
 const HEALTH_FILL: Record<Sprint["health"], string> = {
@@ -49,8 +50,8 @@ interface MigrationCheckpoint {
 }
 
 export default function SprintTimelinePage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -58,16 +59,16 @@ export default function SprintTimelinePage() {
   const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(() => {
-    if (!token || !projectId) {
+    if (!token || !id) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchSprints(token, projectId)
+    fetchSprints(token, id)
       .then(setSprints)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [token, projectId]);
+  }, [token, id]);
 
   useEffect(() => {
     load();
@@ -143,9 +144,9 @@ export default function SprintTimelinePage() {
   }, [sprints]);
 
   const handleSeed = () => {
-    if (!token || !projectId) return;
+    if (!token || !id) return;
     setSeeding(true);
-    seedSprints(token, projectId)
+    seedSprints(token, id)
       .then(() => {
         load();
       })
@@ -156,9 +157,9 @@ export default function SprintTimelinePage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint timeline & roadmap"
-        crumbs={["Projects", projectId, "Sprints", "Timeline"]}
+        crumbs={["Projects", projectKey, "Sprints", "Timeline"]}
       >
         <LoadingState />
       </AppShell>
@@ -168,9 +169,9 @@ export default function SprintTimelinePage() {
   if (sprints.length === 0) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint timeline & roadmap"
-        crumbs={["Projects", projectId, "Sprints", "Timeline"]}
+        crumbs={["Projects", projectKey, "Sprints", "Timeline"]}
       >
         <Card>
           <EmptyState
@@ -193,10 +194,10 @@ export default function SprintTimelinePage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Sprint timeline & roadmap"
       description="Multi-sprint gantt with migration checkpoints from discovery through production cutover."
-      crumbs={["Projects", projectId, "Sprints", "Timeline"]}
+      crumbs={["Projects", projectKey, "Sprints", "Timeline"]}
       actions={
         <>
           <Button variant="outline">

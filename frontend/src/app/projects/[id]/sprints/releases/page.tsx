@@ -22,6 +22,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchReleases,
   seedSprints,
@@ -52,8 +53,8 @@ function scoreColor(v: number, kind: "validation" | "recon"): string {
 }
 
 export default function MigrationReleasesPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [releases, setReleases] = useState<MigrationRelease[]>([]);
@@ -99,9 +100,9 @@ export default function MigrationReleasesPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Migration releases"
-        crumbs={["Projects", projectId, "Sprints", "Releases"]}
+        crumbs={["Projects", projectKey, "Sprints", "Releases"]}
       >
         <LoadingState />
       </AppShell>
@@ -111,9 +112,9 @@ export default function MigrationReleasesPage() {
   if (!upcoming) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Migration releases"
-        crumbs={["Projects", projectId, "Sprints", "Releases"]}
+        crumbs={["Projects", projectKey, "Sprints", "Releases"]}
       >
         <Card>
           <EmptyState
@@ -135,10 +136,10 @@ export default function MigrationReleasesPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Migration releases"
       description="Upcoming cutover, deployment checklist, and full release history."
-      crumbs={["Projects", projectId, "Sprints", "Releases"]}
+      crumbs={["Projects", projectKey, "Sprints", "Releases"]}
     >
       {/* Hero — upcoming release */}
       <Card className="mb-6">

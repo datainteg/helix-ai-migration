@@ -43,6 +43,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface APIProject {
   id: string;
+  slug?: string;
   name: string;
   description?: string;
   status: string;
@@ -276,7 +277,7 @@ export default function ProjectsPage() {
                           <div className="w-[3px] h-[46px]" style={{ background: riskColor }} />
                         </td>
                         <td className="px-3 py-3">
-                          <Link href={`/projects/${p.id}`} className="block max-w-[240px]">
+                          <Link href={`/projects/${p.slug ?? p.id}`} className="block max-w-[240px]">
                             <div className="flex flex-col gap-0.5">
                               <span className="font-medium text-ink truncate">{p.name}</span>
                               <span className="font-mono text-[11px] text-ink-3">
@@ -320,7 +321,7 @@ export default function ProjectsPage() {
                         <td className="px-3 py-3">
                           <div className="flex items-center justify-end gap-0.5">
                             <Link
-                              href={`/projects/${p.id}`}
+                              href={`/projects/${p.slug ?? p.id}`}
                               aria-label={`Open ${p.name}`}
                               className="inline-flex items-center justify-center h-8 w-8 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring"
                             >

@@ -22,6 +22,7 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, Button, Chip, StatusBadge, EmptyState, ErrorBanner, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   listProjectRequirements, createProjectRequirement, editProjectRequirement,
   compileRequirement, fieldsForType, EMPTY_SPEC,
@@ -64,7 +65,8 @@ function groupByChain(reqs: ProjectRequirement[]): Group[] {
 }
 
 export default function ProjectRequirementsPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { can } = useAuth();
   const canWrite = can("project:write");
 
@@ -78,7 +80,7 @@ export default function ProjectRequirementsPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [histOpen, setHistOpen] = useState<Record<string, boolean>>({});
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   useEffect(() => {
     if (!id) return;
@@ -101,7 +103,7 @@ export default function ProjectRequirementsPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       onHold={onHold}
       subtitle="The structured requirements the agents plan from — versioned, editable, and reusable across runs."
@@ -185,7 +187,7 @@ export default function ProjectRequirementsPage() {
 
                     {canWrite && (
                       <div>
-                        <Link href={`/projects/${id}/agents?run=new`}>
+                        <Link href={`/projects/${projectKey}/agents?run=new`}>
                           <Button size="sm" variant="outline" disabled={onHold} title={onHold ? "Project is on hold" : undefined}>
                             <Play className="h-3.5 w-3.5" /> Use in a workflow run
                           </Button>

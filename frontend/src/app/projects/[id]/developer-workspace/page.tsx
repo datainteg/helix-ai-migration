@@ -7,6 +7,7 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, Button, Chip, EmptyState, LoadingState, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   listProjectArtifacts, listArtifactVersions, fetchArtifactContent, saveArtifactContent,
   type Artifact, type ArtifactVersion, type ArtifactContent,
@@ -26,7 +27,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
  * never fabricate it — an honest empty state shows when bytes are unavailable.
  */
 export default function ProjectDevWorkspacePage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token, can } = useAuth();
   const canWrite = can("project:write");
   const [projectName, setProjectName] = useState("Project");
@@ -45,7 +47,7 @@ export default function ProjectDevWorkspacePage() {
   const [editErr, setEditErr] = useState("");
   const [versionsReloadKey, setVersionsReloadKey] = useState(0);
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Real project name for the header/breadcrumb.
   useEffect(() => {
@@ -151,7 +153,7 @@ export default function ProjectDevWorkspacePage() {
   );
 
   return (
-    <ProjectShell projectId={String(id)} projectName={projectName} subtitle="Three-pane IDE: artifact explorer · version control · AI review">
+    <ProjectShell projectId={projectKey} projectName={projectName} subtitle="Three-pane IDE: artifact explorer · version control · AI review">
       {loading ? <LoadingState label="Loading artifacts…" /> : null}
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-12 lg:col-span-3" title="Artifacts" padding="sm">

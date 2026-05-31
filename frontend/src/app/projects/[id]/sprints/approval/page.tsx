@@ -23,6 +23,7 @@ import {
 } from "@/components/ui";
 import { SprintApprovalCard } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   decideApproval,
   fetchActiveSprint,
@@ -36,8 +37,8 @@ type Filter = "all" | "pending" | "approved" | "rejected";
 type ApprovalStatus = SprintApproval["status"];
 
 export default function SprintApprovalPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [active, setActive] = useState<Sprint | null>(null);
@@ -48,16 +49,16 @@ export default function SprintApprovalPage() {
   const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(() => {
-    if (!token || !projectId) {
+    if (!token || !id) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchActiveSprint(token, projectId)
+    fetchActiveSprint(token, id)
       .then(setActive)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [token, projectId]);
+  }, [token, id]);
 
   useEffect(() => {
     load();
@@ -107,9 +108,9 @@ export default function SprintApprovalPage() {
   };
 
   const handleSeed = () => {
-    if (!token || !projectId) return;
+    if (!token || !id) return;
     setSeeding(true);
-    seedSprints(token, projectId)
+    seedSprints(token, id)
       .then(() => {
         load();
       })
@@ -120,9 +121,9 @@ export default function SprintApprovalPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Approval center"
-        crumbs={["Projects", projectId, "Sprints", "Approvals"]}
+        crumbs={["Projects", projectKey, "Sprints", "Approvals"]}
       >
         <LoadingState />
       </AppShell>
@@ -132,9 +133,9 @@ export default function SprintApprovalPage() {
   if (!active) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Approval center"
-        crumbs={["Projects", projectId, "Sprints", "Approvals"]}
+        crumbs={["Projects", projectKey, "Sprints", "Approvals"]}
       >
         <Card>
           <EmptyState
@@ -153,10 +154,10 @@ export default function SprintApprovalPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Approval center"
       description={`${counts.pending} pending approvals across ${active.name}.`}
-      crumbs={["Projects", projectId, "Sprints", "Approvals"]}
+      crumbs={["Projects", projectKey, "Sprints", "Approvals"]}
     >
       {/* Metric strip */}
       <div className="grid grid-cols-4 bg-surface border border-hx rounded-[10px] divide-x divide-hx mb-6">

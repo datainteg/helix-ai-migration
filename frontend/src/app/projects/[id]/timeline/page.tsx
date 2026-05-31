@@ -25,6 +25,7 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, StatusBadge, EmptyState, ErrorBanner, LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { listProjectWorkflowRuns, type WorkflowRun } from "@/lib/workflows/api";
 import { fetchProjectComments, type ProjectComment } from "@/lib/projects/api";
 
@@ -104,7 +105,8 @@ function commentEvent(c: ProjectComment): TimelineEvent {
 }
 
 export default function ProjectTimelinePage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
   const [projectName, setProjectName] = useState("Project");
   const [projectStatus, setProjectStatus] = useState("draft");
@@ -113,7 +115,7 @@ export default function ProjectTimelinePage() {
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [error, setError] = useState("");
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Project header + breadcrumb.
   useEffect(() => {
@@ -159,7 +161,7 @@ export default function ProjectTimelinePage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}

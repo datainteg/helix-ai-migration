@@ -16,11 +16,13 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Button, Card, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function ProjectCompliancePage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +30,7 @@ export default function ProjectCompliancePage() {
   const [projectStatus, setProjectStatus] = useState("draft");
   const [onHold, setOnHold] = useState(false);
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Real project name + status for the ProjectShell header + breadcrumb.
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function ProjectCompliancePage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}

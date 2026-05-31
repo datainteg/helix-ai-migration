@@ -14,6 +14,7 @@ import { AppShell } from "@/components/layout";
 import { Button, Card, EmptyState, LoadingState, MetricCell } from "@/components/ui";
 import { SprintRiskCard } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchActiveSprint,
   fetchRisks,
@@ -50,8 +51,8 @@ const LEVEL_CELL: Record<RiskLevel, { lik: number; imp: number }> = {
 };
 
 export default function SprintRisksPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [active, setActive] = useState<Sprint | null>(null);
@@ -60,16 +61,16 @@ export default function SprintRisksPage() {
   const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(() => {
-    if (!token || !projectId) {
+    if (!token || !id) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchActiveSprint(token, projectId)
+    fetchActiveSprint(token, id)
       .then(setActive)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [token, projectId]);
+  }, [token, id]);
 
   useEffect(() => {
     load();
@@ -122,9 +123,9 @@ export default function SprintRisksPage() {
   }, [byCategory]);
 
   const handleSeed = () => {
-    if (!token || !projectId) return;
+    if (!token || !id) return;
     setSeeding(true);
-    seedSprints(token, projectId)
+    seedSprints(token, id)
       .then(() => {
         load();
       })
@@ -135,9 +136,9 @@ export default function SprintRisksPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Risk dashboard"
-        crumbs={["Projects", projectId, "Sprints", "Risks"]}
+        crumbs={["Projects", projectKey, "Sprints", "Risks"]}
       >
         <LoadingState />
       </AppShell>
@@ -147,9 +148,9 @@ export default function SprintRisksPage() {
   if (!active) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Risk dashboard"
-        crumbs={["Projects", projectId, "Sprints", "Risks"]}
+        crumbs={["Projects", projectKey, "Sprints", "Risks"]}
       >
         <Card>
           <EmptyState
@@ -168,10 +169,10 @@ export default function SprintRisksPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Risk dashboard"
       description={`${risks.length} open risks across ${active.name}.`}
-      crumbs={["Projects", projectId, "Sprints", "Risks"]}
+      crumbs={["Projects", projectKey, "Sprints", "Risks"]}
     >
       {/* Metric strip (6 cells, wraps 3+3) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 bg-surface border border-hx rounded-[10px] divide-y sm:divide-y-0 sm:divide-x divide-hx mb-6">

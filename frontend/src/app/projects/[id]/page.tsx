@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
 import { AskProject } from "@/components/projects/AskProject";
 import { AppIcon, AgentIcon } from "@/components/icons";
@@ -206,7 +207,8 @@ function SectionCard({ href, icon, title, stat }: { href: string; icon: React.Re
 // ─── Page ───────────────────────────────────────────────────────
 
 export default function ProjectDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token, can } = useAuth();
   const canWrite = can("project:write");
   const [project, setProject] = useState<APIProject | null>(null);
@@ -242,6 +244,7 @@ export default function ProjectDetailPage() {
   }, [id, token]);
 
   const load = useCallback(async () => {
+    if (!id) return;
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
     setLoading(true);
     setError("");
@@ -294,7 +297,7 @@ export default function ProjectDetailPage() {
   const shortId = String(id).slice(0, 8);
   // Register id → name so breadcrumbs (here + deep sub-pages) show the project
   // name instead of the raw id.
-  useRegisterCrumbLabel(String(id), project?.name);
+  useRegisterCrumbLabel(projectKey, project?.name);
   const createdLabel = project?.created_at
     ? new Date(project.created_at).toLocaleDateString(undefined, {
         month: "short", day: "numeric", year: "numeric",
@@ -338,12 +341,12 @@ export default function ProjectDetailPage() {
               </Button>
             )
           )}
-          <Link href={`/projects/${id}/sprints`}>
+          <Link href={`/projects/${projectKey}/sprints`}>
             <Button variant="outline">
               Sprints
             </Button>
           </Link>
-          <Link href={`/projects/${id}/developer-workspace`}>
+          <Link href={`/projects/${projectKey}/developer-workspace`}>
             <Button variant="outline">
               <Eye className="h-3.5 w-3.5" /> Open workspace
             </Button>
@@ -397,7 +400,7 @@ export default function ProjectDetailPage() {
           <div className="eyebrow mb-2">PROJECT SECTIONS</div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {(() => {
-              const b = `/projects/${id}`;
+              const b = `/projects/${projectKey}`;
               const reqN = hub?.reqs ?? 0;
               const artN = hub?.artifacts ?? 0;
               const st = project?.source_system, tg = project?.target_system;
@@ -465,7 +468,7 @@ export default function ProjectDetailPage() {
                 <div className="text-[14px] font-semibold mt-1">No workflow run yet</div>
                 <div className="text-[12px] text-ink-3 mt-0.5">Start the migration pipeline to plan + generate this migration.</div>
               </div>
-              <Link href={`/projects/${id}/agents`}><Button variant="primary"><Play className="h-3.5 w-3.5" /> View agents</Button></Link>
+              <Link href={`/projects/${projectKey}/agents`}><Button variant="primary"><Play className="h-3.5 w-3.5" /> View agents</Button></Link>
             </div>
           )}
         </Card>
@@ -518,7 +521,7 @@ export default function ProjectDetailPage() {
               eyebrow={run ? `${run.kind.toUpperCase()} · ${run.status.toUpperCase()}` : "WORKFLOW"}
               description={run ? `${run.steps_done}/${run.steps_total} steps · ${run.mode ?? ""}` : "No run yet"}
               actions={
-                <Link href={`/projects/${id}/agents`}>
+                <Link href={`/projects/${projectKey}/agents`}>
                   <Button variant="ghost" size="sm">Open in Agents →</Button>
                 </Link>
               }

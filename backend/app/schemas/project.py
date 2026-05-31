@@ -24,6 +24,7 @@ class ProjectResponse(BaseModel):
     id: str
     organization_id: str
     name: str
+    slug: Optional[str] = None
     description: Optional[str] = None
     status: str
     risk_level: str

@@ -8,6 +8,7 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, Button, StatusBadge, Avatar, Chip, EmptyState, LoadingState, Modal, ErrorBanner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   listProjectWorkflowRuns,
   getWorkflowDetail,
@@ -50,7 +51,8 @@ const AGENT_PHASE: Record<string, { label: string; color: "indigo" | "violet" | 
 };
 
 export default function ProjectAgentsPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const searchParams = useSearchParams();
   const { token, can } = useAuth();
   const canWrite = can("project:write");
@@ -79,7 +81,7 @@ export default function ProjectAgentsPage() {
     }
   };
 
-  useRegisterCrumbLabel(String(id), projectName !== "Loading…" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Loading…" ? projectName : undefined);
 
   // The persistent "Start Workflow" CTA (ProjectShell) links here with ?run=new
   // to open the Run modal directly. Honour it once the page mounts.
@@ -165,7 +167,7 @@ export default function ProjectAgentsPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={active ? (active.status as any) : "draft"}
       onHold={onHold}
@@ -180,7 +182,7 @@ export default function ProjectAgentsPage() {
     >
       {runModal && (
         <RunWorkflowModal
-          projectId={String(id)}
+          projectId={id}
           migType={migType}
           requireApproval={requireApproval}
           onClose={() => setRunModal(false)}
@@ -247,7 +249,7 @@ export default function ProjectAgentsPage() {
                 )}
               </Card>
               <RunRequestsPanel
-                projectId={String(id)}
+                projectId={id}
                 reloadKey={reloadKey}
                 canApprove={can("agent:approve")}
                 onActioned={() => setReloadKey((k) => k + 1)}

@@ -9,6 +9,10 @@ class Project(BaseModel):
 
     organization_id = Column(String(36), ForeignKey("organizations.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
+    # URL-friendly identifier (unique per org). Readable project URLs use this
+    # instead of the UUID. Nullable for legacy rows (backfilled by migration);
+    # the project-fetch resolves either slug or id.
+    slug = Column(String(140), nullable=True, index=True)
     description = Column(Text, nullable=True)
     status = Column(String(50), default="draft", nullable=False)
     risk_level = Column(String(20), default="unknown")

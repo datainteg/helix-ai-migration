@@ -14,6 +14,7 @@ import { useParams } from "next/navigation";
 import { Plus, RefreshCw } from "lucide-react";
 
 import { ProjectShell } from "@/components/layout/ProjectShell";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import { Button, Card, Chip, EmptyState, LoadingState, ErrorBanner, Modal } from "@/components/ui";
 import { SchemaDriftCard } from "@/components/SchemaDriftCard";
 import { useAuth } from "@/lib/auth-context";
@@ -39,7 +40,8 @@ const STATE_TONE: Record<CutoverState, "default" | "indigo" | "amber" | "ok" | "
 };
 
 export default function ProjectCutoverPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
   const [items, setItems] = useState<Cutover[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +66,7 @@ export default function ProjectCutoverPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName="Untitled project"
       projectStatus="active"
       subtitle="Cutover orchestration. Plan, run, freeze, diff and flip."

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFocusTrap } from "@/lib/use-focus-trap";
 import { useParams } from "next/navigation";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   Sparkles,
   AlertTriangle,
@@ -53,8 +54,8 @@ const RISK_TONE = { low: "ok", med: "warn", high: "err", critical: "err" } as co
 const VAL_TONE = { pass: "ok", warn: "warn", fail: "err", pending: "default" } as const;
 
 export default function SprintBoardPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -149,9 +150,9 @@ export default function SprintBoardPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint planning board"
-        crumbs={["Projects", projectId, "Sprints", "Board"]}
+        crumbs={["Projects", projectKey, "Sprints", "Board"]}
       >
         <LoadingState />
       </AppShell>
@@ -161,9 +162,9 @@ export default function SprintBoardPage() {
   if (sprints.length === 0 || !active) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint planning board"
-        crumbs={["Projects", projectId, "Sprints", "Board"]}
+        crumbs={["Projects", projectKey, "Sprints", "Board"]}
       >
         <Card>
           <EmptyState
@@ -182,10 +183,10 @@ export default function SprintBoardPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Sprint planning board"
       description="Migration-specific kanban with agent assignments, validation and recon signals."
-      crumbs={["Projects", projectId, "Sprints", "Board"]}
+      crumbs={["Projects", projectKey, "Sprints", "Board"]}
       actions={
         <>
           <Button

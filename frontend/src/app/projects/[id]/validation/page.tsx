@@ -26,6 +26,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -36,7 +37,8 @@ interface RunDetail { id: string; status: string; results: ResultRow[]; }
 const TERMINAL = new Set(["completed", "failed", "error"]);
 
 export default function ProjectValidationPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { can } = useAuth();
   const canWrite = can("project:write");
 
@@ -52,7 +54,7 @@ export default function ProjectValidationPage() {
 
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   // Real project name + status for the ProjectShell header + breadcrumb.
   useEffect(() => {
@@ -157,7 +159,7 @@ export default function ProjectValidationPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus}
       onHold={onHold}

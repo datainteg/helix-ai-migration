@@ -1,7 +1,28 @@
 import json
+import re
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
+
+
+def _slugify(name: str) -> str:
+    """name → url-safe slug (lowercase, hyphens, no leading/trailing dashes)."""
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return s[:120] or "project"
+
+
+def _unique_slug(db: Session, org_id: str, name: str, exclude_id: str | None = None) -> str:
+    """A slug unique within the org (appends -2, -3, … on collision)."""
+    base = _slugify(name)
+    slug, n = base, 2
+    while True:
+        q = db.query(Project.id).filter(Project.organization_id == org_id, Project.slug == slug)
+        if exclude_id:
+            q = q.filter(Project.id != exclude_id)
+        if not q.first():
+            return slug
+        slug, n = f"{base}-{n}", n + 1
 
 from app.models.project import (
     Project, SubProject, MigrationRequirement,
@@ -48,6 +69,7 @@ def _project_to_response(project: Project, owner_names: dict[str, str] | None = 
         migration_type=_normalize_mt(project.migration_type),
         owner_id=project.owner_id,
         owner_name=(owner_names or {}).get(project.owner_id),
+        slug=getattr(project, "slug", None),
         on_hold=bool(getattr(project, "on_hold", False)),
         require_run_approval=bool(getattr(project, "require_run_approval", True)),
         source_system=src,
@@ -61,6 +83,7 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     resolved_owner = data.owner_id or owner_id
     project = Project(
         organization_id=org_id, owner_id=resolved_owner, name=data.name,
+        slug=_unique_slug(db, org_id, data.name),
         description=data.description, risk_level=data.risk_level,
         migration_type=_normalize_mt(data.migration_type), environment=data.environment,
         status=data.status or "draft",
@@ -126,7 +149,13 @@ def get_project(db: Session, org_id: str, project_id: str) -> ProjectResponse:
 
 
 def _get_project(db: Session, org_id: str, project_id: str) -> Project:
-    project = db.query(Project).filter(Project.id == project_id, Project.organization_id == org_id).first()
+    # Resolve by id OR slug so readable URLs (/projects/<slug>) and legacy UUID
+    # links both work. The frontend then uses the resolved .id for sub-calls.
+    project = (
+        db.query(Project)
+        .filter(or_(Project.id == project_id, Project.slug == project_id), Project.organization_id == org_id)
+        .first()
+    )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project

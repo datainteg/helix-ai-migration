@@ -24,6 +24,7 @@ import {
 } from "@/components/ui";
 import { SprintVelocityChart } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchSprints,
   fetchVelocity,
@@ -44,8 +45,8 @@ const AGENT_BREAKDOWN: Array<{ label: string; value: number; color: string }> = 
 ];
 
 export default function SprintAnalyticsPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -124,9 +125,9 @@ export default function SprintAnalyticsPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint analytics"
-        crumbs={["Projects", projectId, "Sprints", "Analytics"]}
+        crumbs={["Projects", projectKey, "Sprints", "Analytics"]}
       >
         <LoadingState />
       </AppShell>
@@ -136,9 +137,9 @@ export default function SprintAnalyticsPage() {
   if (sprints.length === 0) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint analytics"
-        crumbs={["Projects", projectId, "Sprints", "Analytics"]}
+        crumbs={["Projects", projectKey, "Sprints", "Analytics"]}
       >
         <Card>
           <EmptyState
@@ -157,10 +158,10 @@ export default function SprintAnalyticsPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINTS · ${projectId}`}
+      eyebrow={`SPRINTS · ${projectKey}`}
       title="Sprint analytics"
       description="Cross-sprint velocity, validation + recon trends, and AI vs human contribution split."
-      crumbs={["Projects", projectId, "Sprints", "Analytics"]}
+      crumbs={["Projects", projectKey, "Sprints", "Analytics"]}
       actions={
         <>
           <Button variant="outline">

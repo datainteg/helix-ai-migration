@@ -21,6 +21,7 @@ import { AppShell } from "@/components/layout";
 import { Button, Card, Chip, EmptyState, LoadingState } from "@/components/ui";
 import { AgentIcon } from "@/components/icons";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   fetchActiveSprint,
   fetchTasks,
@@ -103,8 +104,8 @@ function TaskNode({ data }: NodeProps<SprintTask>) {
 const NODE_TYPES = { task: TaskNode };
 
 export default function SprintDependenciesPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [active, setActive] = useState<Sprint | null>(null);
@@ -113,16 +114,16 @@ export default function SprintDependenciesPage() {
   const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(() => {
-    if (!token || !projectId) {
+    if (!token || !id) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchActiveSprint(token, projectId)
+    fetchActiveSprint(token, id)
       .then(setActive)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [token, projectId]);
+  }, [token, id]);
 
   useEffect(() => {
     load();
@@ -190,9 +191,9 @@ export default function SprintDependenciesPage() {
   }, [tasks]);
 
   const handleSeed = () => {
-    if (!token || !projectId) return;
+    if (!token || !id) return;
     setSeeding(true);
-    seedSprints(token, projectId)
+    seedSprints(token, id)
       .then(() => {
         load();
       })
@@ -203,9 +204,9 @@ export default function SprintDependenciesPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINT DEPENDENCIES · ${projectId}`}
+        eyebrow={`SPRINT DEPENDENCIES · ${projectKey}`}
         title="Task Dependency Graph"
-        crumbs={["Projects", projectId, "Sprints", "Dependencies"]}
+        crumbs={["Projects", projectKey, "Sprints", "Dependencies"]}
       >
         <LoadingState />
       </AppShell>
@@ -215,9 +216,9 @@ export default function SprintDependenciesPage() {
   if (!active) {
     return (
       <AppShell
-        eyebrow={`SPRINT DEPENDENCIES · ${projectId}`}
+        eyebrow={`SPRINT DEPENDENCIES · ${projectKey}`}
         title="Task Dependency Graph"
-        crumbs={["Projects", projectId, "Sprints", "Dependencies"]}
+        crumbs={["Projects", projectKey, "Sprints", "Dependencies"]}
       >
         <Card>
           <EmptyState
@@ -240,10 +241,10 @@ export default function SprintDependenciesPage() {
 
   return (
     <AppShell
-      eyebrow={`SPRINT DEPENDENCIES · ${projectId}`}
+      eyebrow={`SPRINT DEPENDENCIES · ${projectKey}`}
       title="Task Dependency Graph"
       description={`Dependencies across ${tasks.length} tasks in ${active.name}.`}
-      crumbs={["Projects", projectId, "Sprints", "Dependencies"]}
+      crumbs={["Projects", projectKey, "Sprints", "Dependencies"]}
     >
       {/* Legend */}
       <div className="flex items-center gap-5 mb-3 text-[11.5px]">

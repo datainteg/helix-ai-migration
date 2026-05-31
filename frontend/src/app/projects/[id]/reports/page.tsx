@@ -18,6 +18,7 @@ import {
   Table, THead, TBody, TR, TH, TD,
 } from "@/components/ui";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -52,7 +53,8 @@ const pctText = (pct: number | null, total: number) =>
   pct == null ? "—" : `${pct}%`;
 
 export default function ProjectReportsPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const [projectName, setProjectName] = useState("Project");
   const [projectStatus, setProjectStatus] = useState("draft");
   const [onHold, setOnHold] = useState(false);
@@ -60,7 +62,7 @@ export default function ProjectReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useRegisterCrumbLabel(String(id), projectName !== "Project" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Project" ? projectName : undefined);
 
   useEffect(() => {
     if (!id) return;
@@ -95,7 +97,7 @@ export default function ProjectReportsPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       projectStatus={projectStatus as any}
       onHold={onHold}

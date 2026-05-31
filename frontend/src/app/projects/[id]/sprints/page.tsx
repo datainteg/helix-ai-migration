@@ -25,6 +25,7 @@ import {
   SprintRiskCard,
 } from "@/components/sprints";
 import { useAuth } from "@/lib/auth-context";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   createSprint,
   fetchSprints,
@@ -43,8 +44,8 @@ import {
 } from "@/lib/sprints";
 
 export default function SprintDashboardPage() {
-  const params = useParams<{ id: string }>();
-  const projectId = String(params?.id ?? "");
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id: projectId } = useProjectKey(projectKey);
   const { token } = useAuth();
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
@@ -131,7 +132,7 @@ export default function SprintDashboardPage() {
   if (loading) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint dashboard"
       >
         <LoadingState />
@@ -142,7 +143,7 @@ export default function SprintDashboardPage() {
   if (sprints.length === 0 || !active) {
     return (
       <AppShell
-        eyebrow={`SPRINTS · ${projectId}`}
+        eyebrow={`SPRINTS · ${projectKey}`}
         title="Sprint dashboard"
         actions={
           <Button variant="outline" onClick={() => setShowNewSprint(true)}>

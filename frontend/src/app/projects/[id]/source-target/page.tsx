@@ -17,6 +17,7 @@ import { ProjectShell } from "@/components/layout/ProjectShell";
 import { Card, Button, Chip, StatusBadge, EmptyState, ErrorBanner, Modal } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { useProjectKey } from "@/lib/projects/useProjectKey";
 import {
   listConnections, addConnection, deleteConnection, testConnection, discoverSchemas,
   CONNECTOR_FIELDS, CONNECTOR_LABELS, type Connection, type ConnSide, type FieldDef,
@@ -27,7 +28,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 interface MigTypeSpec { value: string; label: string; source_kinds: string[]; target_kinds: string[]; }
 
 export default function SourceTargetPage() {
-  const { id } = useParams<{ id: string }>();
+  const projectKey = String(useParams<{ id: string }>().id);
+  const { id } = useProjectKey(projectKey);
   const { can } = useAuth();
   const canWrite = can("project:write");
   const [projectName, setProjectName] = useState("Loading…");
@@ -35,8 +37,9 @@ export default function SourceTargetPage() {
   const [typeSpecs, setTypeSpecs] = useState<MigTypeSpec[]>([]);
   const [connKinds, setConnKinds] = useState<Record<string, string>>({});
 
-  useRegisterCrumbLabel(String(id), projectName !== "Loading…" ? projectName : undefined);
+  useRegisterCrumbLabel(projectKey, projectName !== "Loading…" ? projectName : undefined);
   useEffect(() => {
+    if (!id) return;
     fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); })
@@ -57,13 +60,13 @@ export default function SourceTargetPage() {
 
   return (
     <ProjectShell
-      projectId={String(id)}
+      projectId={projectKey}
       projectName={projectName}
       subtitle={`Connect the source and target for this ${spec?.label ?? "migration"}. The agents read the source structure from here.`}
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ConnPanel projectId={String(id)} side="source" canWrite={canWrite} allowed={sourceTypes} discoverLabel={sourceIsFile ? "Infer schema from files" : "Introspect schema"} />
-        <ConnPanel projectId={String(id)} side="target" canWrite={canWrite} allowed={targetTypes} discoverLabel="Introspect schema" />
+        <ConnPanel projectId={id} side="source" canWrite={canWrite} allowed={sourceTypes} discoverLabel={sourceIsFile ? "Infer schema from files" : "Introspect schema"} />
+        <ConnPanel projectId={id} side="target" canWrite={canWrite} allowed={targetTypes} discoverLabel="Introspect schema" />
       </div>
     </ProjectShell>
   );
@@ -77,7 +80,7 @@ function ConnPanel({ projectId, side, canWrite, allowed, discoverLabel }: { proj
   const [testMsg, setTestMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
 
   const load = () => listConnections(projectId, side).then(setConns).catch(() => setConns([]));
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [projectId, side]);
+  useEffect(() => { if (!projectId) return; load(); /* eslint-disable-next-line */ }, [projectId, side]);
 
   const onTest = async (c: Connection) => {
     setBusyId(c.id); setErr("");
