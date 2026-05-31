@@ -899,37 +899,60 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     #    >60s) blocking provider call.
     from worker.activities.bmad_node_activities import _run_with_heartbeats
 
-    result = _run_with_heartbeats(
-        lambda: call_llm(
-            "script_generator",
-            system_prompt,
-            user_prompt,
-            org_id=input_data.get("organization_id"),
-        ),
-        "script_generator",
-    )
-
-    if result is None:
-        return _script_generator_failure(
-            ["LLM call failed (provider/key/API error)"],
-            "script generation failed: LLM call returned no result",
-        )
-
-    # 5. Normalize. The model may return structured fields, OR (commonly with
-    #    DeepSeek) return the JSON payload as PLAIN TEXT in `summary` rather than
-    #    parsed fields — recover it so the real DDL/data SQL isn't dropped.
-    if isinstance(result, dict) and not result.get("target_ddl") and not result.get("data_migration"):
-        blob = result.get("summary") if isinstance(result.get("summary"), str) else None
+    def _recover(res) -> dict:
+        """Pull the JSON object out of an inconsistent model response. DeepSeek
+        often returns the payload as plain text (in `summary`) or as a bare
+        string/list rather than structured fields."""
+        if isinstance(res, dict) and (res.get("target_ddl") or res.get("data_migration")):
+            return res
+        blob = None
+        if isinstance(res, dict):
+            blob = res.get("summary") if isinstance(res.get("summary"), str) else None
+        elif isinstance(res, str):
+            blob = res
         if blob:
             m = re.search(r"\{.*\}", blob, re.DOTALL)
             if m:
                 try:
                     parsed = json.loads(m.group(0))
                     if isinstance(parsed, dict):
-                        result = {**result, **parsed}
-                except Exception:  # noqa: BLE001 — leave result as-is if not JSON
+                        return {**(res if isinstance(res, dict) else {}), **parsed}
+                except Exception:  # noqa: BLE001
                     pass
+        return res if isinstance(res, dict) else {}
 
+    def _attempt(strict: bool) -> dict:
+        up = user_prompt
+        if strict:
+            up = user_prompt + (
+                "\n\nCRITICAL: respond with ONLY one raw JSON object — no markdown, "
+                "no code fences, no prose. target_ddl MUST be a non-empty string with "
+                "CREATE SCHEMA / CREATE TABLE statements for EVERY table in the schema "
+                "above (keys, types, constraints). data_migration MUST be non-empty SQL."
+            )
+        return _recover(_run_with_heartbeats(
+            lambda: call_llm("script_generator", system_prompt, up, org_id=input_data.get("organization_id")),
+            "script_generator",
+        ))
+
+    # 4b. First attempt; retry once more forcefully when a needed field came back
+    #     empty (DeepSeek is inconsistent with strict-JSON prompts).
+    def _has(r, k):
+        return isinstance(r, dict) and isinstance(r.get(k), str) and r.get(k).strip()
+    result = _attempt(strict=False)
+    missing = (emit_ddl and not _has(result, "target_ddl")) or (emit_data and not _has(result, "data_migration"))
+    if missing:
+        retry = _attempt(strict=True)
+        if _has(retry, "target_ddl") or _has(retry, "data_migration"):
+            result = retry
+
+    if not isinstance(result, dict) or not result:
+        return _script_generator_failure(
+            ["LLM returned no usable script after retry"],
+            "script generation failed: model returned no SQL (after retry)",
+        )
+
+    # 5. Normalize.
     def _str_field(key: str) -> str:
         val = result.get(key) if isinstance(result, dict) else None
         return val if isinstance(val, str) else ""

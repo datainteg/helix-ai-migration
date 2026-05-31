@@ -88,7 +88,26 @@ def call_llm(
                 # SEC-010: decrypt sealed sensitive keys before handing the dict to the provider
                 extra_config=_decrypt_extra_config_safe(provider_obj.extra_config) or {},
             )
-            return adapter.call(ctx)
+            result = adapter.call(ctx)
+            # Usage/cost sync: provider adapters don't surface token counts, so
+            # estimate (~4 chars/token) and record. Without this, call_llm-based
+            # agents (migration type_mapper / script_generator, assistants) never
+            # appeared in llm_usage_records — only the BMAD executor did. org_id
+            # is required for the record; skip if absent.
+            if result is not None and org_id:
+                try:
+                    import json as _json
+                    from app.services.cost_service import record_usage
+                    in_est = max(1, (len(system_prompt) + len(user_prompt)) // 4)
+                    out_est = max(1, len(_json.dumps(result)) // 4)
+                    record_usage(
+                        db, organization_id=org_id,
+                        provider_type=provider_obj.provider_type, model=model,
+                        input_tokens=in_est, output_tokens=out_est, agent_name=agent_name,
+                    )
+                except Exception:  # noqa: BLE001 — usage accounting must never fail the call
+                    logger.debug("call_llm usage record failed", exc_info=True)
+            return result
         finally:
             db.close()
     except Exception as exc:  # noqa: BLE001
