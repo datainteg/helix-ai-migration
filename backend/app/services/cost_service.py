@@ -42,12 +42,14 @@ _DEFAULT_RATES: dict[str, tuple[float, float]] = {
     # Google / Gemini
     "google:gemini-3-pro":       (3.50, 10.50),
     "google:gemini-3-flash":     (0.30, 2.50),
-    # DeepSeek
-    "deepseek:deepseek-chat":     (0.27, 1.10),
-    "deepseek:deepseek-reasoner": (0.55, 2.19),
+    # DeepSeek. deepseek-chat is a legacy alias of V4 Flash and deepseek-reasoner
+    # of V4 Pro (see models.py) — keep the alias rates EQUAL to their targets so
+    # the same model isn't billed two different rates by alias string.
     "deepseek:deepseek-v4-pro":   (0.55, 2.19),
     "deepseek:deepseek-v4-flash": (0.14, 0.28),
-    "deepseek:*":                 (0.27, 1.10),
+    "deepseek:deepseek-reasoner": (0.55, 2.19),  # = V4 Pro
+    "deepseek:deepseek-chat":     (0.14, 0.28),  # = V4 Flash
+    "deepseek:*":                 (0.14, 0.28),
     # OpenRouter is a meta-broker; pricing flows through whichever model is selected.
     # Vertex/Bedrock/Azure mirror their respective vendor rates (covered above).
     # Local + custom: free.

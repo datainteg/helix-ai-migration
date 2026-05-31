@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import logging
 import os
 from datetime import datetime, timezone
@@ -751,6 +750,37 @@ def _write_sql_artifact(
         return None
 
 
+def _extract_json_obj(text: str) -> str | None:
+    """Return the first BALANCED top-level JSON object in `text`, honoring string
+    literals (so braces inside SQL strings don't break it). Replaces a greedy
+    `\\{.*\\}` regex that spanned to the LAST brace and failed json.loads when the
+    blob held more than one object."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def _register_code_artifact(input_data: dict[str, Any], filename: str, storage_path: str | None) -> None:
     """Register a generated artifact file in code_artifacts (new version if it
     already exists for this project). Lets the project Artifacts + Developer
@@ -911,10 +941,10 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(res, str):
             blob = res
         if blob:
-            m = re.search(r"\{.*\}", blob, re.DOTALL)
-            if m:
+            js = _extract_json_obj(blob)
+            if js:
                 try:
-                    parsed = json.loads(m.group(0))
+                    parsed = json.loads(js)
                     if isinstance(parsed, dict):
                         return {**(res if isinstance(res, dict) else {}), **parsed}
                 except Exception:  # noqa: BLE001
@@ -1217,7 +1247,7 @@ def _write_recon_artifact(
             "`reconciler` migration agent (no LLM).\n",
             "## Summary\n",
             summary + "\n",
-            f"- Verified: **{verified_pct}%**",
+            f"- Verified: **{verified_pct}%**" if verified_pct is not None else "- Verified: **n/a (skipped — no target)**",
             f"- Tables checked: {len(rows)}",
             f"- Matched: {matched}",
             f"- Mismatched: {mismatched}",
@@ -1310,6 +1340,25 @@ def reconciler_activity(input_data: dict[str, Any]) -> dict[str, Any]:
         or input_data.get("source_connector_type")
     )
     target_provided = bool(input_data.get("target_config"))
+
+    # 2b. No target to reconcile against → DO NOT compare the source to itself
+    #     (that fabricated a false 100% verified). Report honestly as skipped
+    #     with verified_pct=None so dashboards/compliance don't read false
+    #     confidence. Applies to schema_only / db_to_file / any start without a
+    #     target connection.
+    if not target_provided:
+        msg = "Reconciliation skipped — no target connection configured to compare against."
+        logger.info("reconciler: %s project=%s", msg, project_id)
+        artifact_path = _write_recon_artifact(str(project_id), msg, None, [], 0, 0, 0) if project_id else None
+        return {
+            "agent": "reconciler", "skill": "migration-reconcile", "success": True,
+            "mode": "reconcile", "errors": [], "artifact_path": artifact_path,
+            "parsed": {
+                "summary": msg, "verified_pct": None, "tables_checked": 0,
+                "matched": 0, "mismatched": 0, "errors_count": 0,
+                "recon_run_id": None, "truncated": False, "skipped": True,
+            },
+        }
 
     # 3. Build the (bounded) list of (schema, table) to compare.
     pairs, truncated = _collect_recon_tables(model)

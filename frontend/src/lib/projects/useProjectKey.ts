@@ -1,18 +1,18 @@
 "use client";
 
 /**
- * useProjectKey — resolve the project URL param (which may be a readable slug
- * OR a UUID) to the canonical project.
+ * useProjectKey — resolve the project URL param (a readable slug OR a UUID) to
+ * the canonical project.
  *
  * URLs are slug-based (/projects/<slug>/...). The backend's project-fetch
  * resolves slug-or-id, so we fetch once and expose:
- *   - `id`   : the canonical UUID — use this for ALL sub-endpoint calls
- *              (/projects/{id}/requirements, etc.) which key on the real id.
- *   - `key`  : the value to use when building sub-page links (prefer the slug
- *              so navigation keeps readable URLs).
+ *   - `id`   : canonical UUID — use for ALL sub-endpoint calls.
+ *   - `key`  : value for building sub-page links (the slug, so URLs stay readable).
  *   - `project`, `name`, `loading`, `error`, `reload`.
  *
- * Cached per param across the session so sibling pages don't re-fetch.
+ * No cross-render module cache: it would serve stale name/slug after a rename
+ * and leak one user's project to another in the same tab. Each hook instance
+ * fetches once on mount (cheap GET) and re-fetches when the param changes.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -30,41 +30,42 @@ export interface ResolvedProject {
   reload: () => void;
 }
 
-const _cache = new Map<string, any>();
-
 export function useProjectKey(param: string | undefined): ResolvedProject {
   const p = param || "";
   const pathname = usePathname() || "";
   const router = useRouter();
-  const cached = _cache.get(p);
-  const [project, setProject] = useState<Record<string, unknown> | null>(cached ?? null);
-  const [loading, setLoading] = useState(!cached);
+  const [project, setProject] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
     if (!p) return;
     setLoading(true); setError("");
-    fetch(`${API_BASE}/api/v1/projects/${p}`, { credentials: "include" })
+    fetch(`${API_BASE}/api/v1/projects/${encodeURIComponent(p)}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? "Project not found" : `Failed (${r.status})`))))
-      .then((data) => { _cache.set(p, data); setProject(data); })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load project"))
+      .then((data) => setProject(data))
+      .catch((e) => { setProject(null); setError(e instanceof Error ? e.message : "Failed to load project"); })
       .finally(() => setLoading(false));
   }, [p]);
 
-  useEffect(() => { if (!cached) load(); /* eslint-disable-next-line */ }, [p]);
+  // Re-resolve whenever the param changes.
+  useEffect(() => { setProject(null); load(); }, [load]);
 
   const id = (project?.id as string) || "";
   const slug = (project?.slug as string) || "";
 
-  // Canonicalize the URL to the slug: if the user arrived via the UUID (or an
-  // old slug) and a slug exists, rewrite the path so the address bar + all
-  // in-page links use the readable slug.
+  // Canonicalize the URL to the slug — SEGMENT-AWARE: only rewrite the leading
+  // `/projects/<param>` segment, never an arbitrary substring elsewhere in the
+  // path (which could corrupt the path or loop). After the replace the route
+  // param becomes the slug, so the condition stops firing.
   useEffect(() => {
-    if (slug && p && p !== slug && pathname.includes(p)) {
-      router.replace(pathname.replace(p, slug));
+    if (!slug || !p || p === slug) return;
+    const from = `/projects/${p}`;
+    if (pathname === from || pathname.startsWith(from + "/")) {
+      router.replace(`/projects/${slug}` + pathname.slice(from.length));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, p, pathname]);
+  }, [slug, p, pathname, router]);
+
   return {
     id,
     key: slug || id || p,

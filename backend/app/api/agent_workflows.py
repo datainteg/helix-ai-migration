@@ -286,30 +286,49 @@ async def approve_run_request(
 ):
     """Approve a pending run request and START the workflow. Separation of
     duties: the requester cannot approve their own request."""
-    from app.models.project import WorkflowRunRequest
-    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).first()
+    from app.models.project import WorkflowRunRequest, Project as _Project
+    # Lock the row so two concurrent approves can't both pass the pending check
+    # and double-start the workflow (TOCTOU).
+    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).with_for_update().first()
     if not req:
         raise HTTPException(status_code=404, detail="Run request not found")
     ensure_project_access(db, org_id, req.project_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail=f"Request already {req.status}.")
+    # Re-check operational hold at approval time — the normal start path refuses
+    # held projects; a request created before a hold must not bypass it.
+    proj = db.query(_Project).filter(_Project.id == req.project_id).first()
+    if proj is not None and getattr(proj, "on_hold", False):
+        raise HTTPException(status_code=409, detail="Project is on hold — set it live before approving a run.")
     # Separation of duties: a regular approver can't approve their own request.
     # Admins / super-admins may self-approve (they own the project governance).
     if req.requested_by == user_id and not user_has_role(db, user_id, {"super_admin", "admin"}):
         raise HTTPException(status_code=403, detail="You can't approve your own run request (separation of duties).")
-
-    requirement = db.query(MigrationRequirement).filter(MigrationRequirement.id == req.requirement_id).first()
+    # Re-assert the requirement still belongs to this request's project.
+    requirement = db.query(MigrationRequirement).filter(
+        MigrationRequirement.id == req.requirement_id,
+        MigrationRequirement.project_id == req.project_id,
+    ).first()
     if not requirement:
-        raise HTTPException(status_code=404, detail="Requirement no longer exists")
+        raise HTTPException(status_code=404, detail="Requirement no longer exists for this project")
 
-    correlation_id = getattr(request.state, "request_id", None) if request else None
-    result = await start_bmad_planning_workflow(
-        project_id=req.project_id, requirement_id=req.requirement_id,
-        organization_id=org_id, requirement_text=requirement.source_text,
-        db=db, correlation_id=correlation_id,
-    )
+    # Claim the request BEFORE starting (atomic under the row lock), so a racing
+    # approver sees "approved" and 409s instead of starting a second run.
     req.status = "approved"
     req.approver_id = user_id
+    db.commit()
+
+    correlation_id = getattr(request.state, "request_id", None) if request else None
+    try:
+        result = await start_bmad_planning_workflow(
+            project_id=req.project_id, requirement_id=req.requirement_id,
+            organization_id=org_id, requirement_text=requirement.source_text,
+            db=db, correlation_id=correlation_id,
+        )
+    except Exception:
+        req.status = "failed"
+        db.commit()
+        raise
     req.workflow_id = result["workflow_id"]
     db.commit()
     db.refresh(req)
@@ -326,7 +345,8 @@ def reject_run_request(
 ):
     """Reject a pending run request with optional notes."""
     from app.models.project import WorkflowRunRequest
-    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).first()
+    # Lock the row so reject can't race with a concurrent approve.
+    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).with_for_update().first()
     if not req:
         raise HTTPException(status_code=404, detail="Run request not found")
     ensure_project_access(db, org_id, req.project_id)

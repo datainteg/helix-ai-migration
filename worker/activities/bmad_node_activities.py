@@ -518,6 +518,23 @@ def persist_workflow_terminal_state_activity(state_data: dict[str, Any]) -> None
             )
             return
         run.status = status
+        # Close the loop on project status: _persist_started_workflow flips the
+        # project to "running" on start; revert it here so projects don't get
+        # stuck "running" forever. Guard: don't downgrade while another run is
+        # still active for the same project (last terminal run wins otherwise).
+        from app.models.project import Project
+        others_active = (
+            db.query(WorkflowRun)
+            .filter(
+                WorkflowRun.project_id == run.project_id,
+                WorkflowRun.workflow_id != workflow_id,
+                WorkflowRun.status.in_(["started", "running", "awaiting_approval"]),
+            )
+            .first()
+        )
+        proj = db.query(Project).filter(Project.id == run.project_id).first()
+        if proj is not None and proj.status not in ("archived", "deleted") and not others_active:
+            proj.status = {"completed": "completed", "failed": "failed"}.get(status, "draft")
         db.commit()
         logger.info(
             "WorkflowRun %s reconciled to status=%s (summary=%s)",

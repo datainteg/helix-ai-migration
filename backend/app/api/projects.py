@@ -327,7 +327,13 @@ def api_update_project(project_id: str, data: ProjectUpdate, request: Request, u
         if data.status not in ("draft", "running", "awaiting", "completed", "failed", "archived"):
             raise HTTPException(status_code=400, detail="Invalid status")
         p.status = data.status
-    if data.require_run_approval is not None:
+    if data.require_run_approval is not None and bool(data.require_run_approval) != bool(p.require_run_approval):
+        # Separation of duties: project:write (held by project_manager, who also
+        # has agent:approve) must NOT be able to disable the pre-start approval
+        # gate — only an admin/super-admin can toggle it, so one PM can't both
+        # turn the gate off and self-approve.
+        if not user_has_role(db, user_id, {"super_admin", "admin"}):
+            raise HTTPException(status_code=403, detail="Only an admin can change the run-approval requirement.")
         p.require_run_approval = data.require_run_approval
     db.commit()
     db.refresh(p)
