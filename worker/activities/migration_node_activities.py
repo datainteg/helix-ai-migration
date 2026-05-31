@@ -164,6 +164,48 @@ async def _introspect_source(
     }
 
 
+async def _introspect_file_source(
+    connector_type: str,
+    config: dict[str, Any],
+    in_scope: list[str],
+) -> dict[str, Any]:
+    """File-source schema inference into the SAME normalized model shape.
+
+    File connectors (csv_upload, excel_upload, s3) implement the same
+    discover_schemas/discover_tables/discover_columns/get_row_count interface as
+    DB connectors (they carry the `file_schema_inference` capability), so we
+    reuse `_introspect_source` verbatim. If that robust inference path raises
+    (e.g. an unreadable file / missing optional dep), we degrade to a minimal,
+    non-crashing model built best-effort from the available metadata and attach
+    a note — the activity must still return success=True with a usable model.
+    """
+    try:
+        model = await _introspect_source(connector_type, config, in_scope)
+        model.setdefault("notes", [])
+        if isinstance(model.get("notes"), list):
+            model["notes"].append("schema inferred from file source")
+        model["source_kind"] = "file"
+        return model
+    except Exception as exc:  # noqa: BLE001 — file inference must not crash the node
+        logger.warning(
+            "schema_analyst: file inference failed for %s, returning minimal model: %s",
+            connector_type,
+            exc,
+        )
+        return {
+            "source_connector_type": connector_type,
+            "source_kind": "file",
+            "schemas": [],
+            "table_count": 0,
+            "column_count": 0,
+            "truncated": False,
+            "notes": [
+                "file schema inference unavailable; minimal model produced "
+                f"best-effort ({exc})"
+            ],
+        }
+
+
 def _failure_result(errors: list[str], summary: str) -> dict[str, Any]:
     return {
         "agent": "schema_analyst",
@@ -269,16 +311,31 @@ def schema_analyst_activity(input_data: dict[str, Any]) -> dict[str, Any]:
             "schema introspection skipped: missing source connector/config",
         )
 
+    # db source path stays exactly as-is; file source (source_kind=="file")
+    # infers the schema from the file instead of DB introspection. Defaults to
+    # "db" when the key is absent so legacy/in-flight runs are unchanged.
+    source_kind = input_data.get("source_kind", "db")
+
     try:
         # Introspection is blocking (psycopg2 in a thread pool) and can exceed
         # the 60s heartbeat on a large DB, so wrap the asyncio fan-out in
         # _run_with_heartbeats. detail_prefix surfaces in Temporal heartbeats.
         from worker.activities.bmad_node_activities import _run_with_heartbeats
 
-        model = _run_with_heartbeats(
-            lambda: asyncio.run(_introspect_source(connector_type, config, in_scope)),
-            detail_prefix="schema_analyst:introspect",
-        )
+        if source_kind == "file":
+            model = _run_with_heartbeats(
+                lambda: asyncio.run(
+                    _introspect_file_source(connector_type, config, in_scope)
+                ),
+                detail_prefix="schema_analyst:infer-file",
+            )
+        else:
+            model = _run_with_heartbeats(
+                lambda: asyncio.run(
+                    _introspect_source(connector_type, config, in_scope)
+                ),
+                detail_prefix="schema_analyst:introspect",
+            )
     except Exception as exc:  # noqa: BLE001 — connection / discovery failure
         logger.exception("schema_analyst: introspection failed for project=%s", project_id)
         return _failure_result(
@@ -497,20 +554,40 @@ def type_mapper_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     compact_lines, truncated = _compact_schema_lines(model)
     compact_text = "\n".join(compact_lines) if compact_lines else "(no tables)"
 
-    # 3. Compose prompts.
-    system_prompt = (
-        "You are a senior database migration engineer. Map source column data "
-        "types to the target database's equivalent types. Be precise about "
-        "precision/scale, identity/sequences, and lossy or ambiguous conversions. "
-        "Respond with STRICT JSON only."
-    )
-    user_prompt = (
-        f"Source: {source_connector_type}. Target: {target}.\n"
-        f"Source schema:\n{compact_text}\n\n"
-        'Return JSON: {"mappings":[{"source_type":"...","target_type":"...","note":"..."}], '
-        '"ambiguous_mappings":[{"table":"...","column":"...","source_type":"...",'
-        '"target_type":"...","reason":"..."}], "summary":"..."}'
-    )
+    # 3. Compose prompts. When the source is a file (source_kind=="file"), frame
+    #    the task as file-field → target-column mapping rather than db-type →
+    #    db-type. Defaults to "db" when absent so legacy runs are unchanged. The
+    #    output JSON shape is identical in both branches.
+    source_kind = input_data.get("source_kind", "db")
+    if source_kind == "file":
+        system_prompt = (
+            "You are a senior data migration engineer. Map each source FILE "
+            "FIELD to the equivalent column type in the target database. Infer "
+            "appropriate target column types from the field's inferred type and "
+            "sample shape. Be precise about precision/scale and lossy or "
+            "ambiguous conversions. Respond with STRICT JSON only."
+        )
+        user_prompt = (
+            f"Source file: {source_connector_type}. Target database: {target}.\n"
+            f"Source fields (file → field list):\n{compact_text}\n\n"
+            'Return JSON: {"mappings":[{"source_type":"...","target_type":"...","note":"..."}], '
+            '"ambiguous_mappings":[{"table":"...","column":"...","source_type":"...",'
+            '"target_type":"...","reason":"..."}], "summary":"..."}'
+        )
+    else:
+        system_prompt = (
+            "You are a senior database migration engineer. Map source column data "
+            "types to the target database's equivalent types. Be precise about "
+            "precision/scale, identity/sequences, and lossy or ambiguous conversions. "
+            "Respond with STRICT JSON only."
+        )
+        user_prompt = (
+            f"Source: {source_connector_type}. Target: {target}.\n"
+            f"Source schema:\n{compact_text}\n\n"
+            'Return JSON: {"mappings":[{"source_type":"...","target_type":"...","note":"..."}], '
+            '"ambiguous_mappings":[{"table":"...","column":"...","source_type":"...",'
+            '"target_type":"...","reason":"..."}], "summary":"..."}'
+        )
 
     # 4. Call the LLM, wrapped so Temporal keeps heartbeating during the (possibly
     #    >60s) blocking provider call.
@@ -689,20 +766,77 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     # "... and N more tables omitted" trailer the helper appends when truncated).
     tables_scripted = sum(1 for ln in compact_lines if not ln.startswith("..."))
 
-    # 3. Compose prompts.
-    system_prompt = (
-        "You are a senior database migration engineer. Generate idempotent, "
-        "runnable SQL to migrate the given source schema to the target database. "
-        "Never include destructive statements outside the rollback script. "
-        "Respond with STRICT JSON only."
-    )
-    user_prompt = (
-        f"Source: {source_connector_type}. Target: {target}.\n"
-        f"Source schema (first {_MAX_SQL_PROMPT_TABLES} tables):\n{compact_text}\n\n"
-        'Return JSON: {"target_ddl":"<CREATE TABLE ... for target dialect>",'
-        '"data_migration":"<INSERT/SELECT or COPY to move data>",'
-        '"rollback":"<DROP/revert>","manual_steps":["..."],"summary":"..."}'
-    )
+    # 3. Resolve the type-aware emission flags. Defaults match db_to_db exactly
+    #    (emit_ddl=True, emit_data=True, direction="load") so legacy / in-flight
+    #    runs and any caller that didn't set these keys behave as today.
+    emit_ddl = input_data.get("emit_ddl", True)
+    emit_data = input_data.get("emit_data", True)
+    direction = input_data.get("direction", "load")
+
+    # 4. Compose prompts, shaped by the flags:
+    #    - emit_ddl=False  → do NOT emit CREATE/DDL statements.
+    #    - emit_data=False → do NOT emit data-migration/INSERT/COPY statements.
+    #    - direction=="unload" → generate EXPORT statements (COPY ... TO /
+    #      UNLOAD to file) rather than load-into-DB SQL; no CREATE TABLE on a
+    #      file target.
+    if direction == "unload":
+        # Database → File: export the source data to file(s). No DDL on a file
+        # target. emit_ddl is False for db_to_file, but guard anyway.
+        ddl_clause = (
+            ('"target_ddl":"<CREATE TABLE ... for target dialect>",' if emit_ddl else "")
+        )
+        system_prompt = (
+            "You are a senior data migration engineer. Generate runnable export "
+            "(unload) statements that read the given source schema and write the "
+            "data OUT to files (e.g. COPY ... TO / UNLOAD). Do NOT generate "
+            "CREATE TABLE statements against a file target. Never include "
+            "destructive statements outside the rollback script. Respond with "
+            "STRICT JSON only."
+        )
+        data_clause = (
+            '"data_migration":"<COPY ... TO / UNLOAD exporting source data to file(s)>",'
+            if emit_data
+            else ""
+        )
+        user_prompt = (
+            f"Source: {source_connector_type}. Target (file): {target}.\n"
+            f"Source schema (first {_MAX_SQL_PROMPT_TABLES} tables):\n{compact_text}\n\n"
+            "Return JSON: {" + ddl_clause + data_clause
+            + '"rollback":"<remove exported files / revert>","manual_steps":["..."],"summary":"..."}'
+        )
+    else:
+        # direction=="load" (default): load into the target DB.
+        ddl_clause = (
+            '"target_ddl":"<CREATE TABLE ... for target dialect>",' if emit_ddl else ""
+        )
+        data_clause = (
+            '"data_migration":"<INSERT/SELECT or COPY to move data>",'
+            if emit_data
+            else ""
+        )
+        ddl_instr = (
+            "Generate idempotent, runnable DDL to create the target schema. "
+            if emit_ddl
+            else "Do NOT generate any CREATE/DDL statements. "
+        )
+        data_instr = (
+            "Generate runnable statements to move the data. "
+            if emit_data
+            else "Do NOT generate any data-migration/INSERT/COPY statements. "
+        )
+        system_prompt = (
+            "You are a senior database migration engineer. "
+            + ddl_instr
+            + data_instr
+            + "Never include destructive statements outside the rollback script. "
+            "Respond with STRICT JSON only."
+        )
+        user_prompt = (
+            f"Source: {source_connector_type}. Target: {target}.\n"
+            f"Source schema (first {_MAX_SQL_PROMPT_TABLES} tables):\n{compact_text}\n\n"
+            "Return JSON: {" + ddl_clause + data_clause
+            + '"rollback":"<DROP/revert>","manual_steps":["..."],"summary":"..."}'
+        )
 
     # 4. Call the LLM, wrapped so Temporal keeps heartbeating during the (possibly
     #    >60s) blocking provider call.
@@ -734,6 +868,15 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     data_migration = _str_field("data_migration")
     rollback = _str_field("rollback")
 
+    # Defensively enforce the emission flags even if the model ignored the
+    # prompt: when emit_ddl/emit_data are False, drop the corresponding script
+    # so it is neither persisted nor surfaced. For db_to_db both flags are True
+    # so these are no-ops and behaviour is byte-identical to before.
+    if not emit_ddl:
+        target_ddl = ""
+    if not emit_data:
+        data_migration = ""
+
     manual_steps = result.get("manual_steps") if isinstance(result, dict) else []
     if not isinstance(manual_steps, list):
         manual_steps = []
@@ -745,15 +888,19 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     if not (target_ddl or data_migration or rollback):
         summary = f"{summary} (no SQL scripts returned by model)"
 
-    # 6. Write the three SQL artifacts (best-effort each). This node NEVER runs
-    #    the SQL — `execution_enabled` is recorded for downstream/UX only.
+    # 6. Write the SQL artifacts (best-effort each). This node NEVER runs the SQL
+    #    — `execution_enabled` is recorded for downstream/UX only. DDL/data
+    #    artifacts are written only when their flag is set (emit_ddl/emit_data);
+    #    for db_to_db both are True so all three are written as before.
     ddl_path = data_path = rollback_path = None
     if project_id:
         pid = str(project_id)
-        ddl_path = _write_sql_artifact(pid, "target-ddl", "Target DDL", target_ddl)
-        data_path = _write_sql_artifact(
-            pid, "data-migration", "Data Migration", data_migration
-        )
+        if emit_ddl:
+            ddl_path = _write_sql_artifact(pid, "target-ddl", "Target DDL", target_ddl)
+        if emit_data:
+            data_path = _write_sql_artifact(
+                pid, "data-migration", "Data Migration", data_migration
+            )
         rollback_path = _write_sql_artifact(pid, "rollback", "Rollback", rollback)
 
     # artifact_path is the single per-node bucket: prefer the target DDL, else
@@ -1020,6 +1167,30 @@ def _write_recon_artifact(
 def reconciler_activity(input_data: dict[str, Any]) -> dict[str, Any]:
     project_id = input_data.get("project_id")
     logger.info("migration: reconciler (reconcile) for project=%s", project_id)
+
+    # 0. Defensive: when recon is explicitly disabled (schema_only), the workflow
+    #    loop normally skips this node entirely, but if it is invoked anyway we
+    #    early-return a benign success rather than reconciling. Defaults to True
+    #    when the key is absent so db_to_db / legacy runs reconcile as before.
+    if input_data.get("recon", True) is False:
+        return {
+            "agent": "reconciler",
+            "skill": "migration-reconcile",
+            "success": True,
+            "mode": "reconcile",
+            "errors": [],
+            "artifact_path": None,
+            "parsed": {
+                "summary": "reconciliation skipped: recon disabled for this migration type",
+                "verified_pct": 0.0,
+                "tables_checked": 0,
+                "matched": 0,
+                "mismatched": 0,
+                "errors_count": 0,
+                "recon_run_id": None,
+                "truncated": False,
+            },
+        }
 
     # 1. Load the latest source-schema snapshot.
     model = _load_latest_source_model(project_id)

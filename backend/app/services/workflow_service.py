@@ -164,6 +164,7 @@ async def start_migration_workflow(
     target_config: dict | None = None,
     in_scope_schemas: list[str] | None = None,
     requirement_text: str | None = None,
+    migration_type: str | None = None,
     db: Session | None = None,
     correlation_id: str | None = None,
 ) -> dict:
@@ -185,6 +186,7 @@ async def start_migration_workflow(
         target_config=target_config,
         in_scope_schemas=in_scope_schemas,
         requirement_text=requirement_text or "",
+        migration_type=migration_type or "db_to_db",
         correlation_id=correlation_id,
     )
     try:

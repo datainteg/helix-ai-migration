@@ -16,6 +16,8 @@ import {
   startProjectWorkflow,
   createProjectRequirement,
   compileRequirement,
+  fieldsForType,
+  EMPTY_SPEC,
   type WorkflowRun,
   type WorkflowDetail,
   type WorkflowStep,
@@ -49,6 +51,7 @@ export default function ProjectAgentsPage() {
   const [active, setActive] = useState<WorkflowDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [projectName, setProjectName] = useState("Loading…");
+  const [migType, setMigType] = useState("db_to_db");
   const [reloadKey, setReloadKey] = useState(0);
   const [runModal, setRunModal] = useState(false);
 
@@ -59,7 +62,7 @@ export default function ProjectAgentsPage() {
     if (!id) return;
     fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((p) => setProjectName(p?.name || "Project"))
+      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); })
       .catch(() => setProjectName("Project"));
   }, [id]);
 
@@ -150,6 +153,7 @@ export default function ProjectAgentsPage() {
       {runModal && (
         <RunWorkflowModal
           projectId={String(id)}
+          migType={migType}
           onClose={() => setRunModal(false)}
           onStarted={() => { setRunModal(false); setReloadKey((k) => k + 1); }}
         />
@@ -244,12 +248,9 @@ function FlowNode({ label, phase, color, status }: { label: string; phase: strin
   );
 }
 
-const EMPTY_SPEC: RequirementSpec = {
-  goal: "", scope: "", typeRules: "", constraints: "", data: "", transforms: "", objects: "", conventions: "",
-};
-
-function RunWorkflowModal({ projectId, onClose, onStarted }: {
+function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
   projectId: string;
+  migType: string;
   onClose: () => void;
   onStarted: () => void;
 }) {
@@ -271,7 +272,7 @@ function RunWorkflowModal({ projectId, onClose, onStarted }: {
     try {
       let requirementId = picked;
       if (mode === "build") {
-        const text = compileRequirement(spec);
+        const text = compileRequirement(migType, spec);
         if (!text || !spec.goal.trim()) { setErr("Describe at least the migration goal."); setStarting(false); return; }
         const created = await createProjectRequirement(projectId, text);
         requirementId = created.id;
@@ -287,12 +288,7 @@ function RunWorkflowModal({ projectId, onClose, onStarted }: {
   };
 
   const ta = "px-2.5 py-2 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring resize-y w-full";
-  const field = (label: string, key: keyof RequirementSpec, placeholder: string, rows = 2) => (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">{label}</span>
-      <textarea rows={rows} value={spec[key]} onChange={(e) => setSpec((s) => ({ ...s, [key]: e.target.value }))} placeholder={placeholder} className={ta} />
-    </label>
-  );
+  const specFields = fieldsForType(migType);
 
   return (
     <Modal open onClose={onClose} title="Run migration workflow" width="lg">
@@ -325,14 +321,12 @@ function RunWorkflowModal({ projectId, onClose, onStarted }: {
           ) : <p className="text-[12.5px] text-ink-4">No saved requirements — build one →</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[46vh] overflow-y-auto pr-1">
-            <div className="sm:col-span-2">{field("Migration goal *", "goal", "e.g. Migrate the Sales OLTP DB from PostgreSQL 15 to Snowflake (staging).")}</div>
-            {field("Scope — schemas/tables", "scope", "Include: sales.*, hr.employees. Exclude: audit_logs.")}
-            {field("Type-mapping rules", "typeRules", "jsonb → VARIANT; numeric(38,x) preserved; timestamptz → TIMESTAMP_TZ.")}
-            {field("Constraints, keys & indexes", "constraints", "Preserve PK/FK as constraints; recreate unique indexes.")}
-            {field("Data handling", "data", "Migrate data (~2M rows), batch 50k; no PII masking in staging.")}
-            {field("Transformations", "transforms", "Rename legacy_id → id; split full_name into first/last.")}
-            {field("Special objects", "objects", "Migrate views; document stored procs (manual port).")}
-            {field("Target conventions", "conventions", "snake_case; cluster orders by order_date.")}
+            {specFields.map((f) => (
+              <label key={f.key} className={`flex flex-col gap-1.5 ${f.full ? "sm:col-span-2" : ""}`}>
+                <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">{f.label}</span>
+                <textarea rows={2} value={spec[f.key]} onChange={(e) => setSpec((s) => ({ ...s, [f.key]: e.target.value }))} placeholder={f.placeholder} className={ta} />
+              </label>
+            ))}
           </div>
         )}
 

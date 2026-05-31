@@ -18,6 +18,7 @@ from app.schemas.project import (
     ColumnCreate,
 )
 from app.services.secret_service import encrypt_value, decrypt_value
+from app.services.migration_types import normalize_migration_type as _normalize_mt
 
 
 # ── Projects ────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ def _project_to_response(project: Project, owner_names: dict[str, str] | None = 
         description=project.description,
         status=project.status,
         risk_level=project.risk_level,
-        migration_type=project.migration_type,
+        migration_type=_normalize_mt(project.migration_type),
         owner_id=project.owner_id,
         owner_name=(owner_names or {}).get(project.owner_id),
         on_hold=bool(getattr(project, "on_hold", False)),
@@ -60,7 +61,7 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     project = Project(
         organization_id=org_id, owner_id=resolved_owner, name=data.name,
         description=data.description, risk_level=data.risk_level,
-        migration_type=data.migration_type, environment=data.environment,
+        migration_type=_normalize_mt(data.migration_type), environment=data.environment,
         status=data.status or "draft",
     )
     db.add(project)

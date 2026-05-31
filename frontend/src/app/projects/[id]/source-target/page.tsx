@@ -24,33 +24,52 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
+interface MigTypeSpec { value: string; label: string; source_kinds: string[]; target_kinds: string[]; }
+
 export default function SourceTargetPage() {
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
   const canWrite = can("project:write");
   const [projectName, setProjectName] = useState("Loading…");
+  const [migType, setMigType] = useState("db_to_db");
+  const [typeSpecs, setTypeSpecs] = useState<MigTypeSpec[]>([]);
+  const [connKinds, setConnKinds] = useState<Record<string, string>>({});
 
   useRegisterCrumbLabel(String(id), projectName !== "Loading…" ? projectName : undefined);
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null)).then((p) => setProjectName(p?.name || "Project")).catch(() => setProjectName("Project"));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); })
+      .catch(() => setProjectName("Project"));
+    fetch(`${API_BASE}/api/v1/migration-types`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) { setTypeSpecs(d.types || []); setConnKinds(d.connector_kinds || {}); } })
+      .catch(() => {});
   }, [id]);
+
+  const spec = typeSpecs.find((t) => t.value === migType);
+  // Connectors valid for a side = those whose kind is allowed by the type.
+  const connectorsFor = (kinds: string[] | undefined) =>
+    Object.keys(CONNECTOR_FIELDS).filter((ct) => !kinds || kinds.includes(connKinds[ct] ?? "db"));
+  const sourceTypes = connectorsFor(spec?.source_kinds);
+  const targetTypes = connectorsFor(spec?.target_kinds);
+  const sourceIsFile = (spec?.source_kinds ?? ["db"]).every((k) => k === "file");
 
   return (
     <ProjectShell
       projectId={String(id)}
       projectName={projectName}
-      subtitle="Connect the source and target databases. The migration agents introspect the source from here."
+      subtitle={`Connect the source and target for this ${spec?.label ?? "migration"}. The agents read the source structure from here.`}
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ConnPanel projectId={String(id)} side="source" canWrite={canWrite} />
-        <ConnPanel projectId={String(id)} side="target" canWrite={canWrite} />
+        <ConnPanel projectId={String(id)} side="source" canWrite={canWrite} allowed={sourceTypes} discoverLabel={sourceIsFile ? "Infer schema from files" : "Introspect schema"} />
+        <ConnPanel projectId={String(id)} side="target" canWrite={canWrite} allowed={targetTypes} discoverLabel="Introspect schema" />
       </div>
     </ProjectShell>
   );
 }
 
-function ConnPanel({ projectId, side, canWrite }: { projectId: string; side: ConnSide; canWrite: boolean }) {
+function ConnPanel({ projectId, side, canWrite, allowed, discoverLabel }: { projectId: string; side: ConnSide; canWrite: boolean; allowed: string[]; discoverLabel: string }) {
   const [conns, setConns] = useState<Connection[] | null>(null);
   const [err, setErr] = useState("");
   const [adding, setAdding] = useState(false);
@@ -111,7 +130,7 @@ function ConnPanel({ projectId, side, canWrite }: { projectId: string; side: Con
               {canWrite && (
                 <div className="mt-2.5 flex gap-2">
                   <Button size="sm" variant="outline" loading={busyId === c.id} onClick={() => onTest(c)}><CheckCircle2 className="h-3.5 w-3.5" /> Test</Button>
-                  <Button size="sm" variant="outline" loading={busyId === c.id} onClick={() => onDiscover(c)}><Search className="h-3.5 w-3.5" /> Discover schemas</Button>
+                  <Button size="sm" variant="outline" loading={busyId === c.id} onClick={() => onDiscover(c)}><Search className="h-3.5 w-3.5" /> {discoverLabel}</Button>
                   <Button size="sm" variant="ghost" onClick={() => onDelete(c)} aria-label="Delete connection"><Trash2 className="h-3.5 w-3.5" /></Button>
                 </div>
               )}
@@ -121,14 +140,14 @@ function ConnPanel({ projectId, side, canWrite }: { projectId: string; side: Con
       )}
 
       {adding && (
-        <AddConnectionModal projectId={projectId} side={side} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />
+        <AddConnectionModal projectId={projectId} side={side} allowed={allowed} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />
       )}
     </Card>
   );
 }
 
-function AddConnectionModal({ projectId, side, onClose, onSaved }: { projectId: string; side: ConnSide; onClose: () => void; onSaved: () => void }) {
-  const types = Object.keys(CONNECTOR_FIELDS);
+function AddConnectionModal({ projectId, side, allowed, onClose, onSaved }: { projectId: string; side: ConnSide; allowed: string[]; onClose: () => void; onSaved: () => void }) {
+  const types = allowed.length ? allowed : Object.keys(CONNECTOR_FIELDS);
   const [type, setType] = useState(types[0]);
   const [name, setName] = useState("");
   const [cfg, setCfg] = useState<Record<string, string>>({});

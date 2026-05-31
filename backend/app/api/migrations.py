@@ -17,7 +17,7 @@ from app.api.connectors import _enforce_host_allowlist
 from app.auth.dependencies import get_current_organization_id
 from app.auth.jwt import get_current_user_id
 from app.db.session import get_db
-from app.models.project import MigrationRequirement
+from app.models.project import MigrationRequirement, Project
 from app.services.project_service import (
     ensure_project_access,
     get_source_config,
@@ -115,6 +115,16 @@ async def start_migration(
 
     requirement_id = _resolve_requirement(db, project_id, data.requirement_id)
 
+    # Load the project's stored migration_type so the workflow runs the correct
+    # type-aware step plan. None/legacy free-text normalizes to db_to_db
+    # downstream (HelixMigration / build_step_plan), so the default path is
+    # unchanged when the column is unset.
+    project_migration_type = (
+        db.query(Project.migration_type)
+        .filter(Project.id == project_id)
+        .scalar()
+    )
+
     correlation_id = getattr(request.state, "request_id", None) if request else None
     result = await start_migration_workflow(
         project_id=project_id,
@@ -126,6 +136,7 @@ async def start_migration(
         target_connector_type=tgt_type,
         source_config=src_config,
         target_config=tgt_config,
+        migration_type=project_migration_type,
         db=db,
         correlation_id=correlation_id,
     )

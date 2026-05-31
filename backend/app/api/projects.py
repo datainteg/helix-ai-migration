@@ -158,6 +158,17 @@ def api_projects_summary(
     return out
 
 
+@router.get("/migration-types")
+def api_migration_types(user_id: str = Depends(get_current_user_id)):
+    """Canonical migration types + the connector kinds each side allows. Drives
+    the New Project type selector + Source/Target connector filtering."""
+    from app.services.migration_types import MIGRATION_TYPES, KIND_BY_CONNECTOR
+    return {
+        "types": [{"value": k, **v} for k, v in MIGRATION_TYPES.items()],
+        "connector_kinds": KIND_BY_CONNECTOR,
+    }
+
+
 @router.get("/projects/members")
 def api_project_members(user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     """Active org members for the project owner picker (project:write — so PMs

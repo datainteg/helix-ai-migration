@@ -49,6 +49,24 @@ _ACTIVITY_TIMEOUT = timedelta(minutes=10)
 _PERSIST_TIMEOUT = timedelta(seconds=30)
 _APPROVAL_TIMEOUT = timedelta(hours=48)
 
+# Fixed node-name → activity map. Node names are a closed set agreed with the
+# backend (Step C); the workflow maps them to the 4 imported activities.
+NODE_ACTIVITIES = {
+    "schema_analyst": schema_analyst_activity,
+    "type_mapper": type_mapper_activity,
+    "script_generator": script_generator_activity,
+    "reconciler": reconciler_activity,
+}
+
+# Inline fallback plan == the legacy hard-coded db_to_db sequence (gate after
+# type_mapper). Used when input_data carries no step_plan (e.g. older callers).
+_DEFAULT_STEP_PLAN = [
+    {"node": "schema_analyst", "step_order": 1, "skip": False, "gate_after": False},
+    {"node": "type_mapper", "step_order": 2, "skip": False, "gate_after": True},
+    {"node": "script_generator", "step_order": 3, "skip": False, "gate_after": False},
+    {"node": "reconciler", "step_order": 4, "skip": False, "gate_after": False},
+]
+
 
 @workflow.defn
 class MigrationPerNodeWorkflow:
@@ -140,18 +158,12 @@ class MigrationPerNodeWorkflow:
                 raise ApplicationError(msg, non_retryable=True)
             return result
 
-        try:
-            # Phase 1: introspect source schema.
-            self._outputs["schema_analyst"] = (
-                await run_step(schema_analyst_activity, "schema_analyst", 1)
-            )["parsed"]
+        async def run_approval_gate() -> dict[str, Any] | None:
+            """The single human-approval gate, verbatim from the legacy flow.
 
-            # Phase 2: propose type mapping.
-            self._outputs["type_mapper"] = (
-                await run_step(type_mapper_activity, "type_mapper", 2)
-            )["parsed"]
-
-            # Approval gate — reviewer signs off the mapping before any SQL.
+            Returns a terminal result dict if the run should stop here
+            (expired / rejected), or None to continue.
+            """
             self._current_step = "awaiting_approval"
             logger.info("Migration per-node waiting for approval signal: %s", workflow_id)
             try:
@@ -180,6 +192,67 @@ class MigrationPerNodeWorkflow:
                     "outputs": self._outputs, "artifact_paths": self._artifact_paths,
                     "approval_notes": self._approval_notes,
                 }
+            return None
+
+        try:
+            if workflow.patched("migration-step-plan-v1"):
+                # ── NEW path: drive steps from the injected step_plan ──────
+                plan = input_data.get("step_plan") or _DEFAULT_STEP_PLAN
+                for step in plan:
+                    node = step["node"]
+                    step_order = step["step_order"]
+
+                    if step.get("skip"):
+                        # Persist a skipped row so step ordering stays
+                        # contiguous and the UI renders the gap; never run
+                        # the activity.
+                        await workflow.execute_activity(
+                            persist_workflow_step_activity,
+                            {
+                                "workflow_run_id": run_id,
+                                "agent_name": node,
+                                "step_order": step_order,
+                                "status": "skipped",
+                                "parsed": None,
+                                "artifact_path": None,
+                                "errors": [],
+                            },
+                            start_to_close_timeout=_PERSIST_TIMEOUT,
+                            retry_policy=_RETRY,
+                        )
+                        self._outputs[node] = {"skipped": True}
+                    else:
+                        result = await run_step(NODE_ACTIVITIES[node], node, step_order)
+                        self._outputs[node] = result["parsed"]
+
+                    if step.get("gate_after"):
+                        terminal = await run_approval_gate()
+                        if terminal is not None:
+                            return terminal
+
+                self._current_step = "completed"
+                await reconcile_terminal_state("completed")
+                return {
+                    "workflow_id": workflow_id, "status": "completed",
+                    "outputs": self._outputs, "artifact_paths": self._artifact_paths,
+                    "approval_notes": self._approval_notes,
+                }
+
+            # ── LEGACY path: verbatim 4-step sequence (replay-safe) ────────
+            # Phase 1: introspect source schema.
+            self._outputs["schema_analyst"] = (
+                await run_step(schema_analyst_activity, "schema_analyst", 1)
+            )["parsed"]
+
+            # Phase 2: propose type mapping.
+            self._outputs["type_mapper"] = (
+                await run_step(type_mapper_activity, "type_mapper", 2)
+            )["parsed"]
+
+            # Approval gate — reviewer signs off the mapping before any SQL.
+            terminal = await run_approval_gate()
+            if terminal is not None:
+                return terminal
 
             # Phase 3: generate migration scripts.
             self._outputs["script_generator"] = (

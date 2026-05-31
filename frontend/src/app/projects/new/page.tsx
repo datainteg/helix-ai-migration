@@ -21,18 +21,11 @@ import {
   type TemplateSummary,
 } from "@/lib/migration-templates/api";
 import { fetchProjectMembers, type OrgMember } from "@/lib/projects/api";
+import { CONNECTOR_FIELDS, CONNECTOR_LABELS } from "@/lib/projects/connections";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
-const SOURCE_SYSTEMS = [
-  "oracle", "sqlserver", "mysql", "postgres", "db2",
-  "sas", "datastage", "salesforce", "snowflake", "databricks",
-];
-
-const TARGET_SYSTEMS = [
-  "snowflake", "databricks", "bigquery", "postgres", "s3",
-  "iceberg", "dbt", "redshift",
-];
+interface MigTypeSpec { value: string; label: string; source_kinds: string[]; target_kinds: string[]; }
 
 const ENVIRONMENTS = [
   { value: "dev",  label: "Dev" },
@@ -51,6 +44,9 @@ export default function NewProjectPage() {
   const [environment, setEnvironment] = useState("dev");
   const [ownerId, setOwnerId] = useState("");   // "" = me (creator)
   const [status, setStatus] = useState("draft");
+  const [migrationType, setMigrationType] = useState("db_to_db");
+  const [migTypes, setMigTypes] = useState<MigTypeSpec[]>([]);
+  const [connKinds, setConnKinds] = useState<Record<string, string>>({});
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -62,7 +58,27 @@ export default function NewProjectPage() {
     if (!token) return;
     listMigrationTemplates(token).then(setTemplates).catch(() => setTemplates([]));
     fetchProjectMembers().then(setMembers).catch(() => setMembers([]));
+    fetch(`${API_BASE}/api/v1/migration-types`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) { setMigTypes(d.types || []); setConnKinds(d.connector_kinds || {}); } })
+      .catch(() => {});
   }, [token]);
+
+  // Connectors valid for a side = those whose kind the chosen type allows.
+  // Mirrors the Source & Target page so the project is provisioned with real,
+  // type-valid connectors (not stale free-text systems).
+  const spec = migTypes.find((t) => t.value === migrationType);
+  const connectorsFor = (kinds: string[] | undefined) =>
+    Object.keys(CONNECTOR_FIELDS).filter((ct) => !kinds || kinds.includes(connKinds[ct] ?? "db"));
+  const sourceSystems = connectorsFor(spec?.source_kinds);
+  const targetSystems = connectorsFor(spec?.target_kinds);
+
+  // When the type changes, drop a source/target that's no longer valid.
+  useEffect(() => {
+    if (sourceSystem && !sourceSystems.includes(sourceSystem)) setSourceSystem("");
+    if (targetSystem && !targetSystems.includes(targetSystem)) setTargetSystem("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [migrationType, migTypes, connKinds]);
 
   const handleTemplate = async (tplId: string) => {
     if (!token || !name.trim()) {
@@ -112,6 +128,7 @@ export default function NewProjectPage() {
           environment,
           owner_id: ownerId || undefined,
           status,
+          migration_type: migrationType,
         }),
       });
       if (!res.ok) {
@@ -211,6 +228,21 @@ export default function NewProjectPage() {
                   className="w-full rounded-[7px] border border-hx bg-surface px-3 py-2 text-[13px] text-ink focus-ring resize-none"
                 />
               </Field>
+
+              <Field label="Migration type">
+                <select
+                  value={migrationType}
+                  onChange={(e) => setMigrationType(e.target.value)}
+                  className="w-full h-9 rounded-[7px] border border-hx bg-surface px-3 text-[13px] text-ink focus-ring"
+                >
+                  {(migTypes.length ? migTypes : [{ value: "db_to_db", label: "Database → Database" }]).map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <span className="text-[11.5px] text-ink-4 mt-1 block">
+                  Drives the connectors, schema discovery, and pipeline steps for this project.
+                </span>
+              </Field>
             </div>
           </Card>
 
@@ -227,8 +259,8 @@ export default function NewProjectPage() {
                   className="w-full h-9 rounded-[7px] border border-hx bg-surface px-3 text-[13px] text-ink focus-ring font-mono"
                 >
                   <option value="">Select source…</option>
-                  {SOURCE_SYSTEMS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {sourceSystems.map((s) => (
+                    <option key={s} value={s}>{CONNECTOR_LABELS[s] ?? s}</option>
                   ))}
                 </select>
               </Field>
@@ -241,8 +273,8 @@ export default function NewProjectPage() {
                   className="w-full h-9 rounded-[7px] border border-hx bg-surface px-3 text-[13px] text-ink focus-ring font-mono"
                 >
                   <option value="">Select target…</option>
-                  {TARGET_SYSTEMS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {targetSystems.map((s) => (
+                    <option key={s} value={s}>{CONNECTOR_LABELS[s] ?? s}</option>
                   ))}
                 </select>
               </Field>

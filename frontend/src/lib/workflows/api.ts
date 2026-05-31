@@ -85,7 +85,8 @@ export async function createProjectRequirement(projectId: string, sourceText: st
 }
 
 /** Compile a structured requirement spec into the rich prompt text the agents
- * plan from. Multi-schema/multi-table migrations need this depth. */
+ * plan from. Multi-schema/multi-table migrations need this depth. The fields
+ * shown depend on the project's migration_type (see TYPE_FIELDS). */
 export interface RequirementSpec {
   goal: string;
   scope: string;          // schemas/tables include/exclude
@@ -95,20 +96,74 @@ export interface RequirementSpec {
   transforms: string;     // renames/splits/denorm
   objects: string;        // views/procs/sequences/triggers
   conventions: string;    // target naming/partitioning
+  // type-specific (optional — only some types show these)
+  validation: string;        // validation/recon rules + tolerances
+  fileFormat: string;        // CSV/Parquet/JSON, delimiter, encoding, compression
+  fileHeaderMapping: string; // header row + file-field → column mapping
+  targetTable: string;       // destination table(s)/schema for the load
+  sourceQuery: string;       // SQL / table selection to extract
+  outputLayout: string;      // export file naming / partitioning / one-file-per-table
 }
 
-export function compileRequirement(s: RequirementSpec): string {
-  const sec = (h: string, v: string) => (v.trim() ? `## ${h}\n${v.trim()}\n` : "");
-  return [
-    s.goal.trim() ? `# Migration goal\n${s.goal.trim()}\n` : "",
-    sec("Scope (schemas / tables to include or exclude)", s.scope),
-    sec("Type-mapping rules", s.typeRules),
-    sec("Constraints, keys & indexes", s.constraints),
-    sec("Data handling (data vs schema-only, volume, PII)", s.data),
-    sec("Transformations (rename / split / denormalize)", s.transforms),
-    sec("Special objects (views / procedures / sequences / triggers)", s.objects),
-    sec("Target conventions (naming / partitioning / clustering)", s.conventions),
-  ].filter(Boolean).join("\n").trim();
+export const EMPTY_SPEC: RequirementSpec = {
+  goal: "", scope: "", typeRules: "", constraints: "", data: "", transforms: "",
+  objects: "", conventions: "", validation: "", fileFormat: "", fileHeaderMapping: "",
+  targetTable: "", sourceQuery: "", outputLayout: "",
+};
+
+export interface ReqFieldMeta {
+  key: keyof RequirementSpec;
+  label: string;        // form label
+  heading: string;      // compiled-prompt section heading
+  placeholder: string;
+  full?: boolean;       // span both columns in the form grid
+}
+
+/** Single source of truth for every requirement field (form label, compiled
+ * heading, placeholder). TYPE_FIELDS selects which appear per migration type. */
+export const FIELD_META: Record<keyof RequirementSpec, ReqFieldMeta> = {
+  goal:        { key: "goal", label: "Migration goal *", heading: "Migration goal", full: true, placeholder: "e.g. Migrate the Sales OLTP DB from PostgreSQL 15 to Snowflake (staging)." },
+  scope:       { key: "scope", label: "Scope — schemas/tables", heading: "Scope (schemas / tables to include or exclude)", placeholder: "Include: sales.*, hr.employees. Exclude: audit_logs." },
+  typeRules:   { key: "typeRules", label: "Type-mapping rules", heading: "Type-mapping rules", placeholder: "jsonb → VARIANT; numeric(38,x) preserved; timestamptz → TIMESTAMP_TZ." },
+  constraints: { key: "constraints", label: "Constraints, keys & indexes", heading: "Constraints, keys & indexes", placeholder: "Preserve PK/FK as constraints; recreate unique indexes." },
+  data:        { key: "data", label: "Data handling", heading: "Data handling (volume, batching, PII)", placeholder: "Migrate data (~2M rows), batch 50k; no PII masking in staging." },
+  transforms:  { key: "transforms", label: "Transformations", heading: "Transformations (rename / split / denormalize)", placeholder: "Rename legacy_id → id; split full_name into first/last." },
+  objects:     { key: "objects", label: "Special objects", heading: "Special objects (views / procedures / sequences / triggers)", placeholder: "Migrate views; document stored procs (manual port)." },
+  conventions: { key: "conventions", label: "Target conventions", heading: "Target conventions (naming / partitioning / clustering)", placeholder: "snake_case; cluster orders by order_date." },
+  validation:  { key: "validation", label: "Validation & reconciliation", heading: "Validation & reconciliation rules", placeholder: "Row-count + checksum per table; numeric tolerance 0; flag mismatches." },
+  fileFormat:  { key: "fileFormat", label: "File format", heading: "File format", placeholder: "CSV, comma-delimited, UTF-8, gzip; or Parquet (snappy)." },
+  fileHeaderMapping: { key: "fileHeaderMapping", label: "File → column mapping", heading: "File-to-column mapping", placeholder: "Header row present; map \"cust_id\"→customer_id, \"dob\"→birth_date (DATE)." },
+  targetTable: { key: "targetTable", label: "Target table(s)", heading: "Target table(s)", placeholder: "Load into analytics.customers; create if absent." },
+  sourceQuery: { key: "sourceQuery", label: "Source query / extract", heading: "Source query / extract", placeholder: "SELECT * FROM sales.orders WHERE order_date >= '2024-01-01'; or: all tables in sales.*" },
+  outputLayout:{ key: "outputLayout", label: "Output layout", heading: "Output layout", placeholder: "One file per table; partition by order_date; path s3://bucket/export/{table}/." },
+};
+
+/** Which fields each migration type shows, in display order. Unknown types fall
+ * back to db_to_db. Mirrors the backend migration_types taxonomy. */
+export const TYPE_FIELDS: Record<string, (keyof RequirementSpec)[]> = {
+  db_to_db:    ["goal", "scope", "typeRules", "constraints", "data", "transforms", "objects", "conventions", "validation"],
+  file_to_db:  ["goal", "fileFormat", "fileHeaderMapping", "scope", "typeRules", "targetTable", "data", "transforms", "validation"],
+  db_to_file:  ["goal", "scope", "sourceQuery", "fileFormat", "outputLayout", "data", "validation"],
+  schema_only: ["goal", "scope", "typeRules", "constraints", "objects", "conventions"],
+  data_only:   ["goal", "scope", "sourceQuery", "data", "transforms", "targetTable", "validation"],
+};
+
+export function fieldsForType(migrationType: string | undefined): ReqFieldMeta[] {
+  const keys = TYPE_FIELDS[migrationType ?? "db_to_db"] ?? TYPE_FIELDS.db_to_db;
+  return keys.map((k) => FIELD_META[k]);
+}
+
+export function compileRequirement(migrationType: string, s: RequirementSpec): string {
+  const keys = TYPE_FIELDS[migrationType] ?? TYPE_FIELDS.db_to_db;
+  const out: string[] = [];
+  for (const k of keys) {
+    const v = (s[k] ?? "").trim();
+    if (!v) continue;
+    const m = FIELD_META[k];
+    // goal is the H1 title; every other section is H2 — contract unchanged.
+    out.push(k === "goal" ? `# ${m.heading}\n${v}\n` : `## ${m.heading}\n${v}\n`);
+  }
+  return out.join("\n").trim();
 }
 
 export interface StartWorkflowResult { workflow_id: string; run_id: string; status: string; mode: string; }
