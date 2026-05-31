@@ -128,7 +128,10 @@ def api_list_artifacts(
     """
     org_id = resolve_active_org_id(db, user_id)
     ensure_project_access(db, org_id, project_id)
-    rows = list_artifacts(db, org_id, project_id)
+    # list_artifacts returns ArtifactResponse models; the envelope is typed
+    # PaginatedResponse[dict], so serialize to dicts (else ResponseValidationError
+    # once any artifact exists).
+    rows = [r.model_dump() for r in list_artifacts(db, org_id, project_id)]
     return paginate(rows, limit=limit, offset=offset)
 
 
