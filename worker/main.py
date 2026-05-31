@@ -205,7 +205,7 @@ async def main() -> int:
         "Worker started on task queue '%s' "
         "(max_concurrent_activities=%d, max_concurrent_workflows=%d, "
         "graceful_shutdown_timeout=%s) "
-        "(workflows: BMADPlanningWorkflow, BMADPerNodeWorkflow)",
+        "(workflows: BMADPlanningWorkflow, BMADPerNodeWorkflow, MigrationPerNodeWorkflow)",
         TASK_QUEUE,
         max_concurrent_activities,
         max_concurrent_workflows,
