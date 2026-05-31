@@ -154,6 +154,10 @@ export default function ProjectDevWorkspacePage() {
 
   return (
     <ProjectShell projectId={projectKey} projectName={projectName} subtitle="Three-pane IDE: artifact explorer · version control · AI review">
+      <div className="flex items-center gap-4 text-[12.5px]">
+        <a href={`/projects/${projectKey}/developer-workspace/code`} className="text-helix-700 hover:underline">Generated code (Amelia) →</a>
+        <a href={`/projects/${projectKey}/developer-workspace/review`} className="text-helix-700 hover:underline">Code review queue →</a>
+      </div>
       {loading ? <LoadingState label="Loading artifacts…" /> : null}
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-12 lg:col-span-3" title="Artifacts" padding="sm">

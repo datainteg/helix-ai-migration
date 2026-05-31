@@ -313,6 +313,34 @@ services:
     mem_limit: 100m
     logging: *default-logging
 
+  code-server:
+    # OPTIONAL isolated developer workspace (VS Code in the browser).
+    # Gated behind the `workspace` profile so a normal `docker compose up` never
+    # starts it:  docker compose --profile workspace up -d code-server
+    #
+    # SECURITY (see WORKSPACE.md):
+    #  - Mounts ONLY the dedicated helix_workspace volume — never the host root
+    #    or the repo. Generated migration code is reviewed/approved in Helix and
+    #    is NEVER executed by the Helix backend.
+    #  - Password-protected via CODE_SERVER_PASSWORD (set a strong value).
+    #  - Bound to 127.0.0.1 only; put it behind the TLS reverse proxy + auth
+    #    before exposing it to a network.
+    profiles: ["workspace"]
+    image: codercom/code-server:latest
+    container_name: helix-code-server
+    restart: unless-stopped
+    environment:
+      PASSWORD: ${CODE_SERVER_PASSWORD:-change-me-please}
+    command: ["--auth", "password", "--disable-telemetry", "/home/coder/workspace"]
+    ports:
+      - "127.0.0.1:8443:8080"
+    volumes:
+      - helix_workspace:/home/coder/workspace
+    networks:
+      - helix-network
+    mem_limit: 1g
+    logging: *default-logging
+
 volumes:
   helix_postgres_data:
     driver: local
@@ -321,6 +349,9 @@ volumes:
   # B-5: separate volume for BMAD planning artifacts written by the worker.
   # Mounted rw in worker (/app/_bmad-output) and ro in backend (/app/_bmad-output).
   helix_planning:
+    driver: local
+  # Optional code-server workspace storage (only used by the `workspace` profile).
+  helix_workspace:
     driver: local
   caddy_data:
     driver: local
