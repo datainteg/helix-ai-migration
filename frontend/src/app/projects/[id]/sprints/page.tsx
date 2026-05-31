@@ -34,7 +34,7 @@ import {
   fetchApprovals,
   fetchRisks,
   fetchBurndown,
-  seedSprints,
+  generateSprints,
   type BurndownPoint,
   type NewSprintInput,
   type Sprint,
@@ -55,7 +55,8 @@ export default function SprintDashboardPage() {
   const [risks, setRisks] = useState<SprintRisk[]>([]);
   const [burndown, setBurndown] = useState<BurndownPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genErr, setGenErr] = useState<string | null>(null);
   const [showNewSprint, setShowNewSprint] = useState(false);
 
   const refetchSprints = useCallback(() => {
@@ -118,15 +119,13 @@ export default function SprintDashboardPage() {
     return total ? Math.round((done / total) * 100) : 0;
   }, [sprints]);
 
-  const handleSeed = () => {
+  const handleGenerate = () => {
     if (!token || !projectId) return;
-    setSeeding(true);
-    seedSprints(token, projectId)
-      .then(() => {
-        refetchSprints();
-      })
-      .catch(() => {})
-      .finally(() => setSeeding(false));
+    setGenerating(true); setGenErr(null);
+    generateSprints(token, projectId)
+      .then(() => { refetchSprints(); })
+      .catch((e) => setGenErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setGenerating(false));
   };
 
   if (loading) {
@@ -154,15 +153,18 @@ export default function SprintDashboardPage() {
         <Card>
           <EmptyState
             title="No sprints yet"
-            description="Run the seed to populate demo sprints, or create one manually."
+            description="Generate sprints from your approved planning artifacts (project context, business analysis, architecture and project plan must be approved first), or create one manually."
             action={
-              <div className="flex gap-2 justify-center">
-                <Button variant="outline" onClick={() => setShowNewSprint(true)}>
-                  <Plus className="h-4 w-4" /> New sprint
-                </Button>
-                <Button variant="primary" loading={seeding} onClick={handleSeed}>
-                  Run seed
-                </Button>
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex gap-2 justify-center">
+                  <Button variant="outline" onClick={() => setShowNewSprint(true)}>
+                    <Plus className="h-4 w-4" /> New sprint
+                  </Button>
+                  <Button variant="primary" loading={generating} onClick={handleGenerate}>
+                    Generate sprints
+                  </Button>
+                </div>
+                {genErr && <p className="text-[12px] text-[var(--con-err)]">{genErr}</p>}
               </div>
             }
           />

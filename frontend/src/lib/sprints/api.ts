@@ -373,6 +373,23 @@ export async function seedSprints(token: string | null, projectId: string): Prom
   return req(`/projects/${projectId}/sprints/seed`, token, { method: "POST" });
 }
 
+// ── Auto generation + stage-gated approval (Prompt 5) ───────────────
+export async function generateSprints(token: string | null, projectId: string): Promise<{ sprints_created: number; sprint_ids: string[] }> {
+  return req(`/projects/${projectId}/sprints/generate`, token, { method: "POST" });
+}
+export async function submitSprintPlan(token: string | null, projectId: string): Promise<{ stage_key: string; status: string }> {
+  return req(`/projects/${projectId}/sprints/submit-review`, token, { method: "POST" });
+}
+export async function approveSprintPlan(token: string | null, projectId: string, comment?: string): Promise<{ stage_key: string; status: string }> {
+  return req(`/projects/${projectId}/sprints/approve`, token, { method: "POST", body: JSON.stringify({ comment }) });
+}
+export async function requestSprintPlanChanges(token: string | null, projectId: string, comment: string): Promise<{ stage_key: string; status: string }> {
+  return req(`/projects/${projectId}/sprints/request-changes`, token, { method: "POST", body: JSON.stringify({ comment }) });
+}
+export async function startSprint(token: string | null, projectId: string, sprintId: string): Promise<unknown> {
+  return req(`/projects/${projectId}/sprints/${sprintId}/start`, token, { method: "POST" });
+}
+
 // ── Create paths ─────────────────────────────────────────────────────
 
 export interface NewSprintInput {

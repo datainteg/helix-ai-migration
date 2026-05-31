@@ -9,13 +9,13 @@ inside every service call.
 
 import asyncio
 import json
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import get_current_organization_id, require_permission
+from app.auth.dependencies import get_current_organization_id, require_permission, user_has_role
 from app.services.project_service import ensure_project_access
 from app.services.sprint_service import (
     list_sprints, get_sprint, get_active_sprint,
@@ -25,7 +25,8 @@ from app.services.sprint_service import (
     compute_velocity, compute_burndown,
     create_sprint, create_task,
 )
-from app.services.sprint_seed import seed_sprints_for_project
+from app.services import sprint_generation_service as gen
+from app.schemas.lifecycle import StageActionRequest, StageRejectRequest
 from app.schemas.sprint import (
     SprintCreate, SprintResponse, SprintTaskCreate, SprintTaskResponse, SprintTaskUpdate,
     SprintRiskResponse, SprintApprovalResponse, ApprovalDecision,
@@ -417,34 +418,101 @@ def api_decide_approval(
     return ap
 
 
-# ── Seed ──────────────────────────────────────────────────────────
+# Admins/super-admins bypass the sprint-plan separation-of-duties rule.
+_SOD_BYPASS_ROLES = {"super_admin", "admin"}
 
-@router.post(
-    "/projects/{project_id}/sprints/seed",
-    response_model=SeedResult,
-    status_code=201,
-)
-def api_seed_sprints(
+
+# ── Auto generation + approval (stage-gated) ────────────────────────
+
+@router.post("/projects/{project_id}/sprints/generate", status_code=201)
+def api_generate_sprints(
     project_id: str,
     request: Request,
-    user_id: str = Depends(require_permission("admin:llm:write")),
+    user_id: str = Depends(require_permission("project:write")),
     org_id: str = Depends(get_current_organization_id),
     db: Session = Depends(get_db),
 ):
-    """Idempotent seed of the demo Oracle GL → Snowflake sprint dataset.
-
-    Admin-gated. Wipes any prior sprint data for this project, then inserts
-    5 sprints, 24 tasks, 3 risks, 4 approvals, 2 releases, 11 mapping
-    nodes, 13 edges, 6 agent executions. Useful for client demos + first
-    deploys; safe to re-run to reset to a known state.
-    """
+    """Generate sprints from APPROVED planning artifacts via the sprint-planner
+    agent. Requires project-context/business-analysis/architecture/project-plan
+    to be approved. Leaves the sprint plan under review."""
     ensure_project_access(db, org_id, project_id)
-    result = seed_sprints_for_project(db, org_id, project_id)
-    write_audit(
-        db, org_id=org_id, actor_id=user_id,
-        action="sprints_seeded",
-        entity_type="project", entity_id=project_id,
-        meta={"counts": {k: v for k, v in result.items() if k.endswith("_created")}},
-        request=request,
-    )
-    return result
+    sprints = gen.generate_sprints_from_approved_artifacts(db, org_id, project_id, user_id)
+    write_audit(db, org_id=org_id, actor_id=user_id, action="sprints_generated",
+                entity_type="project", entity_id=project_id,
+                meta={"sprints_created": len(sprints)}, request=request)
+    return {"sprints_created": len(sprints), "sprint_ids": [s.id for s in sprints]}
+
+
+@router.post("/projects/{project_id}/sprints/submit-review")
+def api_submit_sprint_plan(
+    project_id: str,
+    user_id: str = Depends(require_permission("project:write")),
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, org_id, project_id)
+    return gen.submit_sprint_plan_for_review(db, org_id, project_id, user_id)
+
+
+@router.post("/projects/{project_id}/sprints/approve")
+def api_approve_sprint_plan(
+    project_id: str,
+    data: StageActionRequest,
+    user_id: str = Depends(require_permission("agent:approve")),
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, org_id, project_id)
+    allow_self = user_has_role(db, user_id, _SOD_BYPASS_ROLES)
+    return gen.approve_sprint_plan(db, org_id, project_id, user_id, data.comment, allow_self_approval=allow_self)
+
+
+@router.post("/projects/{project_id}/sprints/request-changes")
+def api_request_sprint_plan_changes(
+    project_id: str,
+    data: StageRejectRequest,
+    user_id: str = Depends(require_permission("agent:approve")),
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, org_id, project_id)
+    return gen.request_sprint_plan_changes(db, org_id, project_id, user_id, data.comment)
+
+
+@router.post("/projects/{project_id}/sprints/{sprint_id}/start", response_model=SprintResponse)
+def api_start_sprint(
+    project_id: str,
+    sprint_id: str,
+    user_id: str = Depends(require_permission("project:write")),
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Activate a sprint — blocked until the sprint plan is approved."""
+    ensure_project_access(db, org_id, project_id)
+    return gen.start_sprint_execution(db, org_id, project_id, sprint_id, user_id)
+
+
+@router.patch("/projects/{project_id}/sprints/{sprint_id}/tasks/{task_id}", response_model=SprintTaskResponse)
+def api_patch_sprint_task_nested(
+    project_id: str,
+    sprint_id: str,
+    task_id: str,
+    data: SprintTaskUpdate,
+    user_id: str = Depends(require_permission("project:write")),
+    org_id: str = Depends(get_current_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Spec alias for the kanban task update (delegates to the flat
+    /sprint-tasks/{task_id} handler's service)."""
+    ensure_project_access(db, org_id, project_id)
+    return update_task_status(db, org_id, task_id, data.status)
+
+
+# ── Seed (mock data) — DISABLED ─────────────────────────────────────
+
+@router.post("/projects/{project_id}/sprints/seed", status_code=410)
+def api_seed_sprints(project_id: str):
+    """Mock sprint seeding is permanently disabled — sprints are generated
+    from approved artifacts via POST /sprints/generate. Kept as a 410 so old
+    clients get a clear signal instead of silently re-injecting demo data."""
+    raise HTTPException(status_code=410, detail="Mock sprint seeding is disabled. Use POST /projects/{id}/sprints/generate.")
