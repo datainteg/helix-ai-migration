@@ -10,7 +10,6 @@ import {
   Bot,
   ShieldCheck,
   GitCompareArrows,
-  TerminalSquare,
   Plug,
   FileText,
   FolderUp,
@@ -49,7 +48,9 @@ const PRIMARY: NavItem[] = [
   { label: "Agents",             href: "/agents",               icon: Bot,             shortcut: "3", live: true },
   { label: "Validation",         href: "/validation",           icon: ShieldCheck,     shortcut: "4" },
   { label: "Reconciliation",     href: "/reconciliation",       icon: GitCompareArrows, shortcut: "5" },
-  { label: "Dev Workspace",      href: "/developer-workspace",  icon: TerminalSquare,  shortcut: "6" },
+  // Developer Workspace is per-project only (a project tab); the global stub is
+  // removed from nav. Workflows/Artifacts globals likewise live under the project
+  // + the Agents org view — not top-level nav.
 ];
 
 const RESOURCES: NavItem[] = [
