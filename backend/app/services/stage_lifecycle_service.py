@@ -241,6 +241,15 @@ def approve_stage(db: Session, organization_id: str, project_id: str, stage_key:
     # approve it, unless they are an admin/super_admin (allow_self_approval).
     if not allow_self_approval and stage.submitted_for_review_by and stage.submitted_for_review_by == user_id:
         raise HTTPException(status_code=403, detail="Separation of duties: the user who submitted this stage cannot approve it.")
+    # VALIDATION can only be approved once at least one evidence item is accepted.
+    if stage.stage_key == LC.VALIDATION:
+        try:
+            from app.services.validation_evidence_service import has_accepted_evidence
+            _has = has_accepted_evidence(db, organization_id, project_id)
+        except Exception:  # noqa: BLE001
+            _has = True   # never hard-fail approval on an import/availability error
+        if not _has:
+            raise HTTPException(status_code=409, detail="Validation cannot be approved until at least one evidence item is accepted.")
     prev = stage.status
     stage.status = "approved"
     stage.approved_at = _now()

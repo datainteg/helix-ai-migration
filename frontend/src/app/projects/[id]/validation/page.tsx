@@ -168,6 +168,11 @@ export default function ProjectValidationPage() {
     >
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
 
+      <div className="flex items-center gap-4 text-[12.5px]">
+        <a href={`/projects/${projectKey}/validation/evidence`} className="text-helix-700 hover:underline">Upload evidence →</a>
+        <a href={`/projects/${projectKey}/validation/review`} className="text-helix-700 hover:underline">QA review →</a>
+      </div>
+
       <div className="flex flex-col gap-4">
         {/* Latest run summary */}
         <Card
