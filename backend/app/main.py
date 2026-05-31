@@ -45,6 +45,7 @@ from app.api.migrations import router as migrations_router
 from app.api.assistant import router as assistant_router
 from app.api.lifecycle import router as lifecycle_router
 from app.api.lifecycle_artifacts import router as lifecycle_artifacts_router
+from app.api.stage_agents import router as stage_agents_router
 from app.core.config import settings
 
 configure_logging(settings.APP_ENV)
@@ -382,6 +383,7 @@ app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(artifacts_router, prefix="/api/v1")
 app.include_router(lifecycle_router, prefix="/api/v1")
 app.include_router(lifecycle_artifacts_router, prefix="/api/v1")
+app.include_router(stage_agents_router, prefix="/api/v1")
 app.include_router(code_reviews_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(audit_router, prefix="/api/v1")

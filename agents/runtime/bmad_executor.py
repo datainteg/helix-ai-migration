@@ -28,6 +28,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -584,8 +585,14 @@ def execute_agent_skill(
     artifact_filename: str | None = None,
     correlation_id: str | None = None,
     prompt_override: str | None = None,
+    persist_file: bool = True,
 ) -> AgentRunResult:
     """Run one BMAD agent+skill end-to-end and return the artifact + parsed metadata.
+
+    `persist_file` (default True) writes the artifact to the BMAD output volume —
+    the worker/legacy path relies on this. The DB-backed stage-gated path sets it
+    False (the markdown is stored in migration_artifacts instead), which also lets
+    the call run inside the backend where the artifact volume is read-only.
 
     Transport order is controlled by `HELIX_LLM_TRANSPORT` (comma-separated:
     `pydantic_ai`, `httpx`, `mock`; default `pydantic_ai,httpx,mock`).
@@ -615,6 +622,7 @@ def execute_agent_skill(
             correlation_id=correlation_id,
             metric_ctx=metric_ctx,
             prompt_override=prompt_override,
+            persist_file=persist_file,
         )
     return result
 
@@ -632,6 +640,7 @@ def _execute_agent_skill_inner(
     correlation_id: str | None,
     metric_ctx,
     prompt_override: str | None = None,
+    persist_file: bool = True,
 ) -> AgentRunResult:
     try:
         agent = load_bmad_agent(agent_code)
@@ -775,14 +784,27 @@ def _execute_agent_skill_inner(
         "provider_type": (front.get("provider_type") if isinstance(front, dict) else None),
         "model": (front.get("model") if isinstance(front, dict) else None),
     }
-    artifact = write_artifact(
-        project_id=project_id,
-        agent_code=agent_code,
-        skill=skill_name,
-        filename=artifact_filename or skill_name.replace("bmad-", ""),
-        body=body,
-        frontmatter=safe_front_dict,
-    )
+    if persist_file:
+        artifact = write_artifact(
+            project_id=project_id,
+            agent_code=agent_code,
+            skill=skill_name,
+            filename=artifact_filename or skill_name.replace("bmad-", ""),
+            body=body,
+            frontmatter=safe_front_dict,
+        )
+    else:
+        # DB-backed stage-gated path: return the artifact in-memory without
+        # touching the (read-only in the backend) BMAD output volume.
+        artifact = Artifact(
+            path=Path("(in-memory)"),
+            agent_code=agent_code,
+            skill=skill_name,
+            project_id=project_id,
+            filename=artifact_filename or skill_name.replace("bmad-", ""),
+            frontmatter=safe_front_dict,
+            body=body.strip(),   # parity with write_artifact, which stores a stripped body
+        )
 
     metric_ctx.set_outcome(success=True, mode=mode, prompt_tokens=prompt_tokens_estimate)
 

@@ -24,6 +24,10 @@ class StageResubmitRequest(BaseModel):
     artifact_version_id: Optional[str] = None
 
 
+class StageAgentRunRequest(BaseModel):
+    instructions: Optional[str] = Field(default=None, max_length=4000)
+
+
 # ── Artifact request bodies ──────────────────────────────────────────
 class ArtifactVersionCreate(BaseModel):
     content_markdown: Optional[str] = Field(default=None, max_length=2_000_000)
