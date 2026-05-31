@@ -323,6 +323,7 @@ export default function ProjectDetailPage() {
     <AppShell
       eyebrow={eyebrow}
       title={displayName}
+      crumbs={[{ label: "Projects", href: "/projects" }, { label: displayName }]}
       metric={project?.on_hold ? `⏸ ON HOLD${metric ? ` · ${metric}` : ""}` : metric}
       actions={
         <>
