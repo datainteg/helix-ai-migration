@@ -9,7 +9,7 @@
  * with no backend data yet render a clean empty state — never sample data.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Check,
@@ -17,6 +17,9 @@ import {
   Play,
   RefreshCw,
   ExternalLink,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -39,6 +42,12 @@ import {
   type WorkflowRun as ApiWorkflowRun,
   type WorkflowStep as ApiWorkflowStep,
 } from "@/lib/workflows/api";
+import {
+  listOrgArtifacts, fetchArtifactContent,
+  type Artifact, type ArtifactContent,
+} from "@/lib/artifacts/api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // ─── View models ────────────────────────────────────────────────────
 
@@ -216,6 +225,8 @@ export default function AgentsPage() {
         ) : (
           <LinearView run={run} runs={displayRuns} nodes={nodes} stepsError={stepsError} selectedRun={selectedRun} setSelectedRun={setSelectedRun} onOpenArtifact={openArtifact} />
         )}
+
+        <GlobalArtifactsSection token={token} />
       </div>
 
       {artifactView && (
@@ -742,5 +753,108 @@ function PhaseNode({ node }: { node: PipelineNodeData }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Global artifacts, grouped by project ───────────────────────────
+// Surfaces every code artifact across the org by project name, openable inline.
+function GlobalArtifactsSection({ token }: { token: string | null }) {
+  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [viewing, setViewing] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listOrgArtifacts(token, 200).then((rows) => { if (!cancelled) setArtifacts(rows); }).catch(() => { if (!cancelled) setArtifacts([]); });
+    fetch(`${API_BASE}/api/v1/projects?limit=200`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        const items = Array.isArray(d) ? d : (d.items ?? []);
+        const map: Record<string, string> = {};
+        for (const p of items) map[p.id] = p.name;
+        setNames(map);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const groups = useMemo(() => {
+    const by = new Map<string, Artifact[]>();
+    for (const a of artifacts ?? []) {
+      const key = a.project_id ? (names[a.project_id] || "Unknown project") : "Unknown project";
+      (by.get(key) ?? by.set(key, []).get(key)!).push(a);
+    }
+    return Array.from(by.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [artifacts, names]);
+
+  return (
+    <Card title="Artifacts by project" description="Every generated/uploaded artifact across your projects — open to view.">
+      {artifacts === null ? (
+        <p className="text-[12.5px] text-ink-3">Loading…</p>
+      ) : groups.length === 0 ? (
+        <EmptyState icon={<FolderOpen className="h-4 w-4" />} title="No artifacts yet" description="Artifacts appear here once a workflow generates them or you upload one." />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {groups.map(([project, items]) => (
+            <div key={project} className="rounded-[8px] border border-hx">
+              <button type="button" onClick={() => setOpen((m) => ({ ...m, [project]: !m[project] }))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-[13px]">
+                {open[project] ? <ChevronDown className="h-4 w-4 text-ink-4" /> : <ChevronRight className="h-4 w-4 text-ink-4" />}
+                <FolderOpen className="h-4 w-4 text-ink-3" />
+                <span className="font-medium text-ink">{project}</span>
+                <span className="ml-auto text-[11.5px] text-ink-4">{items.length}</span>
+              </button>
+              {open[project] && (
+                <ul className="px-3 pb-2 space-y-1">
+                  {items.map((a) => (
+                    <li key={a.id}>
+                      <button type="button" onClick={() => setViewing({ id: a.id, name: a.filename })}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[12.5px] text-ink-2 hover:bg-app-2 text-left">
+                        <FileIcon className="h-3.5 w-3.5 text-[var(--con-brand)] flex-shrink-0" />
+                        <span className="truncate font-mono">{a.filename}</span>
+                        {a.file_type ? <span className="ml-auto text-[10.5px] text-ink-4">{a.file_type}</span> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {viewing && <CodeArtifactViewer artifactId={viewing.id} name={viewing.name} token={token} onClose={() => setViewing(null)} />}
+    </Card>
+  );
+}
+
+function CodeArtifactViewer({ artifactId, name, token, onClose }: { artifactId: string; name: string; token: string | null; onClose: () => void }) {
+  const [data, setData] = useState<ArtifactContent | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    fetchArtifactContent(token, artifactId)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e: unknown) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load artifact"); });
+    return () => { cancelled = true; };
+  }, [token, artifactId]);
+  return (
+    <Modal open onClose={onClose} title={name} width="lg">
+      {err ? <ErrorBanner message={err} onDismiss={() => setErr("")} /> : data === null ? (
+        <p className="text-[12.5px] text-ink-3">Loading…</p>
+      ) : data.content == null ? (
+        <EmptyState icon={<FileIcon className="h-4 w-4" />} title="No content" description={data.note || "This artifact has no readable content."} />
+      ) : (
+        <>
+          <div className="mb-2 flex items-center gap-2 text-[11.5px] text-ink-4">
+            <span className="font-mono">v{data.version_number}</span>
+            {data.file_type ? <span>· {data.file_type}</span> : null}
+            <span>· {data.size_bytes} bytes</span>
+          </div>
+          <pre className="max-h-[60vh] overflow-auto rounded-lg border border-hx bg-app-2 p-3 text-[12px] font-mono leading-relaxed whitespace-pre-wrap">{data.content}</pre>
+        </>
+      )}
+    </Modal>
   );
 }

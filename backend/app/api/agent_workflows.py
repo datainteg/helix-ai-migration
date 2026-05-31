@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.db.session import get_db
 from app.core.config import settings
 from app.auth.jwt import get_current_user_id
-from app.auth.dependencies import get_current_organization_id
+from app.auth.dependencies import get_current_organization_id, require_permission
 from app.services.project_service import ensure_project_access
 from app.services.workflow_service import (
     get_workflow_run,
@@ -176,6 +176,14 @@ async def start_workflow(
     if _proj is not None and getattr(_proj, "on_hold", False):
         raise HTTPException(status_code=409, detail="Project is on hold — set it live before starting a workflow.")
 
+    # Pre-start approval gate — when the project requires approval, a direct
+    # start is refused; runs must go through request → approve.
+    if _proj is not None and getattr(_proj, "require_run_approval", True):
+        raise HTTPException(
+            status_code=409,
+            detail="This project requires manager approval before a run can start. Submit a run request instead.",
+        )
+
     requirement = db.query(MigrationRequirement).filter(
         MigrationRequirement.id == data.requirement_id,
         MigrationRequirement.project_id == project_id,
@@ -202,6 +210,134 @@ async def start_workflow(
         mode=result["mode"],
         result=result.get("result"),
     )
+
+
+# ── Pre-start approval gate ─────────────────────────────────────────────
+def _request_to_dict(r) -> dict:
+    return {
+        "id": r.id, "project_id": r.project_id, "requirement_id": r.requirement_id,
+        "requested_by": r.requested_by, "status": r.status, "approver_id": r.approver_id,
+        "notes": r.notes, "workflow_id": r.workflow_id,
+        "created_at": str(r.created_at) if r.created_at else None,
+    }
+
+
+@router.post("/projects/{project_id}/agent-workflows/request", status_code=201)
+async def request_workflow_run(
+    project_id: str,
+    data: StartWorkflowRequest,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Submit a run request for manager approval (pre-start gate). Does NOT start
+    the workflow — an approver must approve it first."""
+    from app.models.project import Project as _Project, WorkflowRunRequest
+    ensure_project_access(db, org_id, project_id)
+    proj = db.query(_Project).filter(_Project.id == project_id).first()
+    if proj is not None and getattr(proj, "on_hold", False):
+        raise HTTPException(status_code=409, detail="Project is on hold — set it live before requesting a run.")
+    requirement = db.query(MigrationRequirement).filter(
+        MigrationRequirement.id == data.requirement_id, MigrationRequirement.project_id == project_id,
+    ).first()
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    req = WorkflowRunRequest(
+        project_id=project_id, requirement_id=data.requirement_id,
+        requested_by=user_id, status="pending",
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return _request_to_dict(req)
+
+
+@router.get("/projects/{project_id}/run-requests")
+def list_run_requests(
+    project_id: str,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Run requests for a project (newest first) — drives the approval queue."""
+    from app.models.project import WorkflowRunRequest
+    ensure_project_access(db, org_id, project_id)
+    rows = (
+        db.query(WorkflowRunRequest)
+        .filter(WorkflowRunRequest.project_id == project_id)
+        .order_by(WorkflowRunRequest.created_at.desc())
+        .all()
+    )
+    return [_request_to_dict(r) for r in rows]
+
+
+class RejectRequest(BaseModel):
+    notes: str | None = None
+
+
+@router.post("/agent-workflows/requests/{request_id}/approve")
+async def approve_run_request(
+    request: Request,
+    request_id: str,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(require_permission("agent:approve")),
+    db: Session = Depends(get_db),
+):
+    """Approve a pending run request and START the workflow. Separation of
+    duties: the requester cannot approve their own request."""
+    from app.models.project import WorkflowRunRequest
+    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Run request not found")
+    ensure_project_access(db, org_id, req.project_id)
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Request already {req.status}.")
+    if req.requested_by == user_id:
+        raise HTTPException(status_code=403, detail="You can't approve your own run request (separation of duties).")
+
+    requirement = db.query(MigrationRequirement).filter(MigrationRequirement.id == req.requirement_id).first()
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement no longer exists")
+
+    correlation_id = getattr(request.state, "request_id", None) if request else None
+    result = await start_bmad_planning_workflow(
+        project_id=req.project_id, requirement_id=req.requirement_id,
+        organization_id=org_id, requirement_text=requirement.source_text,
+        db=db, correlation_id=correlation_id,
+    )
+    req.status = "approved"
+    req.approver_id = user_id
+    req.workflow_id = result["workflow_id"]
+    db.commit()
+    db.refresh(req)
+    return {**_request_to_dict(req), "run": result}
+
+
+@router.post("/agent-workflows/requests/{request_id}/reject")
+def reject_run_request(
+    request_id: str,
+    data: RejectRequest,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(require_permission("agent:approve")),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending run request with optional notes."""
+    from app.models.project import WorkflowRunRequest
+    req = db.query(WorkflowRunRequest).filter(WorkflowRunRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Run request not found")
+    ensure_project_access(db, org_id, req.project_id)
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Request already {req.status}.")
+    if req.requested_by == user_id:
+        raise HTTPException(status_code=403, detail="You can't action your own run request (separation of duties).")
+    req.status = "rejected"
+    req.approver_id = user_id
+    req.notes = data.notes
+    db.commit()
+    db.refresh(req)
+    return _request_to_dict(req)
 
 
 def _assert_workflow_in_org(db: Session, workflow_id: str, org_id: str) -> None:

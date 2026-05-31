@@ -396,18 +396,30 @@ def collect_prior_context(
     return out
 
 
+def _ensure_dir(p: Path) -> Path:
+    """mkdir the dir, tolerating a read-only mount.
+
+    These path accessors run in BOTH the worker (rw — actually writes artifacts)
+    and the backend (the planning volume is mounted read-only there; it only
+    needs the path to start the workflow / read existing artifacts). On the
+    backend the mkdir would raise EROFS — swallow it; the worker creates the dir
+    when it executes. The real write in write_artifact() stays strict.
+    """
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # read-only fs / permission — backend side
+        logger.debug("planning dir mkdir skipped (read-only mount?): %s (%s)", p, exc)
+    return p
+
+
 def planning_root_for_project(project_id: str) -> Path:
     """Public accessor — returns `{planning_artifacts}/{project_id}/`."""
-    p = _project_dir(project_id, phase="planning")
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return _ensure_dir(_project_dir(project_id, phase="planning"))
 
 
 def implementation_root_for_project(project_id: str) -> Path:
     """Public accessor — returns `{implementation_artifacts}/{project_id}/`."""
-    p = _project_dir(project_id, phase="implementation")
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return _ensure_dir(_project_dir(project_id, phase="implementation"))
 
 
 # ── Internals ───────────────────────────────────────────────────────

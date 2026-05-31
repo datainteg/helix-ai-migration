@@ -17,12 +17,17 @@ import {
   createProjectRequirement,
   compileRequirement,
   fieldsForType,
+  requestWorkflowRun,
+  listRunRequests,
+  approveRunRequest,
+  rejectRunRequest,
   EMPTY_SPEC,
   type WorkflowRun,
   type WorkflowDetail,
   type WorkflowStep,
   type ProjectRequirement,
   type RequirementSpec,
+  type RunRequest,
 } from "@/lib/workflows/api";
 import { approveMigration, rejectMigration } from "@/lib/migrations/api";
 
@@ -55,6 +60,7 @@ export default function ProjectAgentsPage() {
   const [projectName, setProjectName] = useState("Loading…");
   const [migType, setMigType] = useState("db_to_db");
   const [onHold, setOnHold] = useState(false);
+  const [requireApproval, setRequireApproval] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [runModal, setRunModal] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState<"" | "approve" | "reject">("");
@@ -86,7 +92,7 @@ export default function ProjectAgentsPage() {
     if (!id) return;
     fetch(`${API_BASE}/api/v1/projects/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); setOnHold(!!p?.on_hold); })
+      .then((p) => { setProjectName(p?.name || "Project"); if (p?.migration_type) setMigType(p.migration_type); setOnHold(!!p?.on_hold); setRequireApproval(p?.require_run_approval ?? true); })
       .catch(() => setProjectName("Project"));
   }, [id]);
 
@@ -176,6 +182,7 @@ export default function ProjectAgentsPage() {
         <RunWorkflowModal
           projectId={String(id)}
           migType={migType}
+          requireApproval={requireApproval}
           onClose={() => setRunModal(false)}
           onStarted={() => { setRunModal(false); setReloadKey((k) => k + 1); }}
         />
@@ -239,6 +246,12 @@ export default function ProjectAgentsPage() {
                   </p>
                 )}
               </Card>
+              <RunRequestsPanel
+                projectId={String(id)}
+                reloadKey={reloadKey}
+                canApprove={can("agent:approve")}
+                onActioned={() => setReloadKey((k) => k + 1)}
+              />
               <Card title="Output Artifacts">
                 {active && active.steps.some((s) => s.artifact_path) ? (
                   <ul className="space-y-1.5 text-[12.5px]">
@@ -258,6 +271,77 @@ export default function ProjectAgentsPage() {
         </>
       )}
     </ProjectShell>
+  );
+}
+
+function RunRequestsPanel({ projectId, reloadKey, canApprove, onActioned }: {
+  projectId: string;
+  reloadKey: number;
+  canApprove: boolean;
+  onActioned: () => void;
+}) {
+  const [requests, setRequests] = useState<RunRequest[] | null>(null);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    listRunRequests(projectId)
+      .then((rows) => { if (!cancelled) setRequests(rows); })
+      .catch((e: unknown) => { if (!cancelled) { setRequests([]); setErr(e instanceof Error ? e.message : "Failed to load run requests"); } });
+    return () => { cancelled = true; };
+  }, [projectId, reloadKey]);
+
+  const act = async (kind: "approve" | "reject", req: RunRequest) => {
+    setErr(""); setBusyId(req.id);
+    try {
+      if (kind === "approve") {
+        await approveRunRequest(req.id);
+      } else {
+        const notes = window.prompt("Reason for rejecting (optional):") ?? undefined;
+        await rejectRunRequest(req.id, notes);
+      }
+      onActioned();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : `Failed to ${kind} request`);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  return (
+    <Card title="Run requests">
+      {err && <div className="mb-3"><ErrorBanner message={err} onDismiss={() => setErr("")} /></div>}
+      {requests === null ? (
+        <p className="text-[12.5px] text-ink-3">Loading…</p>
+      ) : requests.length === 0 ? (
+        <p className="text-[12.5px] text-ink-3">No run requests</p>
+      ) : (
+        <ul className="space-y-2.5">
+          {requests.map((req) => {
+            const pending = req.status === "pending";
+            return (
+              <li key={req.id} className="rounded-[8px] border border-hx bg-surface px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge status={req.status} />
+                  <span className="font-mono text-[11px] text-ink-4">{req.created_at ? new Date(req.created_at).toLocaleString() : "—"}</span>
+                </div>
+                <div className="mt-1.5 text-[11.5px] text-ink-3">
+                  Requirement <span className="font-mono text-ink-2">{req.requirement_id.slice(0, 8)}</span>
+                </div>
+                {req.notes && <p className="mt-1 text-[11.5px] text-ink-3">Notes: {req.notes}</p>}
+                {pending && canApprove && (
+                  <div className="mt-2 flex gap-2">
+                    <Button className="justify-center" loading={busyId === req.id} disabled={busyId !== ""} onClick={() => act("approve", req)}>Approve</Button>
+                    <Button variant="danger" className="justify-center" loading={busyId === req.id} disabled={busyId !== ""} onClick={() => act("reject", req)}>Reject</Button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -281,9 +365,10 @@ function FlowNode({ label, phase, color, status }: { label: string; phase: strin
   );
 }
 
-function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
+function RunWorkflowModal({ projectId, migType, requireApproval, onClose, onStarted }: {
   projectId: string;
   migType: string;
+  requireApproval: boolean;
   onClose: () => void;
   onStarted: () => void;
 }) {
@@ -292,6 +377,7 @@ function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
   const [picked, setPicked] = useState<string>("");
   const [spec, setSpec] = useState<RequirementSpec>(EMPTY_SPEC);
   const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
@@ -301,7 +387,7 @@ function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
   }, [projectId]);
 
   const run = async () => {
-    setStarting(true); setErr("");
+    setStarting(true); setErr(""); setOk("");
     try {
       let requirementId = picked;
       if (mode === "build") {
@@ -311,8 +397,16 @@ function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
         requirementId = created.id;
       }
       if (!requirementId) { setErr("Select or build a requirement."); setStarting(false); return; }
-      await startProjectWorkflow(projectId, requirementId);
-      onStarted();
+      if (requireApproval) {
+        // Approval gate: file a pending request instead of starting directly.
+        await requestWorkflowRun(projectId, requirementId);
+        setOk("Run requested — pending manager approval");
+        // Brief beat so the user sees the confirmation before close + reload.
+        setTimeout(() => onStarted(), 1200);
+      } else {
+        await startProjectWorkflow(projectId, requirementId);
+        onStarted();
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Failed to start workflow");  // surfaces on-hold 409, etc.
     } finally {
@@ -327,6 +421,11 @@ function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
     <Modal open onClose={onClose} title="Run migration workflow" width="lg">
       <div className="space-y-4">
         {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
+        {ok && (
+          <div className="rounded-[8px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12.5px] text-emerald-800">
+            {ok}
+          </div>
+        )}
         <p className="text-[12.5px] text-ink-3">
           The pipeline introspects the source, maps types, generates scripts, and reconciles — streaming
           live here. Give it good detail: real migrations span many schemas, tables, types, and rules.
@@ -365,7 +464,7 @@ function RunWorkflowModal({ projectId, migType, onClose, onStarted }: {
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={run} loading={starting}><Play className="h-3.5 w-3.5" /> {mode === "build" ? "Create & run" : "Start run"}</Button>
+          <Button onClick={run} loading={starting} disabled={!!ok}><Play className="h-3.5 w-3.5" /> {requireApproval ? "Request run" : (mode === "build" ? "Create & run" : "Start run")}</Button>
         </div>
       </div>
     </Modal>

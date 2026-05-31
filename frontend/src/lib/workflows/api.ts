@@ -199,6 +199,67 @@ export async function startProjectWorkflow(projectId: string, requirementId: str
   return res.json() as Promise<StartWorkflowResult>;
 }
 
+/** A pre-start workflow run approval request. Created via /agent-workflows/request;
+ * stays `pending` until a manager approves (which starts the workflow) or rejects. */
+export interface RunRequest {
+  id: string;
+  project_id: string;
+  requirement_id: string;
+  requested_by: string;
+  status: string;
+  approver_id: string | null;
+  notes: string | null;
+  workflow_id: string | null;
+  created_at: string | null;
+}
+
+/** Request a workflow run (approval gate). Creates a pending request; does NOT
+ * start the workflow. Throws the backend detail message on !ok. */
+export async function requestWorkflowRun(projectId: string, requirementId: string): Promise<RunRequest> {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/agent-workflows/request`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement_id: requirementId }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<RunRequest>;
+}
+
+/** List a project's run requests (newest first). */
+export function listRunRequests(projectId: string): Promise<RunRequest[]> {
+  return get<RunRequest[]>(`/api/v1/projects/${projectId}/run-requests`, null);
+}
+
+/** Approve a pending run request → starts the workflow. Throws on 403/409 etc. */
+export async function approveRunRequest(requestId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/agent-workflows/requests/${requestId}/approve`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Approve failed (${res.status})`);
+  }
+}
+
+/** Reject a pending run request, with optional notes. Throws on !ok. */
+export async function rejectRunRequest(requestId: string, notes?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/agent-workflows/requests/${requestId}/reject`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: notes ?? null }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Reject failed (${res.status})`);
+  }
+}
+
 export interface WorkflowArtifactContent {
   path: string;
   content: string;

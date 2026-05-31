@@ -19,6 +19,9 @@ class Project(BaseModel):
     # Operational hold — when True, starting new BMAD/agent workflows is refused.
     # Orthogonal to `status` (a live project can be put on hold and resumed).
     on_hold = Column(Boolean, default=False, nullable=False, server_default="false")
+    # Pre-start governance: when True (default), a workflow run must be approved
+    # by a project manager before the agents run. Toggleable per project.
+    require_run_approval = Column(Boolean, default=True, nullable=False, server_default="true")
     owner_id = Column(String(36), nullable=False)
 
     organization = relationship("Organization", back_populates="projects")
@@ -67,6 +70,23 @@ class MigrationRequirement(BaseModel):
     root_id = Column(String(36), nullable=True, index=True)
 
     project = relationship("Project", back_populates="requirements")
+
+
+class WorkflowRunRequest(BaseModel):
+    """A request to run a workflow that needs project-manager approval BEFORE the
+    agents start (pre-start gate). Separate from WorkflowRun (which only exists
+    once a run actually starts in Temporal). On approval, the normal start path
+    runs and its workflow_id is linked back here.
+    """
+    __tablename__ = "workflow_run_requests"
+
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    requirement_id = Column(String(36), nullable=False)
+    requested_by = Column(String(36), nullable=False)        # actor user_id
+    status = Column(String(20), default="pending", nullable=False)  # pending|approved|rejected
+    approver_id = Column(String(36), nullable=True)
+    notes = Column(Text, nullable=True)
+    workflow_id = Column(String(100), nullable=True)         # set once started after approval
 
 
 class SourceConnection(BaseModel):

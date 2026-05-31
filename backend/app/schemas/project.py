@@ -33,6 +33,8 @@ class ProjectResponse(BaseModel):
     owner_name: Optional[str] = None
     # Operational hold — when True, new workflow starts are refused.
     on_hold: bool = False
+    # Pre-start approval gate — when True, runs need manager approval first.
+    require_run_approval: bool = True
     # Derived from the project's source/target connection rows (first of each).
     source_system: Optional[str] = None
     target_system: Optional[str] = None

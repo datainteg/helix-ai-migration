@@ -178,11 +178,17 @@ class HelixBMAD:
         """
         from temporalio.client import Client
 
-        from worker.workflows.bmad_per_node_workflow import BMADPerNodeWorkflow
+        # Start by STRING type name — the backend image does not ship the
+        # `worker` package, so importing the workflow class here raises
+        # ModuleNotFoundError (which silently dropped BMAD to the in-process
+        # local fallback, then failed on the read-only planning mount). Temporal
+        # dispatches by type name to the worker, which has the class registered
+        # and rw access to /app/_bmad-output. Mirrors HelixMigration.
+        BMAD_WORKFLOW_TYPE = "BMADPerNodeWorkflow"
 
         client = await Client.connect(self.temporal_address)
         handle = await client.start_workflow(
-            BMADPerNodeWorkflow.run,
+            BMAD_WORKFLOW_TYPE,
             self._input_payload(),
             id=self.workflow_id,
             task_queue=self.task_queue,

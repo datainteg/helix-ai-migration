@@ -4,7 +4,7 @@ from app.models.identity import (  # noqa: F401
     PasswordResetToken, OrgInvitation,
 )
 from app.models.llm import LLMProvider, LLMProviderSecret, LLMAgentMapping  # noqa: F401
-from app.models.project import Project, SubProject, MigrationRequirement, SourceConnection, TargetConnection, SchemaMetadata, TableMetadata, ColumnMetadata, ProjectComment  # noqa: F401
+from app.models.project import Project, SubProject, MigrationRequirement, SourceConnection, TargetConnection, SchemaMetadata, TableMetadata, ColumnMetadata, ProjectComment, WorkflowRunRequest  # noqa: F401
 from app.models.agents import AgentDefinition, AgentTask, AgentOutput, PromptTemplate, PromptVersion  # noqa: F401
 from app.models.artifacts import CodeArtifact, CodeArtifactVersion, ArtifactDependency, ArtifactLineage, ArtifactReview, ArtifactApproval  # noqa: F401
 from app.models.validation import ValidationRule, ValidationRun, ValidationResult, ReconRun, ReconResult  # noqa: F401

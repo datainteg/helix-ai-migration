@@ -301,6 +301,7 @@ def api_restore_project(project_id: str, request: Request, user_id: str = Depend
 class ProjectUpdate(BaseModel):
     owner_id: str | None = None
     status: str | None = None
+    require_run_approval: bool | None = None
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -326,6 +327,8 @@ def api_update_project(project_id: str, data: ProjectUpdate, request: Request, u
         if data.status not in ("draft", "running", "awaiting", "completed", "failed", "archived"):
             raise HTTPException(status_code=400, detail="Invalid status")
         p.status = data.status
+    if data.require_run_approval is not None:
+        p.require_run_approval = data.require_run_approval
     db.commit()
     db.refresh(p)
     write_audit(db, org_id=org_id, actor_id=user_id, action="project_updated", entity_type="project", entity_id=project_id, meta=data.model_dump(exclude_none=True), request=request)

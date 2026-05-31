@@ -49,6 +49,7 @@ def _project_to_response(project: Project, owner_names: dict[str, str] | None = 
         owner_id=project.owner_id,
         owner_name=(owner_names or {}).get(project.owner_id),
         on_hold=bool(getattr(project, "on_hold", False)),
+        require_run_approval=bool(getattr(project, "require_run_approval", True)),
         source_system=src,
         target_system=tgt,
         environment=getattr(project, "environment", None),
