@@ -23,6 +23,19 @@ import {
   ArrowRight,
   Pencil,
   RotateCw,
+  ListChecks,
+  Database,
+  Workflow as WorkflowIcon,
+  FileCode,
+  ShieldCheck,
+  GitCompare,
+  Rocket,
+  Terminal,
+  FileCheck2,
+  BarChart3,
+  CheckSquare,
+  Clock,
+  ChevronRight,
 } from "lucide-react";
 
 import { AppShell } from "@/components/layout";
@@ -46,7 +59,9 @@ import {
   fetchProjectComments, addProjectComment,
   type OrgMember, type ProjectComment as ProjectCommentT,
 } from "@/lib/projects/api";
-import { listRunRequests } from "@/lib/workflows/api";
+import { listRunRequests, listProjectRequirements } from "@/lib/workflows/api";
+import { listProjectArtifacts } from "@/lib/artifacts/api";
+import { listConnections } from "@/lib/projects/connections";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -174,6 +189,20 @@ function PctValue({ pct, total }: { pct: number | null; total: number }) {
   return <span className="font-mono tabular-nums text-[18px] font-medium" style={{ color: tone }}>{pct.toFixed(1)}%</span>;
 }
 
+/** A section-hub card: icon + title + one live quick-stat, links to the tab. */
+function SectionCard({ href, icon, title, stat }: { href: string; icon: React.ReactNode; title: string; stat: string }) {
+  return (
+    <Link href={href} className="group block rounded-[10px] border border-hx bg-surface p-3 hover:border-hx-2 hover:bg-surface-hi transition-colors">
+      <div className="flex items-center gap-2">
+        <span className="grid place-items-center h-7 w-7 rounded-lg bg-app-2 text-ink-3 group-hover:text-ink-2">{icon}</span>
+        <span className="text-[12.5px] font-medium text-ink flex-1 min-w-0 truncate">{title}</span>
+        <ChevronRight className="h-3.5 w-3.5 text-ink-4 group-hover:text-ink-2" />
+      </div>
+      <div className="mt-2 text-[12px] text-ink-3 truncate">{stat}</div>
+    </Link>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────
 
 export default function ProjectDetailPage() {
@@ -188,6 +217,7 @@ export default function ProjectDetailPage() {
   const [holdPrompt, setHoldPrompt] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [hub, setHub] = useState<{ reqs: number; artifacts: number; sources: number; targets: number } | null>(null);
 
   // Pending run-requests count for the PM status view (best-effort).
   useEffect(() => {
@@ -196,6 +226,20 @@ export default function ProjectDetailPage() {
       .then((rs) => setPendingApprovals(rs.filter((r) => r.status === "pending").length))
       .catch(() => setPendingApprovals(0));
   }, [id]);
+
+  // Quick counts for the section hub (best-effort; each tab is the source of truth).
+  useEffect(() => {
+    if (!id) return;
+    Promise.all([
+      listProjectRequirements(String(id)).catch(() => []),
+      listProjectArtifacts(token, String(id)).catch(() => []),
+      listConnections(String(id), "source").catch(() => []),
+      listConnections(String(id), "target").catch(() => []),
+    ]).then(([reqs, arts, src, tgt]) => {
+      const chains = new Set(reqs.map((r) => r.root_id || r.id)).size;
+      setHub({ reqs: chains, artifacts: arts.length, sources: src.length, targets: tgt.length });
+    });
+  }, [id, token]);
 
   const load = useCallback(async () => {
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
@@ -345,6 +389,35 @@ export default function ProjectDetailPage() {
             label="Reconciliation"
             value={<PctValue pct={overview?.recon.pct ?? null} total={overview?.recon.total ?? 0} />}
           />
+        </div>
+
+        {/* Section hub — quick live update from every sub-page, one jump away. */}
+        <div>
+          <div className="eyebrow mb-2">PROJECT SECTIONS</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {(() => {
+              const b = `/projects/${id}`;
+              const reqN = hub?.reqs ?? 0;
+              const artN = hub?.artifacts ?? 0;
+              const st = project?.source_system, tg = project?.target_system;
+              const vp = overview?.validation.pct, rp = overview?.recon.pct;
+              const cards: { href: string; icon: React.ReactNode; title: string; stat: string }[] = [
+                { href: `${b}/requirements`, icon: <ListChecks className="h-4 w-4" />, title: "Requirements", stat: reqN ? `${reqN} requirement${reqN > 1 ? "s" : ""}` : "None yet" },
+                { href: `${b}/source-target`, icon: <Database className="h-4 w-4" />, title: "Source & Target", stat: (st || tg) ? `${st ?? "?"} → ${tg ?? "?"}` : "Not configured" },
+                { href: `${b}/agents`, icon: <WorkflowIcon className="h-4 w-4" />, title: "Workflows", stat: run ? `${run.status} · ${run.steps_done}/${run.steps_total}` : "No runs yet" },
+                { href: `${b}/artifacts`, icon: <FileCode className="h-4 w-4" />, title: "Artifacts", stat: artN ? `${artN} artifact${artN > 1 ? "s" : ""}` : "None yet" },
+                { href: `${b}/validation`, icon: <ShieldCheck className="h-4 w-4" />, title: "Validation", stat: vp != null ? `${vp.toFixed(1)}% passed` : "Not run" },
+                { href: `${b}/recon`, icon: <GitCompare className="h-4 w-4" />, title: "Reconciliation", stat: rp != null ? `${rp.toFixed(1)}% verified` : "Not run" },
+                { href: `${b}/cutover`, icon: <Rocket className="h-4 w-4" />, title: "Cutover", stat: "Plan & execute" },
+                { href: `${b}/developer-workspace`, icon: <Terminal className="h-4 w-4" />, title: "Developer Workspace", stat: artN ? `${artN} file${artN > 1 ? "s" : ""}` : "No code yet" },
+                { href: `${b}/compliance`, icon: <FileCheck2 className="h-4 w-4" />, title: "Compliance", stat: "Audit & export" },
+                { href: `${b}/reports`, icon: <BarChart3 className="h-4 w-4" />, title: "Reports", stat: "Summary & exports" },
+                { href: `${b}/approvals`, icon: <CheckSquare className="h-4 w-4" />, title: "Approvals", stat: pendingApprovals ? `${pendingApprovals} pending` : "None pending" },
+                { href: `${b}/timeline`, icon: <Clock className="h-4 w-4" />, title: "Timeline", stat: "Activity history" },
+              ];
+              return cards.map((c) => <SectionCard key={c.href} {...c} />);
+            })()}
+          </div>
         </div>
 
         {/* Pipeline progress — REAL steps from the latest workflow run, or an
