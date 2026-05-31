@@ -1,0 +1,1608 @@
+Prompt 0  → Analysis only
+Prompt 1  → Database models + migrations
+Prompt 2  → Stage lifecycle + artifact review backend
+Prompt 3  → Stage-gated BMAD agent execution
+Prompt 4  → Lifecycle + artifact review frontend
+Prompt 5  → Sprint generation + approval
+Prompt 6  → Developer workspace + code-server
+Prompt 7  → Validation evidence + QA Agent
+Prompt 8  → Recon Agent + reports
+Prompt 9  → Sign-off email workflow
+Prompt 10 → Project console navigation
+Prompt 11 → Tests + docs + hardening
+
+
+
+Prompt 0 — Deep Analysis First, No Code
+You are working on the repository:
+
+Product: Helix Migration
+Repo: helix-ai-migration
+Goal: Convert the existing linear BMAD workflow into a full enterprise stage-gated migration execution lifecycle.
+
+Important:
+Do not write code yet.
+Do not modify files yet.
+First deeply inspect the existing codebase and create an implementation plan.
+
+My product goal:
+Helix Migration should not just run BMAD agents linearly. It should work like an enterprise migration execution platform where every stage creates artifacts, users can review/edit/resubmit/approve artifacts, and only then the next stage runs.
+
+Desired lifecycle:
+
+1. Create Project
+2. Generate 6-digit project alias, for example HXM-482913
+3. Requirement Intake
+4. Project Context Agent
+5. Review / Edit / Resubmit / Approve
+6. Mary — Business Analyst
+7. Review / Edit / Resubmit / Approve
+8. Winston — System Architect
+9. Review / Edit / Resubmit / Approve
+10. John — Product Manager / Planning
+11. Review / Edit / Resubmit / Approve
+12. Sally — UX Designer, optional based on use case
+13. Review / Edit / Resubmit / Approve
+14. Auto Sprint Generation
+15. Review / Edit / Resubmit / Approve
+16. Start Sprint Execution
+17. Amelia — Senior Software Engineer
+18. Developer Workspace / optional code-server
+19. Code generation / review / test case generation
+20. Developer testing in their own environment
+21. Validation evidence upload
+22. QA Agent reviews validation evidence
+23. Recon Agent generates recon code and reports
+24. Business recon report approval
+25. Generate sign-off email with report attachment
+26. Final documentation by Paige
+27. Project closure
+
+Agents:
+
+Project Context Agent:
+- Creates initial migration understanding, project scope, source/target, assumptions, risks, migration strategy.
+
+Mary — Business Analyst:
+- Requirement analysis, business process understanding, use cases, acceptance criteria, risks.
+
+Winston — System Architect:
+- Architecture, migration approach, source-target mapping strategy, validation/recon strategy, security, deployment approach.
+
+John — Product Manager:
+- Project planning, epics, stories, roadmap, milestones, sprint planning.
+
+Sally — UX Designer:
+- Optional. Only runs when migration requires dashboard/report/workflow/user-facing UI.
+
+Amelia — Senior Software Engineer:
+- Code generation, code review, test case generation, migration scripts, Databricks notebooks, Python/SQL/ETL/DAG outputs.
+
+QA Agent:
+- Validation plan, test cases, validation evidence review, QA summary.
+
+Recon Agent:
+- Row count recon, schema recon, checksum recon, business-rule recon, recon code generation, final recon report.
+
+Paige — Technical Writer:
+- Documentation, runbooks, sign-off package, closure report.
+
+Current system:
+The current platform already has BMAD agents and workflow run/step persistence. Do not delete that. Reuse and refactor it into the new lifecycle.
+
+First inspect:
+- README.md
+- docs/
+- backend/app/models/
+- backend/app/api/
+- backend/app/services/
+- backend/app/schemas/
+- backend/alembic/versions/
+- agents/
+- worker/
+- frontend/src/app/
+- frontend/src/components/
+- frontend/src/lib/
+- docker-compose.yml
+- docker-compose.build.yml
+
+Specifically inspect:
+- workflow service
+- workflow models
+- artifact service
+- project service
+- sprint pages
+- developer workspace pages
+- validation and recon services
+- frontend project pages
+- existing BMAD agent execution logic
+
+Analysis report required:
+1. Current BMAD workflow design
+2. Current project model and missing fields
+3. Current artifact model and versioning capability
+4. Current approval capability
+5. Current sprint capability
+6. Current developer workspace capability
+7. Current validation/recon capability
+8. Current email/sign-off capability
+9. Gaps against desired lifecycle
+10. Recommended implementation phases
+11. Risk areas
+12. Files that need modification
+13. Files that should not be touched
+14. Database migration plan
+15. API plan
+16. Frontend page/component plan
+17. Worker/Temporal workflow plan
+18. Testing plan
+
+Do not modify files.
+Return only the analysis and implementation plan.
+Prompt 1 — Database Model + Migration Foundation
+You are working on Helix Migration.
+
+Goal:
+Implement the database foundation for the enterprise stage-gated BMAD migration lifecycle.
+
+Important:
+Do not rewrite the existing project/workflow/artifact system from scratch.
+Reuse existing models where possible.
+Add missing models/columns cleanly with Alembic migrations.
+
+Required concepts:
+
+1. Project alias
+Every project must have:
+- internal UUID id
+- public 6-digit alias like HXM-482913
+- alias must be unique
+- UI should use alias in headings, reports, emails, artifacts
+
+Add to Project model if missing:
+- alias
+- current_stage
+- lifecycle_status
+- stage_progress_percent
+- approved_at nullable
+- closed_at nullable
+
+Alias format:
+HXM- + 6 random digits
+
+Example:
+HXM-482913
+
+2. Migration lifecycle stages
+
+Create enum/constants:
+
+PROJECT_CONTEXT
+BUSINESS_ANALYSIS
+ARCHITECTURE
+PROJECT_PLANNING
+UX_DESIGN
+SPRINT_GENERATION
+SPRINT_EXECUTION
+DEVELOPMENT
+VALIDATION
+RECONCILIATION
+SIGN_OFF
+DOCUMENTATION
+CLOSURE
+
+Stage status:
+
+not_started
+running
+generated
+under_review
+edit_requested
+resubmitted
+approved
+rejected
+completed
+failed
+skipped
+
+3. Stage model
+
+Create model/table:
+
+migration_stages:
+- id
+- organization_id
+- project_id
+- stage_key
+- stage_name
+- stage_order
+- status
+- assigned_agent
+- is_optional
+- started_at
+- generated_at
+- submitted_for_review_at
+- approved_at
+- rejected_at
+- completed_at
+- current_artifact_id nullable
+- created_by
+- updated_by
+- created_at
+- updated_at
+
+Unique:
+- project_id + stage_key
+
+4. Artifact lifecycle
+
+Create or extend artifact models to support:
+
+migration_artifacts:
+- id
+- organization_id
+- project_id
+- stage_id
+- artifact_type
+- title
+- description
+- current_version_id
+- status
+- created_by_agent
+- created_by_user_id
+- approved_by_user_id
+- approved_at
+- created_at
+- updated_at
+
+artifact_versions:
+- id
+- artifact_id
+- version_number
+- content_markdown
+- content_json nullable
+- file_path nullable
+- change_summary
+- created_by_type: agent|user|system
+- created_by_agent nullable
+- created_by_user_id nullable
+- source_version_id nullable
+- created_at
+
+artifact_reviews:
+- id
+- organization_id
+- project_id
+- artifact_id
+- artifact_version_id
+- reviewer_user_id
+- status: pending|approved|rejected|changes_requested
+- comments
+- created_at
+- updated_at
+
+artifact_comments:
+- id
+- organization_id
+- project_id
+- artifact_id
+- artifact_version_id
+- user_id
+- comment
+- created_at
+
+5. Stage transitions
+
+Create transition log:
+
+stage_transition_logs:
+- id
+- organization_id
+- project_id
+- stage_id
+- from_status
+- to_status
+- action
+- actor_type: user|agent|system
+- actor_id
+- comment
+- created_at
+
+6. Sprint models
+
+Create or extend sprint models:
+
+migration_sprints:
+- id
+- organization_id
+- project_id
+- sprint_alias
+- name
+- description
+- status
+- sprint_order
+- start_date nullable
+- end_date nullable
+- progress_percent
+- validation_progress_percent
+- recon_progress_percent
+- risk_level
+- created_from_artifact_id nullable
+- approved_by_user_id nullable
+- approved_at nullable
+- created_at
+- updated_at
+
+migration_sprint_tasks:
+- id
+- organization_id
+- project_id
+- sprint_id
+- title
+- description
+- task_type
+- status
+- priority
+- owner_type: user|agent|system
+- owner_id nullable
+- assigned_agent nullable
+- story_points nullable
+- dependency_task_ids json nullable
+- artifact_id nullable
+- validation_status nullable
+- recon_status nullable
+- created_at
+- updated_at
+
+7. Validation evidence
+
+Create model:
+
+validation_evidence:
+- id
+- organization_id
+- project_id
+- sprint_id nullable
+- artifact_id nullable
+- uploaded_by_user_id
+- evidence_type
+- title
+- description
+- file_path nullable
+- content_json nullable
+- status: uploaded|under_review|accepted|rejected
+- reviewed_by_agent nullable
+- reviewed_by_user_id nullable
+- review_summary nullable
+- created_at
+- updated_at
+
+8. Recon report
+
+Create model:
+
+recon_reports:
+- id
+- organization_id
+- project_id
+- sprint_id nullable
+- report_type
+- status
+- source_summary_json
+- target_summary_json
+- mismatch_summary_json
+- business_rules_json
+- report_markdown nullable
+- report_pdf_path nullable
+- generated_by_agent
+- approved_by_user_id nullable
+- approved_at nullable
+- created_at
+- updated_at
+
+9. Sign-off
+
+Create model:
+
+signoff_requests:
+- id
+- organization_id
+- project_id
+- recon_report_id nullable
+- recipient_email
+- subject
+- body
+- attachment_paths_json
+- status: draft|sent|approved|rejected
+- sent_at nullable
+- approved_at nullable
+- created_by_user_id
+- created_at
+- updated_at
+
+10. Migration requirements versioning
+
+If not already supported, ensure requirement intake supports:
+- root requirement
+- version number
+- edited requirement
+- active version
+- approval status
+
+Implementation rules:
+- Use SQLAlchemy existing BaseModel style.
+- Add Alembic migration.
+- Do not break existing APIs.
+- Do not drop existing columns.
+- Backfill project alias for existing projects.
+- Add indexes on organization_id, project_id, status, stage_key.
+- Keep metadata only. Do not store production row-level source/target data.
+
+Acceptance criteria:
+- Project alias exists and is generated for new/existing projects.
+- migration_stages table exists.
+- artifact lifecycle tables exist.
+- sprint tables exist or are extended.
+- validation_evidence exists.
+- recon_reports exists.
+- signoff_requests exists.
+- Alembic migration runs cleanly.
+- Existing tests still pass.
+- No destructive migration.
+- No backend route behavior broken.
+
+After implementation:
+- Show changed files.
+- Show migration file.
+- Show test/migration commands run.
+- Show remaining gaps.
+Prompt 2 — Stage Lifecycle Service + Artifact Review Service
+You are working on Helix Migration.
+
+Goal:
+Create backend services for stage-gated execution and artifact review/edit/resubmit/approval.
+
+Important:
+This is the core product behavior.
+Do not run all BMAD agents continuously anymore.
+Each stage must generate an artifact and wait for review/approval before the next stage starts.
+
+Create or update services:
+
+backend/app/services/stage_lifecycle_service.py
+backend/app/services/artifact_review_service.py
+backend/app/services/project_alias_service.py
+
+1. Project initialization
+
+When a project is created:
+- generate alias like HXM-482913
+- create default lifecycle stages:
+  1. PROJECT_CONTEXT
+  2. BUSINESS_ANALYSIS
+  3. ARCHITECTURE
+  4. PROJECT_PLANNING
+  5. UX_DESIGN optional
+  6. SPRINT_GENERATION
+  7. SPRINT_EXECUTION
+  8. DEVELOPMENT
+  9. VALIDATION
+  10. RECONCILIATION
+  11. SIGN_OFF
+  12. DOCUMENTATION
+  13. CLOSURE
+
+UX_DESIGN should be optional and only enabled if project requires UI/dashboard/report/workflow experience.
+
+2. Stage lifecycle functions
+
+Implement:
+
+initialize_project_lifecycle(project_id, organization_id)
+get_project_lifecycle(project_id, organization_id)
+get_current_stage(project_id, organization_id)
+start_stage(project_id, stage_key, actor_user_id)
+mark_stage_generated(project_id, stage_key, artifact_id)
+submit_stage_for_review(project_id, stage_key, artifact_id)
+approve_stage(project_id, stage_key, user_id, comment=None)
+reject_stage(project_id, stage_key, user_id, comment)
+request_stage_changes(project_id, stage_key, user_id, comment)
+resubmit_stage(project_id, stage_key, artifact_version_id, user_id)
+skip_optional_stage(project_id, stage_key, user_id, reason)
+advance_to_next_stage(project_id, organization_id)
+calculate_project_progress(project_id)
+
+Rules:
+- Cannot start a stage until previous required stage is approved/completed.
+- Optional UX stage can be skipped.
+- Every transition must be logged.
+- Every approval must be tied to artifact version.
+- Cannot approve artifact if no current artifact version exists.
+- Cannot start sprint execution until sprint generation is approved.
+- Cannot start sign-off until recon report is approved.
+
+3. Artifact review functions
+
+Implement:
+
+create_agent_artifact(project_id, stage_id, artifact_type, title, content_markdown, content_json, agent_name)
+create_artifact_version(artifact_id, content_markdown, content_json, created_by_type, created_by_agent, created_by_user_id, change_summary)
+get_artifact(artifact_id)
+get_artifact_versions(artifact_id)
+edit_artifact_version(artifact_id, base_version_id, new_content_markdown, user_id, change_summary)
+submit_artifact_for_review(artifact_id, version_id, user_id)
+approve_artifact(artifact_id, version_id, reviewer_user_id, comment)
+reject_artifact(artifact_id, version_id, reviewer_user_id, comment)
+request_artifact_changes(artifact_id, version_id, reviewer_user_id, comment)
+add_artifact_comment(artifact_id, version_id, user_id, comment)
+compare_artifact_versions(artifact_id, from_version, to_version)
+
+4. Artifact statuses
+
+Artifact status:
+- draft
+- generated
+- under_review
+- changes_requested
+- resubmitted
+- approved
+- rejected
+- superseded
+
+5. Version behavior
+
+Rules:
+- Agent creates v1.
+- User edit creates v2.
+- Agent resubmit creates v3.
+- Approval locks the approved version.
+- Later edits create a new version but do not overwrite approved history.
+- All versions remain readable.
+- UI should be able to compare versions.
+
+6. API schemas
+
+Create/update:
+
+backend/app/schemas/lifecycle.py
+backend/app/schemas/artifacts.py
+
+Include request/response schemas for:
+- stage list
+- stage detail
+- stage transition
+- artifact detail
+- artifact version
+- artifact review
+- artifact comment
+- version comparison
+
+7. APIs
+
+Create/update:
+
+backend/app/api/lifecycle.py
+backend/app/api/artifacts.py
+
+Endpoints:
+
+GET /api/v1/projects/{project_id}/lifecycle
+GET /api/v1/projects/{project_id}/lifecycle/current
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/start
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/submit-review
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/approve
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/reject
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/request-changes
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/resubmit
+POST /api/v1/projects/{project_id}/lifecycle/{stage_key}/skip
+POST /api/v1/projects/{project_id}/lifecycle/advance
+
+GET /api/v1/projects/{project_id}/artifacts
+GET /api/v1/artifacts/{artifact_id}
+GET /api/v1/artifacts/{artifact_id}/versions
+POST /api/v1/artifacts/{artifact_id}/versions
+POST /api/v1/artifacts/{artifact_id}/submit-review
+POST /api/v1/artifacts/{artifact_id}/approve
+POST /api/v1/artifacts/{artifact_id}/reject
+POST /api/v1/artifacts/{artifact_id}/request-changes
+POST /api/v1/artifacts/{artifact_id}/comments
+GET /api/v1/artifacts/{artifact_id}/compare
+
+Security:
+- Require authenticated user.
+- Enforce organization/project isolation.
+- Review/approve actions require permission.
+- Do not expose artifacts across projects.
+- Audit every transition.
+
+Acceptance criteria:
+- Project lifecycle can be initialized.
+- Stages can be started, reviewed, approved, rejected, changed, resubmitted.
+- Artifacts can be versioned and approved.
+- Stage cannot advance without approval.
+- Transition logs are written.
+- APIs return useful JSON.
+- Existing BMAD workflow not broken yet.
+Prompt 3 — Convert BMAD to Stage-Gated Agent Execution
+You are working on Helix Migration.
+
+Goal:
+Refactor the current BMAD workflow so agents execute stage-by-stage with approval gates after every major artifact.
+
+Important:
+Do not delete existing HelixBMAD logic.
+Add a new stage-gated workflow path and gradually route the UI to it.
+
+Current problem:
+The current BMAD pipeline behaves too linearly. We need enterprise workflow:
+agent generates artifact → user reviews/edits/resubmits/approves → next agent runs.
+
+Create:
+
+backend/app/services/stage_agent_service.py
+backend/app/api/stage_agents.py
+
+Worker updates:
+- worker/workflows/stage_gated_bmad_workflow.py
+- worker/activities/stage_agent_activities.py
+
+Agents:
+Reuse existing BMAD agents where possible.
+
+Stage to agent mapping:
+
+PROJECT_CONTEXT:
+- Agent: Project Context Agent or Winston if no separate agent exists
+- Output: project-context.md
+
+BUSINESS_ANALYSIS:
+- Agent: Mary — Business Analyst
+- Output: business-analysis.md
+
+ARCHITECTURE:
+- Agent: Winston — System Architect
+- Output: architecture.md
+
+PROJECT_PLANNING:
+- Agent: John — Product Manager
+- Output: project-plan.md
+
+UX_DESIGN:
+- Agent: Sally — UX Designer
+- Output: ux-plan.md
+- Optional
+
+SPRINT_GENERATION:
+- Agent: John + Winston
+- Output: sprint-plan.md and sprint JSON
+
+DEVELOPMENT:
+- Agent: Amelia
+- Output: generated code, dev-story.md, implementation-plan.md
+
+VALIDATION:
+- Agent: QA Agent
+- Output: validation-plan.md, test-cases.md
+
+RECONCILIATION:
+- Agent: Recon Agent
+- Output: recon-plan.md, recon-code draft, recon-report draft
+
+DOCUMENTATION:
+- Agent: Paige
+- Output: final-docs.md, runbook.md, closure-report.md
+
+Workflow rules:
+- API starts only one stage at a time.
+- Running a stage creates one or more artifacts.
+- Stage status becomes generated.
+- Stage then becomes under_review.
+- Workflow pauses.
+- User can edit artifact or request changes.
+- User approves.
+- Only after approval can next stage start.
+- Temporal signal can be used for approval, but also persist approval in database.
+
+Required APIs:
+
+POST /api/v1/projects/{project_id}/stages/{stage_key}/run-agent
+POST /api/v1/projects/{project_id}/stages/{stage_key}/regenerate
+POST /api/v1/projects/{project_id}/stages/{stage_key}/continue-after-approval
+
+Behavior:
+- run-agent validates previous stage approval.
+- generates agent prompt using all previously approved artifacts.
+- stores output as artifact v1.
+- updates stage current_artifact_id.
+- marks stage under_review.
+- returns artifact id/version id.
+
+Prompt context building:
+For every stage, build context from:
+- project metadata
+- latest approved requirement
+- all previously approved artifacts
+- connector metadata, if available
+- sprint metadata, if available
+- validation/recon summaries, if available
+
+Do not use unapproved artifacts as final context unless user explicitly selects them.
+
+Stage prompts:
+
+PROJECT_CONTEXT prompt should produce:
+- migration objective
+- source systems
+- target systems
+- scope
+- assumptions
+- constraints
+- risks
+- open questions
+- initial execution strategy
+
+BUSINESS_ANALYSIS prompt should produce:
+- business requirements
+- use cases
+- stakeholders
+- acceptance criteria
+- data domains
+- risks
+- success metrics
+
+ARCHITECTURE prompt should produce:
+- source-target architecture
+- migration architecture
+- connector plan
+- schema discovery strategy
+- validation strategy
+- recon strategy
+- security/governance
+- deployment approach
+
+PROJECT_PLANNING prompt should produce:
+- epics
+- stories
+- milestones
+- dependencies
+- timeline
+- resource assumptions
+- risks
+
+SPRINT_GENERATION prompt should produce:
+- sprint list
+- sprint goals
+- tasks
+- owners
+- dependencies
+- validation/recon checkpoints
+- approval gates
+
+DEVELOPMENT prompt should produce:
+- implementation plan
+- generated code or code skeletons
+- testing instructions
+- known assumptions
+- files created
+
+VALIDATION prompt should produce:
+- test cases
+- expected validation evidence
+- validation checklist
+- pass/fail criteria
+
+RECONCILIATION prompt should produce:
+- recon strategy
+- recon checks
+- recon SQL/Python code
+- report structure
+- business sign-off criteria
+
+DOCUMENTATION prompt should produce:
+- runbook
+- technical documentation
+- business summary
+- closure checklist
+
+Acceptance criteria:
+- Each stage can run independently.
+- Stage uses approved previous artifacts as context.
+- Stage output is stored as artifact version.
+- Stage waits for approval.
+- Next stage cannot run before approval.
+- UX stage can be skipped.
+- Existing BMAD workflow remains available as legacy/fallback.
+- Logs and audit entries are created.
+Prompt 4 — Frontend: Lifecycle + Artifact Review UI
+You are working on Helix Migration frontend.
+
+Goal:
+Build UI for stage-gated BMAD lifecycle and artifact review/edit/resubmit/approval.
+
+Important:
+Do not create generic pages.
+This must feel like an enterprise migration execution console.
+
+Inspect existing:
+- frontend/src/app/projects/[id]/
+- frontend/src/components/layout/ProjectShell.tsx
+- frontend/src/lib/projects/
+- existing artifacts pages
+- existing agent/workflow pages
+
+Create/update pages:
+
+1. Project Lifecycle Page
+Route:
+frontend/src/app/projects/[id]/lifecycle/page.tsx
+
+2. Stage Detail Page
+Route:
+frontend/src/app/projects/[id]/lifecycle/[stageKey]/page.tsx
+
+3. Artifact Review Page
+Route:
+frontend/src/app/projects/[id]/artifacts/[artifactId]/review/page.tsx
+
+4. Artifact Version Compare Page
+Route:
+frontend/src/app/projects/[id]/artifacts/[artifactId]/compare/page.tsx
+
+5. Project Overview update
+Show:
+- project alias
+- current stage
+- stage progress
+- next action
+- pending approvals
+- latest artifact
+
+Project lifecycle UI:
+- vertical stage timeline
+- stage cards
+- current stage highlighted
+- approved stages green
+- under review yellow
+- blocked red
+- optional stages gray
+- action button per stage
+
+Stage card shows:
+- stage name
+- assigned agent
+- status
+- artifact count
+- current artifact
+- reviewer
+- approved date
+- next required action
+
+Stage detail page:
+- stage objective
+- agent assigned
+- input context summary
+- generated artifacts
+- comments
+- version history
+- action buttons:
+  - Run Agent
+  - Regenerate
+  - Submit for Review
+  - Approve
+  - Request Changes
+  - Reject
+  - Skip Optional Stage
+  - Continue to Next Stage
+
+Artifact review UI:
+Left:
+- artifact outline / version list
+
+Center:
+- markdown artifact viewer/editor
+- edit mode
+- preview mode
+
+Right:
+- review panel
+- comments
+- approval status
+- stage status
+- artifact metadata
+- agent/model used
+
+Actions:
+- Edit Artifact
+- Save as New Version
+- Submit for Review
+- Approve
+- Request Changes
+- Reject
+- Compare Versions
+- Download
+
+Version compare:
+- side-by-side markdown diff
+- from version
+- to version
+- change summary
+
+Create components:
+
+frontend/src/components/lifecycle/
+- LifecycleTimeline.tsx
+- LifecycleStageCard.tsx
+- StageStatusBadge.tsx
+- StageActionPanel.tsx
+- StageContextSummary.tsx
+- StageApprovalPanel.tsx
+
+frontend/src/components/artifacts/
+- ArtifactViewer.tsx
+- ArtifactEditor.tsx
+- ArtifactReviewPanel.tsx
+- ArtifactVersionList.tsx
+- ArtifactCommentThread.tsx
+- ArtifactDiffViewer.tsx
+- ArtifactStatusBadge.tsx
+
+frontend/src/lib/lifecycle/api.ts
+frontend/src/lib/artifacts/review-api.ts
+
+Use API functions:
+- getProjectLifecycle
+- getCurrentStage
+- runStageAgent
+- submitStageReview
+- approveStage
+- requestStageChanges
+- rejectStage
+- skipStage
+- getArtifacts
+- getArtifact
+- getArtifactVersions
+- createArtifactVersion
+- approveArtifact
+- requestArtifactChanges
+- compareArtifactVersions
+
+Design:
+- premium light enterprise UI
+- clean cards
+- subtle colors
+- good empty/loading/error states
+- no dark-only UI
+- no generic Jira clone
+
+UX rule:
+Every stage should clearly show:
+"What was generated?"
+"What should user review?"
+"What action is needed next?"
+"What happens after approval?"
+
+Acceptance criteria:
+- Lifecycle page works with mock or API data.
+- Stage detail page works.
+- Artifact review page works.
+- Edit creates a new version, not overwrite.
+- Approve action is available only for under-review artifact.
+- Project overview shows lifecycle status.
+- UI supports stage-gated workflow.
+- Build passes.
+Prompt 5 — Auto Sprint Generation + Sprint Approval
+You are working on Helix Migration.
+
+Goal:
+Implement automatic sprint generation after project planning and architecture are approved.
+
+Important:
+Sprint generation should be based on approved artifacts only:
+- approved project context
+- approved business analysis
+- approved architecture
+- approved project plan
+
+Do not create random mock sprint data in backend.
+
+Backend service:
+backend/app/services/sprint_generation_service.py
+
+Functions:
+- generate_sprints_from_approved_artifacts(project_id, organization_id)
+- parse_sprint_plan_to_structured_tasks(agent_output)
+- create_sprints_and_tasks(project_id, organization_id, sprint_plan_json)
+- submit_sprint_plan_for_review(project_id)
+- approve_sprint_plan(project_id, user_id)
+- request_sprint_plan_changes(project_id, user_id, comment)
+- start_sprint_execution(project_id, sprint_id)
+
+Sprint generation agent:
+Use John + Winston context or a dedicated Sprint Planner Agent.
+
+Output should include:
+- sprint name
+- sprint goal
+- sprint order
+- start/end assumptions
+- tasks
+- task type
+- assigned agent/human role
+- dependencies
+- validation checkpoints
+- recon checkpoints
+- approval gates
+- deliverables
+
+Default sprint examples:
+1. Source Discovery
+2. Schema Mapping
+3. ETL / Code Conversion
+4. Validation
+5. Reconciliation
+6. Cutover / Sign-off
+
+APIs:
+POST /api/v1/projects/{project_id}/sprints/generate
+GET /api/v1/projects/{project_id}/sprints
+GET /api/v1/projects/{project_id}/sprints/{sprint_id}
+POST /api/v1/projects/{project_id}/sprints/submit-review
+POST /api/v1/projects/{project_id}/sprints/approve
+POST /api/v1/projects/{project_id}/sprints/request-changes
+POST /api/v1/projects/{project_id}/sprints/{sprint_id}/start
+PATCH /api/v1/projects/{project_id}/sprints/{sprint_id}/tasks/{task_id}
+
+Frontend:
+Update/create:
+
+frontend/src/app/projects/[id]/sprints/page.tsx
+frontend/src/app/projects/[id]/sprints/board/page.tsx
+frontend/src/app/projects/[id]/sprints/mapping/page.tsx
+frontend/src/app/projects/[id]/sprints/timeline/page.tsx
+frontend/src/app/projects/[id]/sprints/execution/page.tsx
+frontend/src/app/projects/[id]/sprints/risks/page.tsx
+frontend/src/app/projects/[id]/sprints/approval/page.tsx
+
+Sprint UI:
+- Sprint dashboard
+- Sprint board
+- Sprint mapping canvas
+- Timeline
+- Approval panel
+- Risk dashboard
+- Execution view
+
+Sprint board columns:
+- Backlog
+- Ready
+- In Progress
+- AI Processing
+- Human Review
+- Validation
+- Recon
+- Approved
+- Completed
+- Blocked
+
+Sprint mapping should show:
+Requirement → Architecture → Plan → Sprint → Task → Artifact → Validation → Recon → Sign-off
+
+Acceptance criteria:
+- Sprints are generated only after required planning stages are approved.
+- Sprint plan is reviewable/editable/approvable.
+- Sprint tasks are stored.
+- Sprint board shows real sprint/task data.
+- Sprint execution cannot start before sprint approval.
+Prompt 6 — Developer Workspace + Optional code-server Integration
+You are working on Helix Migration.
+
+Goal:
+Add enterprise Developer Workspace support for migration development, code review, generated code, and optional code-server integration.
+
+Important:
+Do not execute generated code inside main backend.
+Generated code must be treated as draft until reviewed and tested.
+code-server must run in an isolated container/workspace.
+
+Backend:
+
+Create:
+backend/app/services/workspace_service.py
+backend/app/api/workspaces.py
+
+Models if missing:
+developer_workspaces:
+- id
+- organization_id
+- project_id
+- sprint_id nullable
+- workspace_alias
+- status
+- workspace_type: code_server|external|artifact_only
+- container_name nullable
+- workspace_url nullable
+- storage_path
+- created_by_user_id
+- created_at
+- updated_at
+
+generated_code_artifacts:
+- id
+- organization_id
+- project_id
+- sprint_id nullable
+- stage_id nullable
+- artifact_id nullable
+- file_name
+- file_type
+- language
+- content
+- status: draft|reviewed|approved|rejected
+- generated_by_agent
+- reviewed_by_user_id nullable
+- created_at
+- updated_at
+
+Workspace APIs:
+POST /api/v1/projects/{project_id}/workspaces
+GET /api/v1/projects/{project_id}/workspaces
+GET /api/v1/workspaces/{workspace_id}
+POST /api/v1/workspaces/{workspace_id}/start
+POST /api/v1/workspaces/{workspace_id}/stop
+POST /api/v1/workspaces/{workspace_id}/sync-artifacts
+POST /api/v1/projects/{project_id}/generated-code
+GET /api/v1/projects/{project_id}/generated-code
+POST /api/v1/generated-code/{code_id}/review
+POST /api/v1/generated-code/{code_id}/approve
+
+code-server:
+- Add optional Docker Compose profile for code-server.
+- Container name example: helix-workspace-HXM-482913
+- Mount project artifact folder.
+- Do not mount host root.
+- Use per-project workspace folder.
+- Protect with token/password.
+- Document security limitations.
+
+Frontend:
+Update/create:
+
+frontend/src/app/projects/[id]/developer-workspace/page.tsx
+frontend/src/app/projects/[id]/developer-workspace/code/page.tsx
+frontend/src/app/projects/[id]/developer-workspace/review/page.tsx
+
+UI layout:
+Left:
+- artifact explorer
+- generated files
+- sprint tasks
+
+Center:
+- code viewer/editor
+- diff viewer
+- notebook preview
+
+Right:
+- Amelia AI review panel
+- suggestions
+- risks
+- actions
+
+Actions:
+- Generate Code
+- Review Code
+- Approve Code
+- Open Workspace
+- Sync Artifacts
+- Download Package
+
+Amelia Agent:
+Use approved architecture + plan + sprint task context.
+Generate:
+- migration code
+- SQL scripts
+- Python scripts
+- Databricks notebook markdown/source
+- Airflow DAG drafts if applicable
+- test cases
+- README/run instructions
+
+Acceptance criteria:
+- Developer workspace page exists.
+- Generated code stored as artifact.
+- Code can be reviewed/approved.
+- code-server integration is optional and isolated.
+- No code is executed in backend.
+Prompt 7 — Validation Evidence + QA Agent Review
+You are working on Helix Migration.
+
+Goal:
+Implement validation evidence upload and QA Agent review lifecycle.
+
+Important:
+Helix should generate validation test cases and expected evidence, but developer/user runs tests in their own environment and uploads results.
+
+Backend:
+
+Create/update:
+backend/app/services/validation_evidence_service.py
+backend/app/api/validation_evidence.py
+
+Validation evidence supports:
+- file upload
+- markdown summary
+- JSON result
+- test result screenshots/files
+- developer notes
+
+APIs:
+POST /api/v1/projects/{project_id}/validation/evidence
+GET /api/v1/projects/{project_id}/validation/evidence
+GET /api/v1/validation/evidence/{evidence_id}
+POST /api/v1/validation/evidence/{evidence_id}/qa-review
+POST /api/v1/validation/evidence/{evidence_id}/accept
+POST /api/v1/validation/evidence/{evidence_id}/reject
+
+QA Agent should review:
+- test coverage
+- failed tests
+- missing evidence
+- data quality risks
+- deployment readiness
+- validation completeness
+
+QA output artifact:
+- validation-review.md
+- qa-summary.md
+- test-gap-analysis.md
+
+Validation statuses:
+- not_started
+- evidence_required
+- evidence_uploaded
+- under_qa_review
+- accepted
+- rejected
+- changes_required
+
+Frontend:
+Update/create:
+
+frontend/src/app/projects/[id]/validation/page.tsx
+frontend/src/app/projects/[id]/validation/evidence/page.tsx
+frontend/src/app/projects/[id]/validation/review/page.tsx
+
+UI:
+- validation checklist
+- upload evidence
+- evidence table
+- QA Agent review panel
+- pass/fail summary
+- comments
+- approve/reject evidence
+
+Acceptance criteria:
+- User can upload validation evidence.
+- QA Agent can review evidence.
+- QA review creates artifact.
+- Validation stage can be approved only after evidence is accepted.
+- No row-level production data is stored.
+Prompt 8 — Recon Agent + Recon Code + Business Report
+You are working on Helix Migration.
+
+Goal:
+Implement Recon Agent lifecycle for business-ready data reconciliation.
+
+Important:
+Recon is one of the most important enterprise features.
+Recon output should be business-understandable and technically useful.
+
+Recon types:
+- schema recon
+- row count recon
+- checksum recon
+- null count recon
+- duplicate recon
+- business-rule recon
+- source-to-target aggregated recon
+- file-to-table recon
+- table-to-table recon
+
+Backend:
+
+Create/update:
+backend/app/services/recon_agent_service.py
+backend/app/services/recon_report_service.py
+backend/app/api/recon_reports.py
+
+APIs:
+POST /api/v1/projects/{project_id}/recon/generate-plan
+POST /api/v1/projects/{project_id}/recon/generate-code
+POST /api/v1/projects/{project_id}/recon/generate-report
+GET /api/v1/projects/{project_id}/recon/reports
+GET /api/v1/recon/reports/{report_id}
+POST /api/v1/recon/reports/{report_id}/approve
+POST /api/v1/recon/reports/{report_id}/request-changes
+GET /api/v1/recon/reports/{report_id}/download
+
+Recon Agent input:
+- approved project context
+- approved architecture
+- approved validation evidence
+- source/target connector metadata
+- business rules
+- sprint outputs
+- uploaded developer evidence
+
+Recon Agent output:
+1. recon-plan.md
+2. recon-code package
+3. recon-report.md
+4. recon-report.pdf
+5. business-summary.md
+
+Recon code generation:
+- generate SQL/Python templates
+- do not execute against customer data by default
+- clearly mark as draft code
+- developer must review before running
+
+Recon report should include:
+- executive summary
+- source/target scope
+- checks performed
+- row count summary
+- schema differences
+- mismatch summary
+- business rule result
+- accepted exceptions
+- risk summary
+- sign-off recommendation
+
+Frontend:
+Update/create:
+
+frontend/src/app/projects/[id]/recon/page.tsx
+frontend/src/app/projects/[id]/recon/reports/page.tsx
+frontend/src/app/projects/[id]/recon/reports/[reportId]/page.tsx
+
+UI:
+- recon dashboard
+- generate recon plan
+- generate recon code
+- upload recon result
+- generate business report
+- approve/request changes
+- download report
+- send for sign-off
+
+Acceptance criteria:
+- Recon plan can be generated.
+- Recon code can be generated as draft artifact.
+- Recon report can be generated.
+- Business report can be approved.
+- No production row-level source/target data stored.
+Prompt 9 — Business Sign-off Email Workflow
+You are working on Helix Migration.
+
+Goal:
+Implement business sign-off workflow after recon report approval.
+
+Important:
+Do not auto-send email without user approval.
+First create draft email.
+User reviews and sends.
+
+Backend:
+
+Create/update:
+backend/app/services/signoff_service.py
+backend/app/api/signoff.py
+
+APIs:
+POST /api/v1/projects/{project_id}/signoff/draft
+GET /api/v1/projects/{project_id}/signoff
+GET /api/v1/signoff/{signoff_id}
+PATCH /api/v1/signoff/{signoff_id}
+POST /api/v1/signoff/{signoff_id}/send
+POST /api/v1/signoff/{signoff_id}/mark-approved
+POST /api/v1/signoff/{signoff_id}/mark-rejected
+
+Sign-off draft should include:
+- recipient email
+- subject
+- body
+- attached recon report
+- attached validation summary
+- attached closure report if available
+
+Subject example:
+Migration reconciliation sign-off required — HXM-482913
+
+Email body should include:
+- project alias
+- project name
+- source system
+- target system
+- validation summary
+- recon summary
+- approval request
+- next steps
+
+Frontend:
+Create/update:
+
+frontend/src/app/projects/[id]/signoff/page.tsx
+
+UI:
+- sign-off status
+- draft email editor
+- recipients
+- attachments
+- preview
+- send button
+- mark approved/rejected
+- audit trail
+
+Security:
+- Use existing email settings service if present.
+- Do not expose SMTP secrets.
+- Log sign-off events.
+- Store sent status.
+
+Acceptance criteria:
+- Sign-off draft is generated.
+- User can edit draft.
+- User can send email.
+- Recon report attachment is linked.
+- Sign-off status is stored.
+Prompt 10 — End-to-End UI Navigation + Project Console
+You are working on Helix Migration frontend.
+
+Goal:
+Update the Project Console so the new lifecycle feels complete and easy to use.
+
+Update ProjectShell tabs:
+
+Overview
+Requirements
+Lifecycle
+Artifacts
+Agents
+Sprints
+Developer Workspace
+Validation
+Recon
+Sign-off
+Reports
+Timeline
+Approvals
+Audit
+
+Project Overview should show:
+- project alias
+- lifecycle status
+- current stage
+- pending user action
+- active sprint
+- validation status
+- recon status
+- sign-off status
+- artifact count
+- approval count
+- risks
+
+Create "Next Best Action" card:
+Examples:
+- Review Project Context
+- Approve Business Analysis
+- Run Architecture Agent
+- Generate Sprint Plan
+- Start Sprint 1
+- Upload Validation Evidence
+- Generate Recon Report
+- Send Sign-off Email
+
+Create unified project timeline:
+- requirement created
+- stage started
+- artifact generated
+- review requested
+- approved
+- sprint generated
+- validation uploaded
+- recon report approved
+- sign-off sent
+
+Create reusable components:
+- ProjectAliasBadge
+- NextBestActionCard
+- LifecycleProgressBar
+- ApprovalQueueCard
+- ArtifactSummaryCard
+- MigrationTimeline
+- RiskSummaryCard
+- StageMiniStatus
+
+Acceptance criteria:
+- Navigation includes new lifecycle pages.
+- Project overview clearly shows what to do next.
+- User can follow migration execution without confusion.
+- Existing pages still work.
+Prompt 11 — Testing, Docs, and Final Hardening
+You are working on Helix Migration.
+
+Goal:
+Add tests, documentation, and hardening for stage-gated BMAD lifecycle.
+
+Backend tests:
+- project alias generation is unique
+- project lifecycle initializes correctly
+- cannot start next stage before previous approval
+- optional UX stage can be skipped
+- artifact v1 created by agent
+- user edit creates v2
+- approval locks correct version
+- resubmit creates new version
+- transition logs are written
+- sprint generation requires approved planning artifacts
+- validation evidence upload works
+- recon report creation works
+- sign-off draft creation works
+- organization isolation enforced
+
+Frontend tests if framework exists:
+- lifecycle timeline renders
+- artifact review page renders
+- stage actions render based on status
+- sprint board renders
+- validation evidence page renders
+- recon report page renders
+- sign-off draft page renders
+
+Docs:
+Update/create:
+- docs/STAGE_GATED_BMAD_WORKFLOW.md
+- docs/ARTIFACT_REVIEW_LIFECYCLE.md
+- docs/SPRINT_EXECUTION_GUIDE.md
+- docs/DEVELOPER_WORKSPACE_GUIDE.md
+- docs/VALIDATION_EVIDENCE_GUIDE.md
+- docs/RECON_REPORT_GUIDE.md
+- docs/SIGNOFF_WORKFLOW.md
+- README.md short section
+
+Documentation should explain:
+- lifecycle stages
+- agent responsibilities
+- artifact versioning
+- approval process
+- sprint generation
+- developer workspace
+- validation evidence
+- recon reports
+- sign-off email
+- security rules
+
+Security review:
+- no code execution in backend
+- secrets not logged
+- artifacts project-scoped
+- approval audited
+- sign-off audited
+- no row-level production data stored
+- generated code marked draft until approved
+
+Build/test commands:
+- backend tests
+- frontend lint/build
+- docker compose build
+- alembic upgrade head
+
+Acceptance criteria:
+- Tests added.
+- Docs added.
+- Build passes.
+- No existing feature broken.
+- New lifecycle documented clearly.
+Final Execution Order
+

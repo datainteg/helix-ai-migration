@@ -25,6 +25,10 @@ class ProjectResponse(BaseModel):
     organization_id: str
     name: str
     slug: Optional[str] = None
+    alias: Optional[str] = None
+    current_stage: Optional[str] = None
+    lifecycle_status: Optional[str] = None
+    stage_progress_percent: Optional[int] = None
     description: Optional[str] = None
     status: str
     risk_level: str

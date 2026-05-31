@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, Text, Integer, Boolean
+from sqlalchemy import Column, String, ForeignKey, Text, Integer, Boolean, DateTime
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -27,6 +27,21 @@ class Project(BaseModel):
     # by a project manager before the agents run. Toggleable per project.
     require_run_approval = Column(Boolean, default=True, nullable=False, server_default="true")
     owner_id = Column(String(36), nullable=False)
+
+    # ── Stage-gated lifecycle (enterprise migration execution) ──────────
+    # Public 6-digit alias (HXM-482913) for headings / reports / emails. The
+    # `slug` above stays the URL identifier; alias is the human/business id.
+    # Unique to match the migration's uq_projects_alias index (generate_unique_alias
+    # relies on DB-level uniqueness); keep the ORM aware of it.
+    alias = Column(String(20), nullable=True, unique=True, index=True)
+    current_stage = Column(String(40), nullable=True)            # active stage_key
+    lifecycle_status = Column(String(20), default="not_started", nullable=False, server_default="not_started")
+    stage_progress_percent = Column(Integer, default=0, nullable=False, server_default="0")
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    # Per-project rollout flag: opt a project into the new stage-gated lifecycle.
+    # Legacy projects stay on the old linear BMAD path until flipped.
+    use_stage_gated_lifecycle = Column(Boolean, default=False, nullable=False, server_default="false")
 
     organization = relationship("Organization", back_populates="projects")
     subprojects = relationship("SubProject", back_populates="project", cascade="all, delete-orphan")

@@ -42,6 +42,16 @@ class Sprint(BaseModel):
     # Milestones live as JSON inline (small, ordered list).
     milestones      = Column(JSON, nullable=True)
 
+    # ── Stage-gated lifecycle additions ─────────────────────────────────
+    sprint_alias                = Column(String(40), nullable=True)   # e.g. HXM-482913-S1
+    progress_percent            = Column(Integer, default=0, nullable=False, server_default="0")
+    validation_progress_percent = Column(Integer, default=0, nullable=False, server_default="0")
+    recon_progress_percent      = Column(Integer, default=0, nullable=False, server_default="0")
+    risk_level                  = Column(String(20), nullable=True)
+    created_from_artifact_id    = Column(String(36), nullable=True)   # sprint-plan artifact it was generated from
+    approved_by_user_id         = Column(String(36), nullable=True)
+    approved_at                 = Column(DateTime(timezone=True), nullable=True)
+
     tasks      = relationship("SprintTask",     back_populates="sprint", cascade="all, delete-orphan")
     risks      = relationship("SprintRisk",     back_populates="sprint", cascade="all, delete-orphan")
     approvals  = relationship("SprintApproval", back_populates="sprint", cascade="all, delete-orphan")

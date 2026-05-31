@@ -12,6 +12,19 @@ def _slugify(name: str) -> str:
     return s[:120] or "project"
 
 
+def generate_unique_alias(db: Session) -> str:
+    """Public 6-digit project alias: HXM-NNNNNN, globally unique. Used in
+    headings, reports, emails and artifacts (the slug stays the URL id)."""
+    import random
+    for _ in range(50):
+        alias = f"HXM-{random.randint(0, 999999):06d}"
+        if not db.query(Project.id).filter(Project.alias == alias).first():
+            return alias
+    # Astronomically unlikely after 50 tries; return one and let the unique
+    # index surface a conflict rather than loop forever.
+    return f"HXM-{random.randint(0, 999999):06d}"
+
+
 def _unique_slug(db: Session, org_id: str, name: str, exclude_id: str | None = None) -> str:
     """A slug unique within the org (appends -2, -3, … on collision)."""
     base = _slugify(name)
@@ -70,6 +83,10 @@ def _project_to_response(project: Project, owner_names: dict[str, str] | None = 
         owner_id=project.owner_id,
         owner_name=(owner_names or {}).get(project.owner_id),
         slug=getattr(project, "slug", None),
+        alias=getattr(project, "alias", None),
+        current_stage=getattr(project, "current_stage", None),
+        lifecycle_status=getattr(project, "lifecycle_status", None),
+        stage_progress_percent=getattr(project, "stage_progress_percent", None),
         on_hold=bool(getattr(project, "on_hold", False)),
         require_run_approval=bool(getattr(project, "require_run_approval", True)),
         source_system=src,
@@ -84,6 +101,7 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
     project = Project(
         organization_id=org_id, owner_id=resolved_owner, name=data.name,
         slug=_unique_slug(db, org_id, data.name),
+        alias=generate_unique_alias(db),
         description=data.description, risk_level=data.risk_level,
         migration_type=_normalize_mt(data.migration_type), environment=data.environment,
         status=data.status or "draft",

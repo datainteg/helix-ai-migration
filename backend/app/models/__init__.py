@@ -23,3 +23,12 @@ from app.models.schema_snapshot import SourceSchemaSnapshot  # noqa: F401
 from app.models.knowledge import KnowledgeDoc  # noqa: F401
 from app.models.encryption import OrgDataEncryptionKey  # noqa: F401
 from app.models.webhook import WebhookEndpoint, WebhookDelivery  # noqa: F401
+# ── Stage-gated migration lifecycle ─────────────────────────────────
+from app.models.lifecycle import MigrationStage, StageTransitionLog  # noqa: F401
+from app.models.migration_artifact import (  # noqa: F401
+    MigrationArtifact, MigrationArtifactVersion,
+    MigrationArtifactReview, MigrationArtifactComment,
+)
+from app.models.evidence import ValidationEvidence, ReconReport  # noqa: F401
+from app.models.signoff import SignoffRequest  # noqa: F401
+from app.models.workspace import DeveloperWorkspace, GeneratedCodeArtifact  # noqa: F401
