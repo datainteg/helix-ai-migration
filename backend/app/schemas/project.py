@@ -29,6 +29,10 @@ class ProjectResponse(BaseModel):
     risk_level: str
     migration_type: Optional[str] = None
     owner_id: str
+    # Resolved owner display name (from the User row), for the UI.
+    owner_name: Optional[str] = None
+    # Operational hold — when True, new workflow starts are refused.
+    on_hold: bool = False
     # Derived from the project's source/target connection rows (first of each).
     source_system: Optional[str] = None
     target_system: Optional[str] = None

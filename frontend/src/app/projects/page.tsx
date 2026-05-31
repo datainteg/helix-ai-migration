@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   Download,
@@ -90,7 +91,9 @@ export default function ProjectsPage() {
     setLoading(true);
     // Paginated fetch + per-project summary merge (validation %, recon %, …).
     Promise.all([
-      fetch(`${API_BASE}/api/v1/projects?include_archived=true&limit=${PAGE_SIZE}&offset=${offset}`, { credentials: "include" })
+      // Only managers (project:write) fetch + see archived projects; regular
+      // members just see active ones.
+      fetch(`${API_BASE}/api/v1/projects?include_archived=${canWrite}&limit=${PAGE_SIZE}&offset=${offset}`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : { items: [], total: 0 })),
       fetch(`${API_BASE}/api/v1/projects/summary`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : {}))
@@ -108,7 +111,7 @@ export default function ProjectsPage() {
       })
       .catch(() => { setProjects([]); setTotal(0); })
       .finally(() => setLoading(false));
-  }, [token, offset, reloadKey]);
+  }, [token, offset, reloadKey, canWrite]);
 
   const counts = {
     all: projects.filter((p) => p.status !== "archived").length,
@@ -187,7 +190,8 @@ export default function ProjectsPage() {
                 { id: "completed", label: "Completed", count: counts.completed },
                 { id: "failed",    label: "Failed",    count: counts.failed },
                 { id: "draft",     label: "Draft",     count: counts.draft },
-                { id: "archived",  label: "Archived",  count: counts.archived },
+                // Archived is a manager concern — only show to project:write holders.
+                ...(canWrite ? [{ id: "archived", label: "Archived", count: counts.archived }] : []),
               ]}
             />
           </div>
@@ -388,38 +392,82 @@ function RowActions({ project, canWrite, isAdmin, onArchive, onRestore, onSoftDe
   onForceDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  // Count visible items to estimate menu height for flip logic.
+  const itemCount =
+    (canWrite && (project.status === "archived" || project.status === "deleted") ? 1 : 0) +
+    (canWrite && project.status !== "archived" && project.status !== "deleted" ? 1 : 0) +
+    (canWrite && project.status !== "deleted" ? 1 : 0) +
+    (isAdmin ? 1 : 0);
+
+  // Render the menu in a portal at the button's viewport position so it escapes
+  // the table's overflow-x-auto clipping. Flip ABOVE the button when there's
+  // not enough room below (e.g. last rows near the viewport bottom).
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const menuH = itemCount * 36 + 8;           // ~36px/item + padding
+      const spaceBelow = window.innerHeight - r.bottom;
+      const flipUp = spaceBelow < menuH + 12 && r.top > menuH + 12;
+      setCoords({
+        top: flipUp ? r.top - menuH - 4 : r.bottom + 4,
+        right: window.innerWidth - r.right,
+      });
+    }
+    setOpen((v) => !v);
+  };
+
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Close on any outside click, scroll, or resize (position would go stale).
+    window.addEventListener("mousedown", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
+
+  const item = "w-full text-left px-3 py-2 hover:bg-app-2 transition-colors";
+
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-label="Project actions" onClick={() => setOpen((v) => !v)}
+    <>
+      <button ref={btnRef} type="button" aria-label="Project actions" aria-haspopup="menu" aria-expanded={open}
+        onMouseDown={(e) => e.stopPropagation()} onClick={toggle}
         className="inline-flex items-center justify-center h-8 w-8 rounded-md text-ink-4 hover:text-ink-2 hover:bg-app-2 focus-ring">
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hx bg-surface shadow-lg py-1 text-[12.5px]">
+      {open && coords && createPortal(
+        <div
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{ position: "fixed", top: coords.top, right: coords.right }}
+          className="z-[200] w-44 rounded-lg border border-hx bg-surface shadow-xl py-1 text-[12.5px]"
+        >
           {canWrite && (project.status === "archived" || project.status === "deleted") && (
-            <button type="button" onClick={() => { setOpen(false); onRestore(); }} className="w-full text-left px-3 py-1.5 text-[var(--con-ok)] font-medium hover:bg-app-2">Restore</button>
+            <button type="button" onClick={() => { setOpen(false); onRestore(); }} className={`${item} text-[var(--con-ok)] font-medium`}>Restore</button>
           )}
           {canWrite && project.status !== "archived" && project.status !== "deleted" && (
-            <button type="button" onClick={() => { setOpen(false); onArchive(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Archive</button>
+            <button type="button" onClick={() => { setOpen(false); onArchive(); }} className={`${item} text-ink-2`}>Archive</button>
           )}
           {canWrite && project.status !== "deleted" && (
-            <button type="button" onClick={() => { setOpen(false); onSoftDelete(); }} className="w-full text-left px-3 py-1.5 text-ink-2 hover:bg-app-2">Delete (soft)</button>
+            <button type="button" onClick={() => { setOpen(false); onSoftDelete(); }} className={`${item} text-ink-2`}>Delete (soft)</button>
           )}
           {isAdmin && (
-            <button type="button" onClick={() => { setOpen(false); onForceDelete(); }} className="w-full text-left px-3 py-1.5 text-[var(--con-err)] hover:bg-app-2 border-t border-hx mt-0.5 pt-2">
-              Force delete
-            </button>
+            <button type="button" onClick={() => { setOpen(false); onForceDelete(); }} className={`${item} text-[var(--con-err)] border-t border-hx mt-0.5`}>Force delete</button>
           )}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 

@@ -51,3 +51,35 @@ export function deleteProject(id: string) {
 export function forceDeleteProject(id: string) {
   return req<void>(`/api/v1/projects/${id}/force`, { method: "DELETE" });
 }
+
+/** Put a project on hold or set it live; a comment (reason) is required. */
+export function setProjectHold(id: string, onHold: boolean, comment: string) {
+  return req(`/api/v1/projects/${id}/hold`, { method: "POST", body: JSON.stringify({ on_hold: onHold, comment }) });
+}
+
+export interface ProjectComment {
+  id: string;
+  author_id: string | null;
+  author_name: string | null;
+  kind: "comment" | "hold" | "live";
+  body: string;
+  created_at: string | null;
+}
+
+export function fetchProjectComments(id: string): Promise<ProjectComment[]> {
+  return req<ProjectComment[]>(`/api/v1/projects/${id}/comments`);
+}
+
+export function addProjectComment(id: string, body: string): Promise<ProjectComment> {
+  return req<ProjectComment>(`/api/v1/projects/${id}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+}
+
+export interface ChatTurn { role: "user" | "assistant"; content: string; }
+
+/** Ask the project-aware orchestrator agent about THIS project. */
+export function askProject(projectId: string, message: string, history: ChatTurn[]): Promise<{ answer: string }> {
+  return req<{ answer: string }>(`/api/v1/assistant/ask-project`, {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, message, history }),
+  });
+}

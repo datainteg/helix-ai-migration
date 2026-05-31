@@ -58,6 +58,77 @@ export function getWorkflowDetail(token: string | null, workflowId: string): Pro
   return get<WorkflowDetail>(`/api/v1/agent-workflows/${workflowId}`, token);
 }
 
+export interface ProjectRequirement {
+  id: string;
+  source_text: string;
+  status: string;
+  version: string;
+  created_at: string | null;
+}
+
+export function listProjectRequirements(projectId: string): Promise<ProjectRequirement[]> {
+  return get<ProjectRequirement[]>(`/api/v1/projects/${projectId}/requirements`, null);
+}
+
+/** Create a migration requirement (the rich prompt the pipeline plans from). */
+export async function createProjectRequirement(projectId: string, sourceText: string): Promise<ProjectRequirement> {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/requirements`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_text: sourceText }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Create failed (${res.status})`);
+  }
+  return res.json() as Promise<ProjectRequirement>;
+}
+
+/** Compile a structured requirement spec into the rich prompt text the agents
+ * plan from. Multi-schema/multi-table migrations need this depth. */
+export interface RequirementSpec {
+  goal: string;
+  scope: string;          // schemas/tables include/exclude
+  typeRules: string;      // type-mapping preferences
+  constraints: string;    // keys/indexes/constraints handling
+  data: string;           // data vs schema-only, volume, PII
+  transforms: string;     // renames/splits/denorm
+  objects: string;        // views/procs/sequences/triggers
+  conventions: string;    // target naming/partitioning
+}
+
+export function compileRequirement(s: RequirementSpec): string {
+  const sec = (h: string, v: string) => (v.trim() ? `## ${h}\n${v.trim()}\n` : "");
+  return [
+    s.goal.trim() ? `# Migration goal\n${s.goal.trim()}\n` : "",
+    sec("Scope (schemas / tables to include or exclude)", s.scope),
+    sec("Type-mapping rules", s.typeRules),
+    sec("Constraints, keys & indexes", s.constraints),
+    sec("Data handling (data vs schema-only, volume, PII)", s.data),
+    sec("Transformations (rename / split / denormalize)", s.transforms),
+    sec("Special objects (views / procedures / sequences / triggers)", s.objects),
+    sec("Target conventions (naming / partitioning / clustering)", s.conventions),
+  ].filter(Boolean).join("\n").trim();
+}
+
+export interface StartWorkflowResult { workflow_id: string; run_id: string; status: string; mode: string; }
+
+/** Start a BMAD workflow for a project requirement. Throws on 409 (project on
+ * hold) / 404 (no requirement) with the backend detail message. */
+export async function startProjectWorkflow(projectId: string, requirementId: string): Promise<StartWorkflowResult> {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/agent-workflows`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement_id: requirementId }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((d && d.detail) || `Start failed (${res.status})`);
+  }
+  return res.json() as Promise<StartWorkflowResult>;
+}
+
 export interface WorkflowArtifactContent {
   path: string;
   content: string;

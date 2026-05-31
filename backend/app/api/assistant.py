@@ -107,3 +107,28 @@ def ask_helix(
     else:
         answer = str(result)
     return AskResponse(answer=answer.strip() or "I didn't get a response from the model — please try again.")
+
+
+class AskProjectRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=36)
+    message: str = Field(..., min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list)
+
+
+@router.post("/assistant/ask-project", response_model=AskResponse)
+def ask_helix_project(
+    data: AskProjectRequest,
+    org_id: str = Depends(get_current_organization_id),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Project-aware orchestrator agent — answers questions about ONE project,
+    grounded in its real status, workflow/agent runs, artifacts, and recon/
+    validation. Read-only. Backed by a LangGraph graph (project_orchestrator)."""
+    from app.services.project_service import ensure_project_access
+    ensure_project_access(db, org_id, data.project_id)  # 403/404 if not in org
+
+    from agents.runtime.project_orchestrator import ask_project
+    history = [{"role": t.role, "content": t.content} for t in (data.history or [])]
+    answer = ask_project(data.project_id, org_id, data.message.strip(), history)
+    return AskResponse(answer=answer)

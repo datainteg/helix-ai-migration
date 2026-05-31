@@ -23,9 +23,18 @@ from app.services.secret_service import encrypt_value, decrypt_value
 # ── Projects ────────────────────────────────────────────────────────
 
 
-def _project_to_response(project: Project) -> ProjectResponse:
+def _owner_name_map(db: Session, owner_ids: set[str]) -> dict[str, str]:
+    """Resolve a set of owner ids to display names in one query."""
+    from app.models.identity import User
+    if not owner_ids:
+        return {}
+    rows = db.query(User.id, User.name, User.email).filter(User.id.in_(owner_ids)).all()
+    return {uid: (name or email or uid) for uid, name, email in rows}
+
+
+def _project_to_response(project: Project, owner_names: dict[str, str] | None = None) -> ProjectResponse:
     """Serialise a Project, deriving source/target system from its first
-    source/target connection row (the connector_type)."""
+    source/target connection row, and resolving the owner name when provided."""
     src = project.source_connections[0].connector_type if project.source_connections else None
     tgt = project.target_connections[0].connector_type if project.target_connections else None
     return ProjectResponse(
@@ -37,6 +46,8 @@ def _project_to_response(project: Project) -> ProjectResponse:
         risk_level=project.risk_level,
         migration_type=project.migration_type,
         owner_id=project.owner_id,
+        owner_name=(owner_names or {}).get(project.owner_id),
+        on_hold=bool(getattr(project, "on_hold", False)),
         source_system=src,
         target_system=tgt,
         environment=getattr(project, "environment", None),
@@ -70,7 +81,7 @@ def create_project(db: Session, org_id: str, owner_id: str, data: ProjectCreate)
         ))
     db.commit()
     db.refresh(project)
-    return _project_to_response(project)
+    return _project_to_response(project, _owner_name_map(db, {project.owner_id}))
 
 
 def force_delete_project(db: Session, project_id: str) -> None:
@@ -102,12 +113,14 @@ def list_projects(db: Session, org_id: str, include_archived: bool = False) -> l
     q = db.query(Project).filter(Project.organization_id == org_id, Project.status != "deleted")
     if not include_archived:
         q = q.filter(Project.status != "archived")
-    return [_project_to_response(p) for p in q.all()]
+    rows = q.all()
+    names = _owner_name_map(db, {p.owner_id for p in rows})
+    return [_project_to_response(p, names) for p in rows]
 
 
 def get_project(db: Session, org_id: str, project_id: str) -> ProjectResponse:
     project = _get_project(db, org_id, project_id)
-    return _project_to_response(project)
+    return _project_to_response(project, _owner_name_map(db, {project.owner_id}))
 
 
 def _get_project(db: Session, org_id: str, project_id: str) -> Project:

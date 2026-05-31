@@ -16,6 +16,9 @@ class Project(BaseModel):
     # Target deployment environment label (dev/staging/prod/…). Collected at
     # project creation; nullable for rows created before this column.
     environment = Column(String(50), nullable=True)
+    # Operational hold — when True, starting new BMAD/agent workflows is refused.
+    # Orthogonal to `status` (a live project can be put on hold and resumed).
+    on_hold = Column(Boolean, default=False, nullable=False, server_default="false")
     owner_id = Column(String(36), nullable=False)
 
     organization = relationship("Organization", back_populates="projects")
@@ -34,6 +37,20 @@ class SubProject(BaseModel):
     status = Column(String(50), default="draft", nullable=False)
 
     project = relationship("Project", back_populates="subprojects")
+
+
+class ProjectComment(BaseModel):
+    """A note on a project's activity timeline. `kind` distinguishes free-text
+    user comments from system-recorded hold/live events (which carry the
+    toggle reason in `body`)."""
+
+    __tablename__ = "project_comments"
+
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id = Column(String(36), nullable=True)         # null = system
+    author_name = Column(String(255), nullable=True)      # denormalised for display
+    kind = Column(String(20), default="comment", nullable=False)  # comment | hold | live
+    body = Column(Text, nullable=False)
 
 
 class MigrationRequirement(BaseModel):

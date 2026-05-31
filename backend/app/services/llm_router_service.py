@@ -29,6 +29,8 @@ AGENT_TYPES = [
     "bmad-agent-architect",      # Winston — System Architect
     "bmad-agent-dev",            # Amelia  — Senior Software Engineer
     "assistant",                 # Helix Help agent (the "Ask Helix" popup)
+    "assistant-project",         # Project orchestrator ("Ask Helix about this project")
+    "assistant-project-router",  # Cheap helper that picks which artifacts to read
 ]
 
 

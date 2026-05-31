@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -173,6 +173,87 @@ def api_project_members(user_id: str = Depends(require_permission("project:write
     return [{"user_id": uid, "name": name, "email": email} for uid, name, email in rows]
 
 
+@router.get("/projects/{project_id}/overview")
+def api_project_overview(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Rich, REAL detail for the project page: counts, per-schema progress (from
+    introspected metadata), latest workflow run + live step status, and
+    validation/recon rollups. Everything is grounded in actual rows — sections
+    with no data return empty, never fabricated."""
+    from sqlalchemy import func
+    from app.models.project import Project, SchemaMetadata, TableMetadata
+    from app.models.workflow import WorkflowRun, WorkflowStep
+    from app.models.validation import ValidationResult, ValidationRun, ReconResult, ReconRun
+    from app.services.project_service import ensure_project_access
+
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id, Project.organization_id == org_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # ── per-schema progress from introspected metadata ──
+    schemas = db.query(SchemaMetadata).filter(SchemaMetadata.project_id == project_id).all()
+    schema_rows = []
+    total_tables = 0
+    for s in schemas:
+        tbls = db.query(TableMetadata).filter(TableMetadata.schema_id == s.id).all()
+        rows = sum((t.row_count or 0) for t in tbls)
+        total_tables += len(tbls)
+        schema_rows.append({
+            "schema": s.name,
+            "schema_type": getattr(s, "schema_type", "source"),
+            "tables": len(tbls),
+            "rows": rows,
+        })
+
+    # ── latest workflow run + live steps ──
+    run = (
+        db.query(WorkflowRun).filter(WorkflowRun.project_id == project_id)
+        .order_by(WorkflowRun.created_at.desc()).first()
+    )
+    latest_run = None
+    if run:
+        steps = (
+            db.query(WorkflowStep).filter(WorkflowStep.workflow_run_id == run.id)
+            .order_by(WorkflowStep.step_order).all()
+        )
+        done = sum(1 for s in steps if (s.status or "").lower() in ("completed", "approved", "done", "succeeded"))
+        latest_run = {
+            "workflow_id": run.workflow_id, "status": run.status, "kind": run.kind or "bmad",
+            "mode": run.mode, "created_at": str(run.created_at) if run.created_at else None,
+            "steps_done": done, "steps_total": len(steps),
+            "steps": [{"agent": s.agent_name, "order": s.step_order, "status": s.status,
+                       "error": s.error_message, "artifact_path": _step_artifact(s)} for s in steps],
+        }
+
+    # ── validation / recon rollups ──
+    def _pct(model, run_model, on, ok):
+        total = db.query(func.count(model.id)).join(run_model, on).filter(run_model.project_id == project_id).scalar() or 0
+        good = db.query(func.count(model.id)).join(run_model, on).filter(run_model.project_id == project_id, ok).scalar() or 0
+        return (round(good / total * 100, 1) if total else None), total
+    val_pct, val_total = _pct(ValidationResult, ValidationRun, ValidationResult.run_id == ValidationRun.id, ValidationResult.status == "passed")
+    recon_pct, recon_total = _pct(ReconResult, ReconRun, ReconResult.run_id == ReconRun.id, ReconResult.mismatch_count == 0)
+
+    return {
+        "schema_count": len(schemas),
+        "table_count": total_tables,
+        "schemas": schema_rows,
+        "latest_run": latest_run,
+        "validation": {"pct": val_pct, "total": val_total},
+        "recon": {"pct": recon_pct, "total": recon_total},
+    }
+
+
+def _step_artifact(step) -> str | None:
+    payload = step.parsed_output_json if isinstance(step.parsed_output_json, dict) else None
+    if not payload:
+        return None
+    paths = payload.get("artifact_paths") or payload.get("artifact_path")
+    if isinstance(paths, list) and paths:
+        return paths[-1]
+    return paths if isinstance(paths, str) else None
+
+
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def api_get_project(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return get_project(db, _org_id(user_id, db), project_id)
@@ -214,7 +295,7 @@ class ProjectUpdate(BaseModel):
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
 def api_update_project(project_id: str, data: ProjectUpdate, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
     """Update a project's owner and/or status (project:write)."""
-    from app.services.project_service import ensure_project_access, _project_to_response
+    from app.services.project_service import ensure_project_access, _project_to_response, _owner_name_map
     from app.models.project import Project
     from app.models.identity import OrganizationMember
     org_id = _org_id(user_id, db)
@@ -237,7 +318,87 @@ def api_update_project(project_id: str, data: ProjectUpdate, request: Request, u
     db.commit()
     db.refresh(p)
     write_audit(db, org_id=org_id, actor_id=user_id, action="project_updated", entity_type="project", entity_id=project_id, meta=data.model_dump(exclude_none=True), request=request)
-    return _project_to_response(p)
+    return _project_to_response(p, _owner_name_map(db, {p.owner_id}))
+
+
+class HoldRequest(BaseModel):
+    on_hold: bool
+    comment: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/projects/{project_id}/hold", response_model=ProjectResponse)
+def api_hold_project(project_id: str, data: HoldRequest, request: Request, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
+    """Put a project on hold or set it live. A comment (reason) is required and
+    recorded on the project's activity timeline. On hold blocks new workflows."""
+    from app.services.project_service import ensure_project_access, _project_to_response, _owner_name_map
+    from app.models.project import Project, ProjectComment
+    from app.services.auth_service import get_current_user
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    p = db.query(Project).filter(Project.id == project_id).first()
+    p.on_hold = data.on_hold
+    actor = get_current_user(db, user_id)
+    db.add(ProjectComment(
+        project_id=project_id, author_id=user_id,
+        author_name=getattr(actor, "name", None) or getattr(actor, "email", None),
+        kind="hold" if data.on_hold else "live", body=data.comment.strip(),
+    ))
+    db.commit()
+    db.refresh(p)
+    write_audit(db, org_id=org_id, actor_id=user_id,
+                action="project_held" if data.on_hold else "project_resumed",
+                entity_type="project", entity_id=project_id, request=request)
+    return _project_to_response(p, _owner_name_map(db, {p.owner_id}))
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+def _comment_dict(c) -> dict:
+    return {
+        "id": c.id,
+        "author_id": c.author_id,
+        "author_name": c.author_name,
+        "kind": c.kind,
+        "body": c.body,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.get("/projects/{project_id}/comments")
+def api_list_comments(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Project activity timeline — comments + hold/live events, newest first."""
+    from app.services.project_service import ensure_project_access
+    from app.models.project import ProjectComment
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    rows = (
+        db.query(ProjectComment)
+        .filter(ProjectComment.project_id == project_id)
+        .order_by(ProjectComment.created_at.desc())
+        .all()
+    )
+    return [_comment_dict(c) for c in rows]
+
+
+@router.post("/projects/{project_id}/comments", status_code=201)
+def api_add_comment(project_id: str, data: CommentCreate, user_id: str = Depends(require_permission("project:write")), db: Session = Depends(get_db)):
+    from app.services.project_service import ensure_project_access
+    from app.models.project import ProjectComment
+    from app.services.auth_service import get_current_user
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    actor = get_current_user(db, user_id)
+    c = ProjectComment(
+        project_id=project_id, author_id=user_id,
+        author_name=getattr(actor, "name", None) or getattr(actor, "email", None),
+        kind="comment", body=data.body.strip(),
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return _comment_dict(c)
 
 
 @router.delete("/projects/{project_id}", status_code=204)
@@ -279,6 +440,25 @@ def api_add_subproject(project_id: str, data: SubProjectCreate, user_id: str = D
 @router.post("/projects/{project_id}/requirements", response_model=RequirementResponse, status_code=201)
 def api_add_requirement(project_id: str, data: RequirementCreate, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     return add_requirement(db, _org_id(user_id, db), project_id, data)
+
+
+@router.get("/projects/{project_id}/requirements")
+def api_list_requirements(project_id: str, user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """List a project's migration requirements — used to start a workflow (the
+    requirement is what the BMAD/migration pipeline plans from)."""
+    from app.services.project_service import ensure_project_access
+    from app.models.project import MigrationRequirement
+    org_id = _org_id(user_id, db)
+    ensure_project_access(db, org_id, project_id)
+    rows = (
+        db.query(MigrationRequirement)
+        .filter(MigrationRequirement.project_id == project_id)
+        .order_by(MigrationRequirement.created_at.desc())
+        .all()
+    )
+    return [{"id": r.id, "source_text": r.source_text, "status": r.status,
+             "version": r.version, "created_at": str(r.created_at) if r.created_at else None}
+            for r in rows]
 
 
 # ── Sources ──

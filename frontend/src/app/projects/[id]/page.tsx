@@ -15,6 +15,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   Pause,
+  Play,
   Eye,
   Sparkles,
   Check,
@@ -25,6 +26,7 @@ import {
 
 import { AppShell } from "@/components/layout";
 import { useRegisterCrumbLabel } from "@/lib/breadcrumbs";
+import { AskProject } from "@/components/projects/AskProject";
 import { AppIcon, AgentIcon } from "@/components/icons";
 import {
   Avatar,
@@ -37,7 +39,11 @@ import {
   Modal,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import { updateProject, fetchProjectMembers, type OrgMember } from "@/lib/projects/api";
+import {
+  updateProject, fetchProjectMembers, setProjectHold,
+  fetchProjectComments, addProjectComment,
+  type OrgMember, type ProjectComment as ProjectCommentT,
+} from "@/lib/projects/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -87,6 +93,7 @@ interface APIProject {
   target_system?: string;
   owner_id?: string;
   owner_name?: string;
+  on_hold?: boolean;
   team?: string;
   environment?: string;
   environments?: string[];
@@ -114,19 +121,22 @@ interface APIProject {
   recent_activity?: APIActivity[];
 }
 
-// ─── Fallback / default phase list (used when API doesn't ship one) ─
+// ─── Overview (real data from GET /projects/{id}/overview) ─
 
-const DEFAULT_PHASES: APIPhase[] = [
-  { id: "intake",       label: "Intake",         status: "pending" },
-  { id: "analysis",     label: "Analysis",       status: "pending" },
-  { id: "planning",     label: "Planning",       status: "pending" },
-  { id: "architecture", label: "Architecture",   status: "pending" },
-  { id: "approval",     label: "Approval gate",  status: "pending" },
-  { id: "impl",         label: "Implementation", status: "pending" },
-  { id: "validation",   label: "Validation",     status: "pending" },
-  { id: "recon",        label: "Reconciliation", status: "pending" },
-  { id: "cutover",      label: "Cutover",        status: "pending" },
-];
+interface OverviewSchema { schema: string; schema_type: string; tables: number; rows: number; }
+interface OverviewStep { agent: string; order: number; status: string; error?: string | null; artifact_path?: string | null; }
+interface OverviewRun {
+  workflow_id: string; status: string; kind: string; mode?: string; created_at?: string | null;
+  steps_done: number; steps_total: number; steps: OverviewStep[];
+}
+interface ProjectOverview {
+  schema_count: number;
+  table_count: number;
+  schemas: OverviewSchema[];
+  latest_run: OverviewRun | null;
+  validation: { pct: number | null; total: number };
+  recon: { pct: number | null; total: number };
+}
 
 function SourceTarget({ source, target }: { source?: string; target?: string }) {
   if (!source && !target) return <span className="text-ink-5 font-mono text-[11.5px]">—</span>;
@@ -148,8 +158,11 @@ export default function ProjectDetailPage() {
   const { token, can } = useAuth();
   const canWrite = can("project:write");
   const [project, setProject] = useState<APIProject | null>(null);
+  const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
+  const [holdPrompt, setHoldPrompt] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
 
   const load = () => {
     // SC-010: auth via the HttpOnly cookie (credentials:"include"); no token gate.
@@ -157,11 +170,17 @@ export default function ProjectDetailPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setProject(data ?? null))
       .catch(() => setProject(null));
+    fetch(`${API_BASE}/api/v1/projects/${id}/overview`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setOverview(data ?? null))
+      .catch(() => setOverview(null));
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
-  const displayName = project?.name || "Untitled project";
+  // Real name once loaded; a neutral placeholder while the fetch is in flight
+  // (never "Untitled" for a project that actually has a name).
+  const displayName = project?.name || (project === null ? "Loading…" : "Untitled project");
   const shortId = String(id).slice(0, 8);
   // Register id → name so breadcrumbs (here + deep sub-pages) show the project
   // name instead of the raw id.
@@ -177,21 +196,16 @@ export default function ProjectDetailPage() {
     createdBy ? ` BY ${createdBy.toUpperCase()}` : ""
   }`;
 
+  // Real counts come from the overview endpoint (introspected metadata).
+  const tableCount = overview?.table_count ?? project?.table_count;
+  const schemaCount = overview?.schema_count ?? project?.schema_count;
   const metricBits = [
-    project?.table_count !== undefined ? `${project.table_count} tables` : null,
-    project?.total_size || null,
-    project?.schema_count !== undefined ? `${project.schema_count} schemas` : null,
+    tableCount !== undefined ? `${tableCount} tables` : null,
+    schemaCount !== undefined ? `${schemaCount} schemas` : null,
   ].filter(Boolean);
   const metric = metricBits.length ? metricBits.join(" · ") : undefined;
 
-  const phases: APIPhase[] = project?.phases?.length ? project.phases : DEFAULT_PHASES;
-  const phasesComplete = project?.phases_complete ?? phases.filter((p) => p.status === "completed").length;
-  const phasesTotal = project?.phases_total ?? phases.length;
-  const progress = project?.progress_pct ?? 0;
-  const phaseLabel = project?.phase_label || phases.find((p) => p.status === "running")?.label;
-  const tablesDone = project?.tables_done;
-  const tablesTotal = project?.table_count;
-
+  const run = overview?.latest_run ?? null;
   const environment =
     project?.environments?.join(", ") || project?.environment || null;
 
@@ -199,12 +213,20 @@ export default function ProjectDetailPage() {
     <AppShell
       eyebrow={eyebrow}
       title={displayName}
-      metric={metric}
+      metric={project?.on_hold ? `⏸ ON HOLD${metric ? ` · ${metric}` : ""}` : metric}
       actions={
         <>
-          <Button variant="outline">
-            <Pause className="h-3.5 w-3.5" /> Pause
-          </Button>
+          {canWrite && (
+            project?.on_hold ? (
+              <Button variant="outline" onClick={() => setHoldPrompt(true)}>
+                <Play className="h-3.5 w-3.5" /> Set live
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setHoldPrompt(true)}>
+                <Pause className="h-3.5 w-3.5" /> Hold
+              </Button>
+            )
+          )}
           <Link href={`/projects/${id}/sprints`}>
             <Button variant="outline">
               Sprints
@@ -215,7 +237,7 @@ export default function ProjectDetailPage() {
               <Eye className="h-3.5 w-3.5" /> Open workspace
             </Button>
           </Link>
-          <Button variant="primary">
+          <Button variant="primary" onClick={() => setAskOpen(true)}>
             <Sparkles className="h-3.5 w-3.5" /> Ask Helix about this
           </Button>
         </>
@@ -228,233 +250,138 @@ export default function ProjectDetailPage() {
       )}
 
       <div className="flex flex-col gap-4">
-        {/* Phase ticker */}
+        {/* Pipeline progress — REAL steps from the latest workflow run, or an
+            honest empty state when nothing has run. No hardcoded phase ladder. */}
         <Card>
-          <div className="flex items-center justify-between mb-3.5">
-            <div>
-              <div className="eyebrow">
-                PROGRESS{phaseLabel ? ` · ${phaseLabel.toUpperCase()} PHASE` : ""}
-              </div>
-              <div className="text-[14px] font-semibold mt-1">
-                {phasesComplete} of {phasesTotal} phases complete
-                {tablesDone !== undefined && tablesTotal !== undefined
-                  ? ` · ${tablesDone} of ${tablesTotal} tables migrated`
-                  : ""}
-              </div>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono tabular-nums text-[30px] font-medium tracking-editorial">
-                {progress}%
-              </span>
-              {project?.eta && (
-                <span className="text-ink-3 text-[11.5px]">· ETA {project.eta}</span>
-              )}
-            </div>
-          </div>
-          <div
-            className="grid gap-1"
-            style={{ gridTemplateColumns: `repeat(${phases.length}, 1fr)` }}
-          >
-            {phases.map((ph) => {
-              const baseBg =
-                ph.status === "completed"
-                  ? "var(--con-ink-1)"
-                  : ph.status === "running"
-                  ? "var(--con-brand)"
-                  : "var(--con-bg-2)";
-              return (
-                <div key={ph.id} className="flex flex-col gap-1.5">
-                  <div
-                    className="h-1 rounded-sm relative"
-                    style={{ background: baseBg }}
-                  >
-                    {ph.status === "running" && (
-                      <div
-                        className="absolute left-0 top-0 h-full rounded-sm"
-                        style={{
-                          width: "55%",
-                          background: "var(--con-brand)",
-                        }}
-                      />
-                    )}
-                  </div>
-                  <div
-                    className="flex items-center gap-1 text-[11px]"
-                    style={{
-                      color:
-                        ph.status === "pending"
-                          ? "var(--con-ink-4)"
-                          : "var(--con-ink-2)",
-                    }}
-                  >
-                    {ph.status === "running" && (
-                      <span
-                        className="animate-pulse-dot inline-block rounded-full"
-                        style={{
-                          width: 5,
-                          height: 5,
-                          background: "var(--con-brand)",
-                        }}
-                      />
-                    )}
-                    {ph.label}
+          {run ? (
+            <>
+              <div className="flex items-center justify-between mb-3.5">
+                <div>
+                  <div className="eyebrow">PIPELINE · {run.kind.toUpperCase()} · {run.status.toUpperCase()}</div>
+                  <div className="text-[14px] font-semibold mt-1">
+                    {run.steps_done} of {run.steps_total} steps complete
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <span className="font-mono tabular-nums text-[30px] font-medium tracking-editorial">
+                  {run.steps_total ? Math.round((run.steps_done / run.steps_total) * 100) : 0}%
+                </span>
+              </div>
+              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.max(run.steps.length, 1)}, 1fr)` }}>
+                {run.steps.map((s) => {
+                  const st = (s.status || "").toLowerCase();
+                  const bg = st === "completed" || st === "approved" ? "var(--con-ink-1)"
+                    : st === "running" || st === "in_progress" ? "var(--con-brand)"
+                    : st === "failed" || st === "rejected" ? "var(--con-err)"
+                    : "var(--con-bg-2)";
+                  return (
+                    <div key={`${s.agent}-${s.order}`} className="flex flex-col gap-1.5" title={s.error || s.status}>
+                      <div className="h-1 rounded-sm" style={{ background: bg }} />
+                      <div className="flex items-center gap-1 text-[11px] truncate" style={{ color: st === "pending" ? "var(--con-ink-4)" : "var(--con-ink-2)" }}>
+                        {(st === "running" || st === "in_progress") && (
+                          <span className="animate-pulse-dot inline-block rounded-full" style={{ width: 5, height: 5, background: "var(--con-brand)" }} />
+                        )}
+                        <span className="truncate">{s.agent}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="eyebrow">PIPELINE</div>
+                <div className="text-[14px] font-semibold mt-1">No workflow run yet</div>
+                <div className="text-[12px] text-ink-3 mt-0.5">Start the migration pipeline to plan + generate this migration.</div>
+              </div>
+              <Link href={`/projects/${id}/agents`}><Button variant="primary"><Play className="h-3.5 w-3.5" /> View agents</Button></Link>
+            </div>
+          )}
         </Card>
 
         {/* Two-column main layout */}
         <div className="grid grid-cols-3 gap-4">
           {/* LEFT */}
           <div className="col-span-2 flex flex-col gap-4">
-            {/* Migration by schema */}
+            {/* Migration by schema — REAL: introspected source schemas + tables
+                + row counts. Populated once the SchemaAnalyst introspects the
+                source; honest empty state until then. */}
             <Card
               title="Migration by schema"
-              description="Tables · row counts · target byte size"
+              description="Introspected schemas · tables · row counts"
             >
-              {project?.schemas?.length ? (
-                project.schemas.map((s, i) => {
-                  const pct = s.tables && s.done !== undefined ? (s.done / s.tables) * 100 : 0;
-                  const tone =
-                    s.status === "completed" ? "ok"
-                    : s.status === "running" ? "brand"
-                    : "ink";
-                  return (
-                    <div
-                      key={s.schema}
-                      className={`grid items-center gap-3.5 py-3 ${
-                        i === (project.schemas?.length ?? 0) - 1 ? "" : "border-b border-hx"
-                      }`}
-                      style={{ gridTemplateColumns: "160px 110px 1fr 110px 100px 80px" }}
-                    >
-                      <div>
-                        <div className="font-mono text-[12.5px] text-ink font-medium">{s.schema}</div>
-                        <div className="font-mono text-[10.5px] text-ink-4 mt-0.5">
-                          {s.tables ?? "—"} tables
-                        </div>
-                      </div>
-                      <div className="font-mono tabular-nums text-[12px] text-ink-2">
-                        {s.done ?? "—"} / {s.tables ?? "—"}
-                      </div>
-                      <div>
-                        <ProgressBar value={pct} tone={tone} />
-                      </div>
-                      <span className="font-mono text-[11.5px] text-ink-3 text-right">
-                        {s.rows ?? "—"} rows
-                      </span>
-                      <span className="font-mono text-[11.5px] text-ink-3 text-right">
-                        {s.size ?? "—"}
-                      </span>
-                      {s.status ? <StatusBadge status={s.status} /> : <span className="text-ink-5 font-mono text-[11px]">—</span>}
-                    </div>
-                  );
-                })
+              {overview?.schemas?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[12.5px]">
+                    <thead>
+                      <tr className="text-[10.5px] uppercase tracking-[0.08em] text-ink-4 font-mono text-left">
+                        <th className="py-2 font-medium">Schema</th>
+                        <th className="py-2 font-medium">Type</th>
+                        <th className="py-2 font-medium text-right">Tables</th>
+                        <th className="py-2 font-medium text-right">Rows</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overview.schemas.map((s, i) => (
+                        <tr key={`${s.schema}-${i}`} className={i === overview.schemas.length - 1 ? "" : "border-b border-hx"}>
+                          <td className="py-2.5 font-mono text-ink font-medium">{s.schema}</td>
+                          <td className="py-2.5"><Chip tone="default">{s.schema_type}</Chip></td>
+                          <td className="py-2.5 font-mono tabular-nums text-right text-ink-2">{s.tables}</td>
+                          <td className="py-2.5 font-mono tabular-nums text-right text-ink-3">{s.rows.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <div className="py-6 text-center text-[12.5px] text-ink-4">
-                  No schema breakdown available.
+                  No schema data yet — run the migration pipeline to introspect the source.
                 </div>
               )}
             </Card>
 
-            {/* Active BMAD workflow */}
+            {/* Latest workflow run — REAL steps with live status + clickable
+                artifacts (links to the Agents page). */}
             <Card
-              title="Active BMAD workflow"
-              eyebrow={
-                project?.workflow_id
-                  ? `WORKFLOW ${project.workflow_id.toUpperCase()}`
-                  : "WORKFLOW"
-              }
-              description={
-                project?.workflow_started || project?.workflow_mode
-                  ? `${project.workflow_started ?? "—"}${
-                      project.workflow_mode ? ` · Mode: ${project.workflow_mode}` : ""
-                    }`
-                  : "No active workflow"
-              }
+              title="Latest workflow run"
+              eyebrow={run ? `${run.kind.toUpperCase()} · ${run.status.toUpperCase()}` : "WORKFLOW"}
+              description={run ? `${run.steps_done}/${run.steps_total} steps · ${run.mode ?? ""}` : "No run yet"}
               actions={
                 <Link href={`/projects/${id}/agents`}>
-                  <Button variant="ghost" size="sm">Open workflow →</Button>
+                  <Button variant="ghost" size="sm">Open in Agents →</Button>
                 </Link>
               }
             >
-              {project?.workflow_steps?.length ? (
+              {run?.steps?.length ? (
                 <div className="flex flex-col gap-1.5">
-                  {project.workflow_steps.map((a, i) => {
-                    const sIcon =
-                      a.status === "completed" ? (
-                        <Check className="h-[11px] w-[11px]" />
-                      ) : a.status === "running" ? (
-                        <span
-                          className="animate-spin rounded-full"
-                          style={{
-                            width: 11,
-                            height: 11,
-                            border: "2px solid var(--con-brand)",
-                            borderRightColor: "transparent",
-                          }}
-                        />
-                      ) : (
-                        <span
-                          className="rounded-full inline-block"
-                          style={{
-                            width: 6,
-                            height: 6,
-                            background: "var(--con-ink-5)",
-                          }}
-                        />
-                      );
-                    const iconColor =
-                      a.status === "completed" ? "var(--con-ok)"
-                      : a.status === "running" ? "var(--con-brand)"
-                      : "var(--con-ink-5)";
+                  {run.steps.map((a) => {
+                    const st = (a.status || "").toLowerCase();
+                    const sIcon = (st === "completed" || st === "approved")
+                      ? <Check className="h-[11px] w-[11px]" />
+                      : (st === "running" || st === "in_progress")
+                        ? <span className="animate-spin rounded-full" style={{ width: 11, height: 11, border: "2px solid var(--con-brand)", borderRightColor: "transparent" }} />
+                        : <span className="rounded-full inline-block" style={{ width: 6, height: 6, background: st === "failed" ? "var(--con-err)" : "var(--con-ink-5)" }} />;
+                    const iconColor = (st === "completed" || st === "approved") ? "var(--con-ok)" : (st === "running" || st === "in_progress") ? "var(--con-brand)" : st === "failed" ? "var(--con-err)" : "var(--con-ink-5)";
                     return (
-                      <div
-                        key={i}
-                        className="grid items-center gap-3 py-1 text-[12.5px]"
-                        style={{ gridTemplateColumns: "20px 110px 1fr 80px 100px" }}
-                      >
-                        <div
-                          className="grid place-items-center"
-                          style={{ color: iconColor, width: 20 }}
-                        >
-                          {sIcon}
-                        </div>
-                        <span className="flex items-center gap-2">
-                          <AgentIcon name={a.name} size={18} />
-                          <span className="font-medium">{a.name}</span>
+                      <div key={`${a.agent}-${a.order}`} className="grid items-center gap-3 py-1 text-[12.5px]" style={{ gridTemplateColumns: "20px 1fr 90px 1fr" }} title={a.error || a.status}>
+                        <div className="grid place-items-center" style={{ color: iconColor, width: 20 }}>{sIcon}</div>
+                        <span className="flex items-center gap-2 min-w-0">
+                          <AgentIcon name={a.agent} size={18} />
+                          <span className="font-medium truncate">{a.agent}</span>
                         </span>
-                        <span
-                          style={{
-                            color:
-                              a.status === "pending"
-                                ? "var(--con-ink-4)"
-                                : "var(--con-ink-2)",
-                          }}
-                        >
-                          {a.role}
-                        </span>
-                        <span className="font-mono text-ink-4 text-[11px] text-right">
-                          {a.duration ?? "—"}
-                        </span>
-                        {a.artifact ? (
-                          <a
-                            className="font-mono text-[11.5px] inline-flex items-center gap-1"
-                            style={{ color: "var(--con-brand)" }}
-                          >
-                            <FileText className="h-3 w-3" /> {a.artifact}
-                          </a>
-                        ) : (
-                          <span />
-                        )}
+                        <StatusBadge status={a.status} />
+                        {a.artifact_path ? (
+                          <span className="font-mono text-[11.5px] inline-flex items-center gap-1 text-ink-3 truncate">
+                            <FileText className="h-3 w-3" /> {a.artifact_path.split("/").pop()}
+                          </span>
+                        ) : <span />}
                       </div>
                     );
                   })}
                 </div>
               ) : (
                 <div className="py-6 text-center text-[12.5px] text-ink-4">
-                  No workflow runs yet.
+                  No workflow runs yet. Start one from the Agents page.
                 </div>
               )}
             </Card>
@@ -493,8 +420,8 @@ export default function ProjectDetailPage() {
                   v={<SourceTarget source={project?.source_system} target={project?.target_system} />}
                   span={2}
                 />
-                <Detail k="Schemas" v={project?.schema_count ?? "—"} />
-                <Detail k="Tables" v={project?.table_count ?? "—"} />
+                <Detail k="Schemas" v={schemaCount ?? "—"} />
+                <Detail k="Tables" v={tableCount ?? "—"} />
                 <Detail
                   k="Owner"
                   v={
@@ -509,113 +436,31 @@ export default function ProjectDetailPage() {
                   }
                 />
                 <Detail k="Status" v={project?.status ? <StatusBadge status={project.status} /> : "—"} />
-                <Detail k="Team" v={project?.team ?? "—"} />
                 <Detail
                   k="Environment"
                   v={environment ? <Chip mono>{environment}</Chip> : "—"}
                 />
-                <Detail
-                  k="LLM routing"
-                  v={
-                    project?.llm_routing ? (
-                      <Chip tone="brand" mono>{project.llm_routing}</Chip>
-                    ) : (
-                      "—"
-                    )
-                  }
-                />
+                <Detail k="On hold" v={project?.on_hold ? <Chip tone="warn" dot>On hold</Chip> : <Chip tone="ok" dot>Live</Chip>} />
               </dl>
             </Card>
 
-            {project?.risk_score !== undefined && (
-              <Card
-                title="AI risk model"
-                eyebrow={`HELIX RISK · ${project.risk_score}`}
-              >
-                <div className="flex items-baseline gap-2 mb-2.5">
-                  <div
-                    className="font-mono tabular-nums text-[36px] font-medium tracking-[-0.03em]"
-                    style={{
-                      color:
-                        project.risk_score >= 80
-                          ? "var(--con-err)"
-                          : project.risk_score >= 60
-                          ? "var(--con-warn)"
-                          : "var(--con-ok)",
-                    }}
-                  >
-                    {project.risk_score}
-                  </div>
-                  <div className="text-[11px] text-ink-3">
-                    {project.risk_score >= 80
-                      ? "HIGH"
-                      : project.risk_score >= 60
-                      ? "MEDIUM"
-                      : "LOW"}
-                    {project.risk_trend === "up"
-                      ? " · trending ▲"
-                      : project.risk_trend === "down"
-                      ? " · trending ▼"
-                      : ""}
-                  </div>
+            {/* Validation & reconciliation rollup — the trust signals. */}
+            <Card title="Quality" description="Validation & reconciliation outcomes">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-[8px] border border-hx p-3">
+                  <div className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Validation</div>
+                  <div className="font-mono tabular-nums text-[22px] mt-1">{overview?.validation.pct != null ? `${overview.validation.pct}%` : "—"}</div>
+                  <div className="text-[11px] text-ink-4">{overview?.validation.total ? `${overview.validation.total} results` : "no runs yet"}</div>
                 </div>
-                {project.risk_factors?.length ? (
-                  project.risk_factors.map((f) => (
-                    <div
-                      key={f.name}
-                      className="grid items-center gap-2 py-1 text-[12px]"
-                      style={{ gridTemplateColumns: "1fr 60px 32px" }}
-                    >
-                      <span className="text-ink-2">{f.name}</span>
-                      <ProgressBar
-                        value={f.value}
-                        tone={f.value >= 80 ? "err" : f.value >= 60 ? "warn" : "ink"}
-                        height={3}
-                      />
-                      <span className="font-mono tabular-nums text-[11px] text-ink-2 text-right">
-                        {f.value}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-[12px] text-ink-4">No factor breakdown.</p>
-                )}
-              </Card>
-            )}
-
-            <Card title="Recent activity">
-              {project?.recent_activity?.length ? (
-                <div className="flex flex-col">
-                  {project.recent_activity.map((a, i) => (
-                    <div
-                      key={i}
-                      className={`grid items-start gap-3 py-2 ${
-                        i === (project.recent_activity?.length ?? 0) - 1
-                          ? ""
-                          : "border-b border-hx"
-                      }`}
-                      style={{ gridTemplateColumns: "8px 1fr auto" }}
-                    >
-                      <span
-                        className="rounded-full inline-block mt-1.5"
-                        style={{
-                          width: 6,
-                          height: 6,
-                          background: "var(--con-ink-5)",
-                        }}
-                      />
-                      <div className="text-[12px] text-ink-2 leading-[1.5]">
-                        <span className="font-medium text-ink">{a.who}</span>{" "}
-                        {a.action}
-                      </div>
-                      <span className="font-mono text-[11px] text-ink-4">{a.time}</span>
-                    </div>
-                  ))}
+                <div className="rounded-[8px] border border-hx p-3">
+                  <div className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Reconciliation</div>
+                  <div className="font-mono tabular-nums text-[22px] mt-1">{overview?.recon.pct != null ? `${overview.recon.pct}%` : "—"}</div>
+                  <div className="text-[11px] text-ink-4">{overview?.recon.total ? `${overview.recon.total} results` : "no runs yet"}</div>
                 </div>
-              ) : (
-                <p className="text-[12px] text-ink-4">No recent activity.</p>
-              )}
+              </div>
             </Card>
+
+            <CommentsCard projectId={String(id)} canWrite={canWrite} refreshKey={String(project?.on_hold)} />
           </div>
         </div>
       </div>
@@ -628,7 +473,167 @@ export default function ProjectDetailPage() {
           onSaved={() => { setEditing(false); load(); }}
         />
       )}
+
+      <AskProject
+        projectId={String(id)}
+        projectName={displayName}
+        open={askOpen}
+        onClose={() => setAskOpen(false)}
+      />
+
+      {holdPrompt && project && (
+        <HoldModal
+          projectId={String(id)}
+          onHold={!project.on_hold}
+          onClose={() => setHoldPrompt(false)}
+          onSaved={() => { setHoldPrompt(false); load(); }}
+        />
+      )}
     </AppShell>
+  );
+}
+
+// Proper, readable date-time for the comments timeline.
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+function relTime(iso: string | null): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function HoldModal({ projectId, onHold, onClose, onSaved }: {
+  projectId: string;
+  onHold: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [comment, setComment] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!comment.trim()) { setErr("A reason is required."); return; }
+    setSaving(true); setErr("");
+    try { await setProjectHold(projectId, onHold, comment.trim()); onSaved(); }
+    catch (e: unknown) { setErr(e instanceof Error ? e.message : "Failed"); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title={onHold ? "Put project on hold" : "Set project live"} width="sm">
+      <div className="space-y-4">
+        {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
+        <p className="text-[12.5px] text-ink-3">
+          {onHold
+            ? "While on hold, new BMAD/agent workflows can't be started. Add a reason — it's recorded on the project timeline."
+            : "This resumes the project so workflows can run again. Add a note — it's recorded on the project timeline."}
+        </p>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider font-mono text-ink-4">Reason / note</span>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3}
+            placeholder={onHold ? "e.g. Pausing for source credential review" : "e.g. Credentials verified, resuming"}
+            className="px-2.5 py-2 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring resize-y" />
+        </label>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} loading={saving}>{onHold ? "Put on hold" : "Set live"}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CommentsCard({ projectId, canWrite, refreshKey }: { projectId: string; canWrite: boolean; refreshKey?: string }) {
+  const [comments, setComments] = useState<ProjectCommentT[] | null>(null);
+  const [body, setBody] = useState("");
+  const [err, setErr] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const PREVIEW = 3;
+
+  const load = () => { fetchProjectComments(projectId).then(setComments).catch(() => setComments([])); };
+  // Reload on mount, and whenever hold/live toggles (refreshKey changes) so the
+  // new hold/live timeline entry appears without a manual refresh.
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [projectId, refreshKey]);
+
+  const post = async () => {
+    if (!body.trim()) return;
+    setPosting(true); setErr("");
+    try {
+      // Prepend the saved comment immediately (newest-first) so it shows
+      // without a manual refresh; no full reload needed.
+      const created = await addProjectComment(projectId, body.trim());
+      setComments((prev) => [created, ...(prev ?? [])]);
+      setBody("");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to post");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const kindDot = (k: string) =>
+    k === "hold" ? "var(--con-warn)" : k === "live" ? "var(--con-ok)" : "var(--con-ink-4)";
+
+  return (
+    <Card title="Comments & activity" description="Notes, plus hold/live events">
+      {canWrite && (
+        <div className="flex flex-col gap-2 mb-3">
+          {err && <ErrorBanner message={err} onDismiss={() => setErr("")} />}
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
+            placeholder="Add a comment…"
+            className="px-2.5 py-2 text-[13px] rounded-[8px] border border-hx bg-surface focus-ring resize-y" />
+          <div className="flex justify-end">
+            <Button size="sm" onClick={post} loading={posting} disabled={!body.trim()}>Comment</Button>
+          </div>
+        </div>
+      )}
+      {comments === null ? (
+        <p className="text-[12px] text-ink-4">Loading…</p>
+      ) : comments.length === 0 ? (
+        <p className="text-[12px] text-ink-4">No comments yet.</p>
+      ) : (
+        <>
+          <ul className="flex flex-col gap-3">
+            {(expanded ? comments : comments.slice(0, PREVIEW)).map((c) => (
+              <li key={c.id} className="flex items-start gap-2.5">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: kindDot(c.kind) }} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12.5px] font-medium text-ink">{c.author_name || "System"}</span>
+                    {c.kind !== "comment" && <Chip tone={c.kind === "hold" ? "warn" : "ok"}>{c.kind === "hold" ? "Put on hold" : "Set live"}</Chip>}
+                    <span className="text-[10.5px] text-ink-4 font-mono" title={formatDateTime(c.created_at)}>
+                      {formatDateTime(c.created_at)} · {relTime(c.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-[12.5px] text-ink-2 mt-0.5 whitespace-pre-wrap break-words">{c.body}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {comments.length > PREVIEW && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-3 text-[12px] font-medium text-[var(--con-brand)] hover:underline"
+            >
+              {expanded ? "Show less" : `Show ${comments.length - PREVIEW} more`}
+            </button>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 

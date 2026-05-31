@@ -210,6 +210,8 @@ _DEMO_WRITE_ALLOWLIST = {
     "/api/v1/auth/sse-ticket",
     # The Help agent is a POST but writes no domain data — let demo users chat.
     "/api/v1/assistant/ask",
+    # Project orchestrator — read-only, lets demo users ask about a project.
+    "/api/v1/assistant/ask-project",
 }
 
 

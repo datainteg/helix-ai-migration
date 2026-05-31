@@ -129,17 +129,29 @@ export default function AgentsPage() {
 
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [layout, setLayout] = useState<string>("linear");
+  // Deep-link: /agents?run=<workflow_id> pre-selects that run once (e.g. from a
+  // project's "View in Agents"). Consumed on first match, then normal behaviour.
+  const [deepLink, setDeepLink] = useState<string | null>(null);
+  useEffect(() => {
+    try { setDeepLink(new URLSearchParams(window.location.search).get("run")); } catch { /* ignore */ }
+  }, []);
 
-  // Keep the selection valid as runs arrive; default to the first run.
+  // Keep the selection valid as runs arrive; honor the deep-link, else default
+  // to the first run.
   useEffect(() => {
     if (displayRuns.length === 0) {
       if (selectedRun) setSelectedRun("");
       return;
     }
+    if (deepLink && displayRuns.some((r) => r.id === deepLink)) {
+      setSelectedRun(deepLink);
+      setDeepLink(null);
+      return;
+    }
     if (!displayRuns.some((r) => r.id === selectedRun)) {
       setSelectedRun(displayRuns[0]!.id);
     }
-  }, [displayRuns, selectedRun]);
+  }, [displayRuns, selectedRun, deepLink]);
 
   const run = displayRuns.find((r) => r.id === selectedRun) ?? null;
 

@@ -170,6 +170,12 @@ async def start_workflow(
     """
     ensure_project_access(db, org_id, project_id)
 
+    # Operational hold — a project on hold refuses new workflow starts.
+    from app.models.project import Project as _Project
+    _proj = db.query(_Project).filter(_Project.id == project_id).first()
+    if _proj is not None and getattr(_proj, "on_hold", False):
+        raise HTTPException(status_code=409, detail="Project is on hold — set it live before starting a workflow.")
+
     requirement = db.query(MigrationRequirement).filter(
         MigrationRequirement.id == data.requirement_id,
         MigrationRequirement.project_id == project_id,
