@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import os
 from datetime import datetime, timezone
@@ -914,8 +915,21 @@ def script_generator_activity(input_data: dict[str, Any]) -> dict[str, Any]:
             "script generation failed: LLM call returned no result",
         )
 
-    # 5. Normalize. The model may return the full JSON, or — if it ignored the
-    #    instruction — just `{"summary": "<raw text>"}`. Either way we succeed.
+    # 5. Normalize. The model may return structured fields, OR (commonly with
+    #    DeepSeek) return the JSON payload as PLAIN TEXT in `summary` rather than
+    #    parsed fields — recover it so the real DDL/data SQL isn't dropped.
+    if isinstance(result, dict) and not result.get("target_ddl") and not result.get("data_migration"):
+        blob = result.get("summary") if isinstance(result.get("summary"), str) else None
+        if blob:
+            m = re.search(r"\{.*\}", blob, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                    if isinstance(parsed, dict):
+                        result = {**result, **parsed}
+                except Exception:  # noqa: BLE001 — leave result as-is if not JSON
+                    pass
+
     def _str_field(key: str) -> str:
         val = result.get(key) if isinstance(result, dict) else None
         return val if isinstance(val, str) else ""

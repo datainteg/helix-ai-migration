@@ -43,8 +43,11 @@ _DEFAULT_RATES: dict[str, tuple[float, float]] = {
     "google:gemini-3-pro":       (3.50, 10.50),
     "google:gemini-3-flash":     (0.30, 2.50),
     # DeepSeek
+    "deepseek:deepseek-chat":     (0.27, 1.10),
+    "deepseek:deepseek-reasoner": (0.55, 2.19),
     "deepseek:deepseek-v4-pro":   (0.55, 2.19),
     "deepseek:deepseek-v4-flash": (0.14, 0.28),
+    "deepseek:*":                 (0.27, 1.10),
     # OpenRouter is a meta-broker; pricing flows through whichever model is selected.
     # Vertex/Bedrock/Azure mirror their respective vendor rates (covered above).
     # Local + custom: free.
